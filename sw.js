@@ -3,7 +3,7 @@
    (pagina, biblioteca de IA, binarios WASM e pesos do modelo) passa a
    ser servido do cache local. */
 
-const CACHE_APP = 'app-v2';
+const CACHE_APP = 'app-v3';
 const CACHE_RUNTIME = 'ia-runtime-v1';
 const CACHE_MODELOS = 'ia-modelos-v1';
 
@@ -34,7 +34,14 @@ function alvo(url) {
   return null;
 }
 
+// Modo turbo: pode ser desligado abrindo o app com ?semturbo=1 na URL.
+let TURBO = true;
+self.addEventListener('message', e => {
+  if (e.data && e.data.tipo === 'turbo') TURBO = !!e.data.ligado;
+});
+
 self.addEventListener('fetch', e => {
+  if (new URL(e.request.url).searchParams.has('semturbo')) TURBO = false;
   const req = e.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
@@ -57,18 +64,26 @@ self.addEventListener('fetch', e => {
   }
 
   // Arquivos do proprio app: rede primeiro, cache como reserva.
+  // Os headers COOP/COEP sao injetados aqui: eles ligam o cross-origin
+  // isolation, que e o que libera WASM multi-thread (SharedArrayBuffer).
   if (url.origin === self.location.origin) {
     e.respondWith((async () => {
+      let resp;
       try {
-        const resp = await fetch(req);
+        resp = await fetch(req);
         const cache = await caches.open(CACHE_APP);
         cache.put(req, resp.clone()).catch(() => {});
-        return resp;
       } catch (err) {
-        const guardado = await caches.match(req);
-        if (guardado) return guardado;
-        throw err;
+        resp = await caches.match(req);
+        if (!resp) throw err;
       }
+      if (TURBO && resp.status !== 0) {
+        const h = new Headers(resp.headers);
+        h.set('Cross-Origin-Opener-Policy', 'same-origin');
+        h.set('Cross-Origin-Embedder-Policy', 'credentialless');
+        return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers: h });
+      }
+      return resp;
     })());
   }
 });

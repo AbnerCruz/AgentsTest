@@ -453,7 +453,16 @@ const MODELOS = {
   forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,1 GB', detalhe:'Melhor qualidade de decisão e escrita. Cada resposta demora bem mais e exige aparelho folgado de memória.', memoria:'Alta', licenca:'Apache-2.0' },
 };const MODEL_PADRAO = MODELOS.recomendado.id;
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
+  navigator.serviceWorker.register('sw.js').then(reg => {
+    // O Service Worker injeta COOP/COEP; eles so valem depois que ele assume a
+    // pagina. Uma recarga unica liga o modo turbo (WASM multi-thread).
+    const semTurbo = new URLSearchParams(location.search).has('semturbo');
+    if(!semTurbo && !self.crossOriginIsolated && navigator.serviceWorker.controller
+       && !sessionStorage.getItem('turbo-reload')){
+      sessionStorage.setItem('turbo-reload','1');
+      location.reload();
+    }
+  }).catch(()=>{});
 }
 let modeloSelecionado = localStorage.getItem('modelo-ia-ativo') || MODEL_PADRAO;
 if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
@@ -563,7 +572,11 @@ async function initRuntime(source, allowRemote=false){
     env.allowRemoteModels=true; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
     try{ if(env.backends?.onnx?.wasm){
       env.backends.onnx.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
-      env.backends.onnx.wasm.numThreads=1;
+      // Com cross-origin isolation ligado (headers COOP/COEP servidos pelo
+      // Service Worker) o ONNX pode usar varios nucleos. Sem isso, 1 thread.
+      const nucleos = (typeof navigator!=='undefined' && navigator.hardwareConcurrency) || 2;
+      env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.max(2, Math.min(4, nucleos-1)) : 1;
+      postMessage({type:'threads', threads: env.backends.onnx.wasm.numThreads, isolado: !!self.crossOriginIsolated});
     } }catch(e){}
     return mod;
   })();
@@ -631,6 +644,11 @@ function criarWorkerIA(){
       const p=m.data||{};
       const frac = typeof p.progress==='number' ? p.progress : null;
       setAIStatus('loading', 'Baixando/preparando a IA', frac==null ? 'O modelo está sendo preparado neste navegador.' : `${Math.round(frac)}%`, frac);
+      return;
+    }
+    if(m.type==='threads'){
+      MOTOR_THREADS = m.threads;
+      monEvento(`Motor usando ${m.threads} thread(s) de CPU${m.isolado?' (modo turbo ativo)':' — modo turbo desligado'}.`, m.isolado?'ok':'aviso');
       return;
     }
     if(m.type==='device'){
@@ -818,10 +836,12 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
   await carregarIA();
   setAIStatus('loading','IA processando…','O modelo está trabalhando em segundo plano; o escritório continua livre.',null);
   const memoria = Number(navigator.deviceMemory || 0);
-  const tetoCelular = memoria && memoria <= 4 ? 128 : 256;
+  // Em CPU, cada token custa tempo real. Textos curtos sao a diferenca entre
+  // uma resposta em 20s e uma em 4 minutos.
+  const tetoCelular = memoria && memoria <= 4 ? 64 : 110;
   const limite=Math.min(Number(maxTokens)||80,tetoCelular);
-  const sysText=String(system||'').slice(0,1100);
-  const userTextSafe=String(userText||'').slice(0,1100);
+  const sysText=String(system||'').slice(0,650);
+  const userTextSafe=String(userText||'').slice(0,650);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
   chamadasNaFila++;
   const inicioGeracao = Date.now();
@@ -839,7 +859,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
         if(!workerIA || !iaPronta){ reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
         // O prazo so comeca quando chega a vez desta chamada na fila. Antes,
         // o relogio corria durante a espera e quase tudo estourava.
-        const teto = 20000 + limite*1800;
+        const teto = 12000 + limite*900;
         const t = setTimeout(()=>{
           workerPendentes.delete(id);
           reject(new Error(`A geração passou de ${Math.round(teto/1000)}s e foi interrompida.`));
@@ -968,6 +988,7 @@ const MON = {
   abertaEm: Date.now(), mostrarPrompt: false,
 };
 let motorPausado = false;
+let MOTOR_THREADS = 1;
 
 function monEvento(texto, tipo='info'){
   MON.eventos.unshift({ts:Date.now(), texto:String(texto).slice(0,240), tipo});
@@ -1021,7 +1042,8 @@ function renderMonitor(){
     cel('Na fila', String(chamadasNaFila)) +
     cel('Ultima resposta', desdeConclusao==null ? 'nenhuma nesta sessao' : 'ha '+monTempo(desdeConclusao)) +
     cel('Chamadas ok/erro', `${MON.chamadas.filter(c=>c.status==='ok').length}/${MON.chamadas.filter(c=>c.status!=='ok').length}`) +
-    cel('Religadas sozinho', String(MON.autoReinicios));
+    cel('Religadas sozinho', String(MON.autoReinicios)) +
+    cel('Threads de CPU', MOTOR_THREADS + (self.crossOriginIsolated ? ' (turbo)' : ' (sem turbo)'));
 
   const ativaBox = document.getElementById('monAtiva');
   if(ativaBox){
@@ -1690,7 +1712,7 @@ async function autonomiaAmbiente(rt,token){
    chamada de IA por entrega, em vez de cinco. */
 async function autonomiaDecisao(rt,token){
   while(token===autonomyToken){
-    await sleep(8000+Math.floor(Math.random()*7000));
+    await sleep(2500+Math.floor(Math.random()*3500));
     if(motorPausado) continue;
     if(token!==autonomyToken||rt.forced||estaDesmaiado(rt)) continue;
     const emp=empresaAtual(); if(!emp) continue;
@@ -1808,7 +1830,7 @@ CORRECAO: <o que falta, ate 14 palavras, ou vazio>`;
 
 async function autonomiaGerente(manager,token){
   while(token===autonomyToken){
-    await sleep(15000+Math.floor(Math.random()*10000));
+    await sleep(9000+Math.floor(Math.random()*6000));
     if(motorPausado) continue;
     if(token!==autonomyToken||manager.forced) continue;
     if(chamadasNaFila>0) continue;
