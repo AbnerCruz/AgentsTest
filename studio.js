@@ -193,6 +193,29 @@
     S.state.gravar();
   }
 
+  /* Checagem operacional local: o agente precisa deixar patrimônio útil, não apenas ocupar tempo. */
+  function avaliarContribuicaoAcervo(p, tarefa, salvos) {
+    const e = S.state.atual(); if (!e || !p || !p.ref) return 0;
+    const projeto = e.projetos.find(x => x.id === tarefa.projectId) || e.projetos[0];
+    const anteriores = projeto ? (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean) : [];
+    const base = tarefa.baseArquivoId ? e.arquivos.find(a => a.id === tarefa.baseArquivoId) : null;
+    let nivel = 55;
+    if (projeto) nivel += 15;
+    if (salvos && salvos.length) nivel += 15;
+    if (base || anteriores.length) nivel += 10;
+    if (tarefa.handoff || (salvos && salvos.length)) nivel += 5;
+    nivel = clamp(nivel, 0, 100);
+    const motivo = base
+      ? `Evoluí ${base.nome}; a entrega continua ligada ao acervo do projeto.`
+      : anteriores.length
+        ? `A entrega acrescenta material ao projeto e aproveita o acervo existente.`
+        : `A entrega criou o primeiro material concreto do projeto.`;
+    p.ref.contribuicaoAcervo = { nivel, ultima: motivo.slice(0,220), atualizadoEm: Date.now() };
+    p.ref.pensamento = `Cheque do acervo: ${motivo}`.slice(0, 240);
+    lembrar(p, `Acervo: ${motivo}`);
+    return nivel;
+  }
+
   /* ---------- arquivos ---------- */
   function salvarArquivos(lista, meta, p) {
     const e = S.state.atual(); if (!e) return [];
@@ -372,7 +395,7 @@
     const e = S.state.atual(); if (!e) return false;
     p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
     p.ref.foco = tarefa.titulo;
-    p.ref.pensamento = `Estou trabalhando em ${tarefa.titulo}. Preciso deixar um resultado que avance o produto final e seja útil para a próxima pessoa.`;
+    p.ref.pensamento = `Estou trabalhando em ${tarefa.titulo}. Antes de agir, verifico: isso melhora o acervo, usa o que já existe e deixa algo útil para a equipe?`;
     tarefa.status = 'fazendo'; tarefa.para = p.id;
     S.bus.emit('trabalho'); S.bus.emit('equipe');
     S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
@@ -393,9 +416,10 @@
           baseArquivoId: tarefa.baseArquivoId || null,
           briefing: tarefa.briefing || ''
         }), p);
+        tarefa.contribuicaoAcervo = avaliarContribuicaoAcervo(p, tarefa, salvos);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
         logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
-        p.ref.pensamento = `Concluí ${tarefa.titulo}. Agora verifico se o que produzi realmente ajuda o produto final e se outra pessoa consegue continuar daqui.`;
+        p.ref.pensamento = `Concluí ${tarefa.titulo}. Confiro se a entrega aumentou o acervo e se outra pessoa consegue reutilizá-la.`;
         lembrar(p, `Concluí ${tarefa.titulo}; entrega vinculada ao projeto ${tarefa.projectId || 'principal'}.`);
         tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
         tarefa.handoff = `${p.nome}: ${salvos.map(a => a.nome).join(', ')} prontos para a próxima etapa.`;
@@ -537,7 +561,7 @@
 Projeto: ${projeto.nome}. Objetivo: ${projeto.objetivo}.
 Equipe: ${equipe}.
 Entregas existentes: ${recentes}.
-Crie no máximo 1 próxima tarefa produtiva que dependa do estado REAL acima. A tarefa deve produzir ou melhorar um artefato concreto.
+Crie no máximo 1 próxima tarefa produtiva que dependa do estado REAL acima. Primeiro verifique se existe uma lacuna concreta no acervo. A tarefa deve produzir, integrar, corrigir ou melhorar um artefato concreto. Se não houver contribuição verificável ao acervo, retorne KIT1 vazio.
 NUNCA invente cliente, pedido, contrato, orçamento, prazo, data futura, métrica, resultado, número, aprovação externa ou acontecimento. Se a informação não existe, não a crie.
 Não crie uma tarefa apenas para conversar, pesquisar sem entregar, fazer reunião ou "definir estratégia".
 Prefira evoluir o artefato existente e usar o trabalho da equipe.
@@ -666,11 +690,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const funcs = rt.filter(p => p.papel === 'func' && p.ref.energia > 25);
     if (funcs.length < 1) return false;
     const produtos = e.arquivos.filter(a => a.classe === 'produto');
-    const spec = produtos.length ? {
-      titulo:'Evoluir e integrar o portfólio existente',
-      objetivo:'Criar uma evolução útil a partir dos produtos já produzidos, evitando começar novamente do zero.',
-      brief:'Revisar os produtos existentes e identificar a integração ou melhoria de maior impacto para o projeto.'
-    } : {
+    if (produtos.length) return false;
+    const spec = {
       titulo:'Construir a primeira entrega completa do projeto',
       objetivo:'Transformar a missão do estúdio em uma primeira entrega concreta e utilizável.',
       brief:'Definir a estrutura e os requisitos da primeira entrega completa usando o contexto persistido do projeto.'
@@ -1219,7 +1240,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
-    novaTarefa, tarefasAbertas, executar,
+    novaTarefa, tarefasAbertas, executar, avaliarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar,
     selecionado: () => selecionado,

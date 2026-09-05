@@ -120,6 +120,10 @@ window.S = window.S || {};
       f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-24) : [];
       f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
       f.foco = String(f.foco || '').slice(0, 180);
+      f.contribuicaoAcervo = f.contribuicaoAcervo && typeof f.contribuicaoAcervo === 'object' ? f.contribuicaoAcervo : {};
+      f.contribuicaoAcervo.nivel = Number.isFinite(f.contribuicaoAcervo.nivel) ? clamp(f.contribuicaoAcervo.nivel, 0, 100) : 70;
+      f.contribuicaoAcervo.ultima = String(f.contribuicaoAcervo.ultima || 'Ainda não avaliada.').slice(0, 220);
+      f.contribuicaoAcervo.atualizadoEm = Number(f.contribuicaoAcervo.atualizadoEm) || 0;
       // Ficha persistente: a personalidade orienta comportamento, comunicação e colaboração.
       f.personalidade = f.personalidade && typeof f.personalidade === 'object' ? f.personalidade : {};
       f.personalidade.tracos = Array.isArray(f.personalidade.tracos) && f.personalidade.tracos.length

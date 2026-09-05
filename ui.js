@@ -166,6 +166,7 @@
         <div class="stat"><span>Entregas assinadas</span><b>${f.entregas || 0}</b></div>
         <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
+        <div class="stat"><span>Contribuição ao acervo</span><b>${Math.round((p.ref.contribuicaoAcervo && p.ref.contribuicaoAcervo.nivel) || 0)}/100</b></div>
       </div>
       ${mem.length ? `<div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Memória relevante</div>${mem.map(x => `<p class="panel-foot" style="margin:6px 0">${esc(x)}</p>`).join('')}</div>` : ''}
       <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-head"><span class="panel-label">Log individual</span><span class="chip">últimos eventos</span></div><div class="logbox person-log">${((f.log||[]).slice(-30).reverse()).map(l=>`<div class="log-line ${esc(l.tag||'info')}"><span class="log-ts">${F.hora(l.t)}</span><span class="log-txt">${esc(l.texto)}</span></div>`).join('') || '<div class="empty">Ainda não há eventos individuais.</div>'}</div></div>
