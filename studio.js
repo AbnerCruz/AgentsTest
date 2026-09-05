@@ -201,8 +201,10 @@
         id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
         classe: meta.classe || 'esboco', kit: meta.kit || 'legado', projectId: meta.projectId || (e.projetos[0] && e.projetos[0].id),
         qualidade: meta.qualidade == null ? 50 : meta.qualidade,
-        viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '')),
-        autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora()
+        viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '').replace(/-v\d+$/i, '')),
+        autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora(),
+        taskId: meta.taskId || null, baseArquivoId: meta.baseArquivoId || null,
+        briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false
       };
       e.arquivos.unshift(arq);
       return arq;
@@ -244,35 +246,77 @@
     return true;
   }
 
-  /* Publicar congela uma versão. Produto final nunca é reescrito:
-     correção vira versão nova, e o histórico permanece. */
+  /* Publicar é um RELEASE, não uma etapa normal de produção.
+     A primeira publicação congela a primeira versão. Uma nova versão só
+     pode nascer de uma tarefa de evolução que aponte explicitamente para
+     um produto publicado e que tenha conteúdo realmente diferente. */
   function publicar(arqId, quem, motivo) {
     const e = S.state.atual(); if (!e) return null;
     const base = e.arquivos.find(a => a.id === arqId); if (!base) return null;
     if (base.classe === 'produto') return null;
-    const anteriores = e.arquivos.filter(a => a.classe === 'produto' && a.linhagem === base.linhagem);
-    const versao = anteriores.reduce((m, a) => Math.max(m, a.versao || 1), 0) + 1;
+
+    const projeto = e.projetos.find(x => x.id === (base.projectId || '')) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+    const produtosDoMesmoKit = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === (projeto && projeto.id) && a.kit === base.kit)
+      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
+    const anteriores = e.arquivos.filter(a => a.classe === 'produto' && a.linhagem === base.linhagem)
+      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
+    const ultima = anteriores[0] || null;
+
+    // Identidade de produto é projeto + kit, não o nome do arquivo. Isso evita
+    // que uma IA mude "index.html" para outro nome e consiga republicar
+    // essencialmente o mesmo produto como se fosse uma novidade.
+    const ultimoDoKit = produtosDoMesmoKit[0] || null;
+    if (ultimoDoKit && (!base.baseArquivoId || base.baseArquivoId !== ultimoDoKit.id)) {
+      S.state.registrar(`Release bloqueado para ${base.nome}: o projeto já possui ${ultimoDoKit.nome}; uma nova versão precisa apontar explicitamente para ela.`, 'alerta');
+      return null;
+    }
+
+    // A equipe só libera um candidato para release depois da revisão da gerente.
+    // Publicação manual continua disponível para o dono do estúdio.
+    if (quem !== 'você' && !base.liberadoPublicacao) {
+      S.state.registrar(`Release bloqueado para ${base.nome}: ainda não foi liberado pela gerente.`, 'alerta');
+      return null;
+    }
+
+    // Depois da primeira versão, uma nova publicação precisa ser uma evolução
+    // explícita da última versão. Isso impede o motor de transformar o mesmo
+    // trabalho em v2, v3, v4 apenas porque a fila ficou vazia.
+    if (ultima) {
+      if (!base.baseArquivoId || base.baseArquivoId !== ultima.id) {
+        S.state.registrar(`Release bloqueado para ${base.nome}: não é uma evolução explícita de ${ultima.nome}.`, 'alerta');
+        return null;
+      }
+      const normal = x => String(x || '').replace(/\s+/g, ' ').trim();
+      if (normal(base.conteudo) === normal(ultima.conteudo)) {
+        S.state.registrar(`Release bloqueado para ${base.nome}: conteúdo idêntico à versão publicada.`, 'alerta');
+        return null;
+      }
+    }
+
+    const versao = ultima ? (ultima.versao || 1) + 1 : 1;
     const ext = (base.nome.match(/\.[a-z0-9]+$/i) || [''])[0];
+    const raiz = base.nome.replace(/\.[a-z0-9]+$/i, '').replace(/-v\d+$/i, '');
     const produto = Object.assign({}, base, {
       id: uid('p'), classe: 'produto', versao,
-      nome: base.nome.replace(/\.[a-z0-9]+$/i, '') + '-v' + versao + ext,
-      publicadoPor: quem || 'você', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now()
+      nome: raiz + '-v' + versao + ext,
+      publicadoPor: quem || 'equipe', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now(),
+      liberadoPublicacao: true
     });
     e.arquivos.unshift(produto);
-    const proj = e.projetos.find(x => x.id === (base.projectId || '')) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+    const proj = projeto;
     if (proj) {
       if (!proj.arquivoIds.includes(produto.id)) proj.arquivoIds.unshift(produto.id);
       proj.atividade.unshift({ t: Date.now(), tipo: 'publicacao', texto: `${produto.nome} entrou no projeto.` });
       proj.atividade = proj.atividade.slice(-40);
-      // O site é tratado como artefato vivo do projeto: quando um produto novo
-      // entra, a equipe agenda a integração em vez de deixar o site desatualizado.
+      // Um produto novo só pede integração quando existe um site anterior.
+      // Não cria uma nova versão do próprio site automaticamente.
       if (base.kit !== 'landing') {
         const site = e.arquivos.find(a => a.classe === 'produto' && a.kit === 'landing');
         const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && t.kit === 'landing' && /atualiz|catálogo|catalogo/i.test(t.titulo));
         if (site && !jaExiste) {
-          novaTarefa({ titulo: `Atualizar site com ${produto.nome}`, kit: 'landing',
-            briefing: `Atualizar o site existente e integrar o novo produto ${produto.nome}; preservar o que já funciona.`,
-            projectId: proj.id, baseArquivoId: site.id });
+          novaTarefa({ titulo: `Integrar ${produto.nome} ao site`, kit: 'landing',
+            briefing: `Atualizar o site existente para integrar ${produto.nome}. Preserve o conteúdo que já funciona e altere apenas o necessário.`,
+            projectId: proj.id, baseArquivoId: site.id, origem: 'integração de produto' });
         }
       }
     }
@@ -343,7 +387,12 @@
     try {
       const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
       if (saida && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, { projectId: tarefa.projectId }), p);
+        const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, {
+          projectId: tarefa.projectId,
+          taskId: tarefa.id,
+          baseArquivoId: tarefa.baseArquivoId || null,
+          briefing: tarefa.briefing || ''
+        }), p);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
         logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
         p.ref.pensamento = `Concluí ${tarefa.titulo}. Agora verifico se o que produzi realmente ajuda o produto final e se outra pessoa consegue continuar daqui.`;
@@ -411,9 +460,8 @@
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
     const publicados = arquivos.filter(a => a.classe === 'produto');
     const tem = kit => publicados.some(a => a.kit === kit);
-    const sequencia = tem('landing')
-      ? (tem('catalogo') ? (tem('artigo') ? (tem('emails') ? (tem('anuncios') ? 'landing' : 'anuncios') : 'emails') : 'artigo') : 'catalogo')
-      : 'landing';
+    const sequencia = ['landing','catalogo','artigo','emails','anuncios'].find(k => !tem(k));
+    if (!sequencia) return 0;
     const kit = S.factory.porId(sequencia);
     if (!kit) return 0;
 
@@ -445,11 +493,17 @@
     if (abertas.length >= 2) return 0;
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
     const temSite = arquivos.some(a => a.classe === 'produto' && a.kit === 'landing');
-    const temCatalogo = arquivos.some(a => /cat[aá]logo/i.test(a.nome) || a.kit === 'catalogo');
+    const temCatalogo = arquivos.some(a => a.classe === 'produto' && a.kit === 'catalogo');
+    const temArtigo = arquivos.some(a => a.classe === 'produto' && a.kit === 'artigo');
+    const temEmails = arquivos.some(a => a.classe === 'produto' && a.kit === 'emails');
+    const temAnuncios = arquivos.some(a => a.classe === 'produto' && a.kit === 'anuncios');
     let spec = null;
     if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e materiais já registrados.' };
-    else if (temCatalogo) spec = { kit:'landing', titulo:'Evoluir o site com o catálogo existente', briefing:'Atualizar o site existente para integrar corretamente os produtos já produzidos, sem apagar conteúdo útil.' };
-    else spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar somente os produtos existentes em um catálogo coerente para uso no site e nas próximas etapas.' };
+    else if (!temCatalogo) spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar somente os produtos existentes em um catálogo coerente para uso no site e nas próximas etapas.' };
+    else if (!temArtigo) spec = { kit:'artigo', titulo:'Criar conteúdo público de apoio', briefing:'Criar um artigo completo usando somente fatos e materiais já registrados no projeto.' };
+    else if (!temEmails) spec = { kit:'emails', titulo:'Criar comunicação de lançamento', briefing:'Criar a sequência de e-mails usando somente informações reais já registradas no projeto.' };
+    else if (!temAnuncios) spec = { kit:'anuncios', titulo:'Criar peças de divulgação', briefing:'Criar peças completas de divulgação sem inventar resultados, preços, prazos ou métricas.' };
+    else return 0;
     const kit = S.factory.porId(spec.kit);
     if (!kit) return 0;
     const funcs = rt.filter(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
@@ -465,9 +519,15 @@
 
   async function planejar(g) {
     const e = S.state.atual(); if (!e) return;
-    const kits = kitsDisponiveis();
     const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     if (!projeto) return;
+    const arqs = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+    const port = ['landing','catalogo','artigo','emails','anuncios'];
+    if (port.every(kit => arqs.some(a => a.classe === 'produto' && a.kit === kit))) {
+      // Portfólio-base completo: não inventar uma v2 só para manter o motor ocupado.
+      return;
+    }
+    const kits = kitsDisponiveis();
     const equipe = rt.filter(p => p.papel === 'func').map(p => `${p.id}=${p.nome}(${p.especialidade})`).join('; ') || 'só a gerente';
     const recentes = (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
       .map(a => `${a.nome} [${a.classe}, q${a.qualidade}]`).join(', ') || 'nenhuma entrega ainda';
@@ -487,10 +547,12 @@ KIT1: <código ou vazio>
 PARA1: <id ou vazio>
 BRIEF1: <até 30 palavras>
 DEP1: <id de tarefa anterior ou vazio>
+BASE1: <id do último produto existente se for evolução, senão vazio>
 KIT2: vazio
 PARA2: vazio
 BRIEF2: vazio
-DEP2: vazio`,
+DEP2: vazio
+BASE2: vazio`,
       pedido: `Missão: ${e.missao}. Produza a próxima etapa verificável. Só use fatos presentes no projeto. Se não houver base suficiente para uma nova etapa, retorne KIT1 vazio.`,
       tokens: 300, agente: g.nome, motivo: 'planejar projeto'
     });
@@ -505,8 +567,14 @@ DEP2: vazio`,
       const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para'+n] || '').trim());
       const brief = String(r.campos['brief'+n] || kit.desc).trim();
       const dep = e.tarefas.find(t => t.id === String(r.campos['dep'+n] || '').trim() && t.status === 'feita');
+      const baseId = String(r.campos['base'+n] || '').trim();
+      const existente = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === projeto.id && a.kit === kit.id).sort((a,b)=>(b.versao||1)-(a.versao||1))[0] || null;
+      // Um kit já publicado não pode voltar à fila como se fosse um produto novo.
+      // Só entra novamente se o planejamento declarar explicitamente uma evolução
+      // baseada na última versão publicada.
+      if (existente && baseId !== existente.id) return;
       if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null,
-        projectId: projeto.id, dependsOn: dep ? [dep.id] : [] })) criadas++;
+        projectId: projeto.id, dependsOn: dep ? [dep.id] : [], baseArquivoId: existente ? existente.id : null })) criadas++;
     });
     S.state.registrar(criadas ? `${g.nome} atualizou o projeto e criou ${criadas} próxima(s) etapa(s).` : `${g.nome} revisou o projeto e manteve o plano.`, criadas ? 'ok' : 'info', g.id);
   }
@@ -529,14 +597,31 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     g.ocupado = false; g.balao = null;
     if (!r) { cand.avaliado = false; S.state.gravar(); return; }
     cand.avaliado = true;
-    if (r.campos.publicar === true && cand.qualidade >= 82) {
-      publicar(cand.id, g.nome, String(r.campos.motivo || ''));
-      e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
+    const tarefaOrigem = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
+    const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.projectId === cand.projectId && a.kit === cand.kit);
+    const evolucaoValida = !produtoExistente || (tarefaOrigem && tarefaOrigem.baseArquivoId === produtoExistente.id);
+    if (r.campos.publicar === true && cand.qualidade >= 82 && evolucaoValida) {
+      cand.liberadoPublicacao = true;
+      const released = publicar(cand.id, g.nome, String(r.campos.motivo || ''));
+      if (released) e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
     } else {
       const correcao = String(r.campos.correcao || r.campos.motivo || '').trim();
-      S.state.registrar(`${g.nome} segurou ${cand.nome}: ${correcao || 'ainda não está pronto'}.`, 'alerta', g.id);
+      const motivoBloqueio = !evolucaoValida ? `já existe uma versão publicada de ${cand.kit}; a tarefa não aponta para ela` : (correcao || 'ainda não está pronto');
+      S.state.registrar(`${g.nome} segurou ${cand.nome}: ${motivoBloqueio}.`, 'alerta', g.id);
       e.decisoes.unshift({ t: Date.now(), tipo: 'segurou', quem: g.nome, texto: `${cand.nome}: ${correcao}` });
-      if (correcao) novaTarefa({ titulo: `Refazer ${cand.nome}: ${correcao}`, kit: cand.kit, briefing: `${correcao}. Base: ${cand.nome}` });
+      if (correcao) {
+        const ultima = e.arquivos
+          .filter(a => a.classe === 'produto' && a.linhagem === cand.linhagem)
+          .sort((a,b) => (b.versao || 1) - (a.versao || 1))[0] || null;
+        novaTarefa({
+          titulo: `Corrigir ${cand.nome}: ${correcao}`,
+          kit: cand.kit,
+          briefing: `${correcao}. Base de trabalho: ${ultima ? ultima.nome : cand.nome}. Preserve o que já funciona e altere somente o necessário.`,
+          projectId: cand.projectId,
+          baseArquivoId: ultima ? ultima.id : (cand.baseArquivoId || null),
+          origem: 'revisão da gerente'
+        });
+      }
     }
     if (e.decisoes.length > 20) e.decisoes.length = 20;
     S.state.gravar(); S.bus.emit('negocio');
@@ -938,17 +1023,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         garantirTrabalhoInicial(g);
         return;
       }
-      // Segundo: transformar entregas reais em produto final sem gastar uma chamada
-      // de revisão quando a aferição estrutural já é suficiente.
+      // Segundo: nenhum artefato vira produto final apenas por nota estrutural.
+      // A gerente faz um único gate de release; se aprovar, congela esta versão.
       if (candidato) {
-        if (candidato.qualidade >= 82) {
-          publicar(candidato.id, g.nome, 'Aferição estrutural atingiu o nível de publicação.');
-          e.decisoes.unshift({t:Date.now(), tipo:'publicação', quem:g.nome, texto:`${candidato.nome}: publicado automaticamente após aferição.`});
-          e.decisoes = e.decisoes.slice(0,20);
-          S.state.gravar(); S.bus.emit('negocio');
-          return;
-        }
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+        return;
       }
       // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.
       if (tarefasAbertas().length < 2) {
