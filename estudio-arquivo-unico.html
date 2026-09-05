@@ -3459,7 +3459,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const st = S.ai.estado;
     $('#conexaoChip').textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
     $('#pausarBtn').textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
-    if (!$('#apiKeyInput').value && S.ai.temChave()) $('#apiKeyInput').placeholder = S.ai.chaveMascarada();
+    const apiKeyInput = $('#apiKeyInput');
+    if (apiKeyInput && !apiKeyInput.value && S.ai.temChave()) apiKeyInput.placeholder = S.ai.chaveMascarada();
     $('#conexaoMsg').textContent = st.detalhe || '';
 
     const opcoes = sel => S.ai.MODELOS.map(m =>
@@ -3676,25 +3677,36 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     });
     $('#exportarTudoBtn').onclick = exportarZip;
 
-    $('#salvarIABtn').onclick = () => {
+    const salvarIABtn = $('#salvarIABtn');
+    if (salvarIABtn) salvarIABtn.onclick = () => {
       try {
-        const digitada = $('#apiKeyInput').value.trim();
-        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, undefined, $('#modeloRevisaoSel').value);
-        $('#apiKeyInput').value = '';
+        const key = $('#apiKeyInput');
+        const decisao = $('#modeloDecisaoSel');
+        const producao = $('#modeloProducaoSel');
+        const revisao = $('#modeloRevisaoSel');
+        const digitada = key ? key.value.trim() : '';
+        S.ai.salvarCfg(digitada ? digitada : undefined, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
+        if (key) key.value = ''; 
         toast('Configuração salva.', 'ok');
         pintarMotor();
       } catch (err) { toast(err.message, 'erro'); }
     };
-    $('#testarIABtn').onclick = async () => {
-      const b = $('#testarIABtn'); b.disabled = true; b.textContent = 'testando…';
+    const testarIABtn = $('#testarIABtn');
+    if (testarIABtn) testarIABtn.onclick = async () => {
+      const b = testarIABtn; b.disabled = true; b.textContent = 'testando…';
       try {
-        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, undefined, $('#modeloRevisaoSel').value);
+        const key = $('#apiKeyInput');
+        const decisao = $('#modeloDecisaoSel');
+        const producao = $('#modeloProducaoSel');
+        const revisao = $('#modeloRevisaoSel');
+        if (key && key.value.trim()) S.ai.salvarCfg(key.value, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
       b.disabled = false; b.textContent = 'Testar'; pintarMotor();
     };
-    $('#pausarBtn').onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
+    const pausarBtn = $('#pausarBtn');
+    if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
 
     $('#fecharEstudioBtn').onclick = () => {
       const e = S.state.atual(); if (!e) return;
