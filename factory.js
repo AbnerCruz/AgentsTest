@@ -712,50 +712,112 @@ Sem numeração, sem markdown.`;
   /* ============================================================
      Contratos — o lado "jogo". O valor é simulado; o arquivo entregue
      ao aceitar o contrato é real e fica com você de qualquer forma.
+     O cliente e o pedido são pensados para o ramo do PRÓPRIO estúdio
+     (a IA inventa; sem IA, cai num gabarito que ao menos cita o ramo
+     em vez de sortear um negócio qualquer sem relação nenhuma).
      ============================================================ */
-  const CLIENTES = [
-    'Padaria Serra Azul', 'Oficina Barreto', 'Ateliê Nogueira', 'Clínica Vida Plena',
-    'Mercearia do Cais', 'Studio Ferrolho', 'Casa Marfim', 'Transportes Ipê',
-    'Escola Girassol', 'Cerâmica Rio Claro', 'Pousada Alvorada', 'Marcenaria Tonini',
-    'Consultoria Bandeira', 'Sorveteria Rebimboca', 'Academia Passo Firme'
-  ];
-  const PEDIDOS = {
+  const VALOR_BASE = { landing: 1400, anuncios: 700, artigo: 550, emails: 900, catalogo: 800, marca: 2200, proposta: 950, calendario: 1200 };
+  const TEMAS_GENERICOS = ['o carro-chefe', 'o lançamento da vez', 'a temporada atual', 'quem ainda não conhece o trabalho',
+    'a linha mais pedida', 'a novidade recente', 'o público fiel', 'a proposta de valor'];
+  const PEDIDOS_GENERICOS = {
     landing: ['precisa de uma página para lançar {tema}', 'quer trocar o site antigo por uma página que venda {tema}'],
     anuncios: ['vai anunciar {tema} e não tem copy', 'quer testar seis abordagens de anúncio para {tema}'],
     artigo: ['quer aparecer no Google falando sobre {tema}', 'precisa de um texto de autoridade sobre {tema}'],
     emails: ['tem uma lista parada e quer reativar com {tema}', 'quer uma sequência de boas-vindas sobre {tema}'],
-    catalogo: ['vai subir {tema} para a loja e não tem planilha', 'precisa organizar {tema} com preço e descrição'],
-    marca: ['vai relançar a marca em torno de {tema}', 'não tem logo nem paleta para {tema}'],
-    proposta: ['precisa enviar uma proposta de {tema} até sexta', 'perdeu negócio por falta de proposta formal de {tema}'],
+    catalogo: ['vai organizar {tema} com preço e descrição', 'precisa listar {tema} de forma apresentável'],
+    marca: ['vai relançar a identidade em torno de {tema}', 'não tem logo nem paleta para {tema}'],
+    proposta: ['precisa enviar uma proposta sobre {tema} até sexta', 'perdeu negócio por falta de proposta formal sobre {tema}'],
     calendario: ['quer um mês inteiro de conteúdo sobre {tema}', 'não sabe o que postar sobre {tema}']
   };
-  const TEMAS = ['a linha nova', 'o serviço principal', 'a promoção de temporada', 'o público que nunca comprou',
-    'a reabertura', 'o plano de assinatura', 'o atendimento premium', 'a versão econômica'];
 
-  function gerarContrato(e) {
+  function valorContrato(e, kitId, nivel) {
+    const ind = S.market.indicadores(e);
+    const reput = ind ? ind.reputacao : 46;
+    const base = VALOR_BASE[kitId] || 800;
+    return Math.round(base * (0.75 + reput / 140) * (0.9 + nivel * 0.12));
+  }
+
+  /* gabarito local — usado quando não há IA configurada. Sem lista de
+     negócios genéricos: o "cliente" nasce do ramo/público do próprio
+     estúdio, então ao menos fica plausível dentro do mundo dele. */
+  function clienteLocal(e) {
+    const formato = pick([
+      `Parceria dentro de ${e.ramo}`,
+      `Contato próximo a ${e.publico}`,
+      `Colega do ramo de ${e.ramo}`,
+      `Indicação de ${e.publico}`,
+      `Rede de ${e.ramo}`
+    ]);
+    return formato.slice(0, 48);
+  }
+
+  function gerarContratoLocal(e) {
     const nivel = S.state.nivelDe(e.xp);
     const kits = disponiveis(nivel);
     const kit = pick(kits);
-    const cliente = pick(CLIENTES);
-    const tema = pick(TEMAS);
-    const frase = pick(PEDIDOS[kit.id] || ['precisa de {tema}']).replace('{tema}', tema);
-    const ind = S.market.indicadores(e);
-    const reput = ind ? ind.reputacao : 46;
-    const base = { landing: 1400, anuncios: 700, artigo: 550, emails: 900, catalogo: 800, marca: 2200, proposta: 950, calendario: 1200 }[kit.id] || 800;
-    const valor = Math.round(base * (0.75 + reput / 140) * (0.9 + nivel * 0.12));
+    const cliente = clienteLocal(e);
+    const tema = pick(TEMAS_GENERICOS);
+    const frase = pick(PEDIDOS_GENERICOS[kit.id] || ['precisa de {tema}']).replace('{tema}', tema);
     return {
       id: S.util.uid('c'), cliente, kit: kit.id, tema,
       titulo: `${kit.nome} para ${cliente}`,
-      briefing: `${cliente} ${frase}. Público: ${e.publico}.`,
-      valor, prazoHoras: 6 + Math.round(Math.random() * 10),
+      briefing: `${cliente} ${frase}, dentro do ramo de ${e.ramo}. Público: ${e.publico}.`,
+      valor: valorContrato(e, kit.id, nivel), prazoHoras: 6 + Math.round(Math.random() * 10),
       status: 'oferta', criadoEm: Date.now()
     };
   }
 
-  function prospectar(e, quantos) {
+  /* gabarito por IA — o caminho principal. Pede um cliente e um pedido
+     que façam sentido dentro do ramo declarado do estúdio. */
+  async function gerarContratoIA(e) {
+    const nivel = S.state.nivelDe(e.xp);
+    const kits = disponiveis(nivel);
+    if (!kits.length) return null;
+    const recentes = (e.contratos || []).slice(0, 6).map(c => c.cliente).filter(Boolean).join(', ') || 'nenhum ainda';
+    const r = await S.ai.perguntar({
+      sistema: `Você prospecta contratos para o estúdio ${e.nome}, cujo ramo é "${e.ramo}". Público do estúdio: ${e.publico}. Missão: ${e.missao}.
+Invente UM cliente e um pedido que façam sentido DENTRO ou bem próximos desse ramo específico — nunca um negócio genérico de outro ramo qualquer (nada de padaria, clínica ou oficina, a não ser que o ramo seja literalmente esse).
+Tipos de entrega possíveis (use o código exato): ${kits.map(k => k.id).join(', ')}.
+Responda SOMENTE nestas linhas, sem nada antes ou depois:
+CLIENTE: <nome do cliente ou pessoa, até 5 palavras>
+KIT: <código>
+TEMA: <do que se trata, até 6 palavras>
+BRIEF: <o pedido do cliente, na voz dele, até 22 palavras>`,
+      pedido: `Clientes recentes (não repetir): ${recentes}.`,
+      tokens: 200, agente: 'prospecção', motivo: 'gerar contrato'
+    });
+    if (!r) return null;
+    const kit = porId(String(r.campos.kit || '').trim()) || pick(kits);
+    const cliente = String(r.campos.cliente || '').trim().slice(0, 60) || clienteLocal(e);
+    const tema = String(r.campos.tema || '').trim().slice(0, 60) || pick(TEMAS_GENERICOS);
+    const brief = String(r.campos.brief || '').trim().slice(0, 240) || `precisa de ${kit.nome.toLowerCase()} sobre ${tema}`;
+    return {
+      id: S.util.uid('c'), cliente, kit: kit.id, tema,
+      titulo: `${kit.nome} para ${cliente}`,
+      briefing: `${cliente}: "${brief}" Público: ${e.publico}.`,
+      valor: valorContrato(e, kit.id, nivel), prazoHoras: 6 + Math.round(Math.random() * 10),
+      status: 'oferta', criadoEm: Date.now()
+    };
+  }
+
+  async function gerarContrato(e) {
+    if (S.ai.pronta && S.ai.pronta()) {
+      try {
+        const c = await gerarContratoIA(e);
+        if (c) return c;
+      } catch (err) { /* sem sorte com a IA agora — cai no gabarito local */ }
+    }
+    return gerarContratoLocal(e);
+  }
+
+  async function prospectar(e, quantos) {
     const abertos = e.contratos.filter(c => c.status === 'oferta').length;
     const alvo = Math.min(4, (quantos || 2) + abertos) - abertos;
-    for (let i = 0; i < alvo; i++) e.contratos.unshift(gerarContrato(e));
+    for (let i = 0; i < alvo; i++) {
+      const c = await gerarContrato(e);
+      e.contratos.unshift(c);
+      S.state.gravar(); S.bus.emit('trabalho');
+    }
     if (e.contratos.length > 24) e.contratos.length = 24;
     S.state.gravar(); S.bus.emit('trabalho');
     return alvo;

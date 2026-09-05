@@ -21,6 +21,7 @@
   let token = 0;            // invalida ciclos de estúdios anteriores
   let motorTimer = null;
   let vitaisTimer = null;
+  let socialTimer = null;
   let selecionado = null;
   let animacao = null;
 
@@ -70,6 +71,69 @@
     p.balao = texto; p.estado = 'falando';
     await sleep(ms || 1600);
     p.balao = null; p.estado = 'sentado';
+  }
+
+  /* ---------- vida social — o chão vira um "sims" mixado. Gente livre
+     sai andando sozinha ou puxa assunto com um colega, sem custar
+     nenhuma chamada de IA: só figurino, pra dar vida ao estúdio. ---------- */
+  async function dizer(p, texto, ms) {
+    p.balao = texto;
+    await sleep(ms || 1400);
+    p.balao = null;
+  }
+  const PAPOS = [
+    ['Como tá indo aí?', 'Quase lá.'],
+    ['Bora um café daqui a pouco?', 'Só termino essa parte.'],
+    ['Viu o prazo de hoje?', 'Vi, ainda dá tempo.'],
+    ['Curti sua última entrega.', 'Valeu, capricho nisso!'],
+    ['O cliente já respondeu?', 'Silêncio total ainda.'],
+    ['Travei numa ideia agora.', 'Dá uma volta, ajuda a pensar.'],
+    ['Semana corrida, hein.', 'Nem me fala.'],
+    ['Alguém pega esse contrato novo?', 'Eu topo depois.'],
+    ['Gostei da mesa nova.', 'Fica melhor assim mesmo.']
+  ];
+  const SOZINHO = ['Só esticando as pernas.', 'Pensando na próxima ideia.', 'Um respiro rápido.', 'Café resolve tudo.'];
+
+  const livres = () => rt.filter(p => !p.ocupado && p.estado === 'sentado');
+
+  async function bateBoca(a, b) {
+    if (a.ocupado || b.ocupado || a.estado !== 'sentado' || b.estado !== 'sentado') return;
+    const meio = { x: clamp((a.mesa.x + b.mesa.x) / 2 + (Math.random() * 30 - 15), 40, 600), y: 300 + (Math.random() * 16 - 8) };
+    a.estado = 'andando'; b.estado = 'andando';
+    await Promise.all([irPara(a, meio), irPara(b, { x: meio.x + 24, y: meio.y })]);
+    if (a.ocupado || b.ocupado) return;
+    a.estado = 'falando'; b.estado = 'falando';
+    const [fa, fb] = pick(PAPOS);
+    await dizer(a, fa, 1500);
+    if (!b.ocupado) await dizer(b, fb, 1500);
+    await sleep(200);
+    if (!a.ocupado) { a.estado = 'andando'; await irPara(a, assento(a)); }
+    if (!b.ocupado) { b.estado = 'andando'; await irPara(b, assento(b)); }
+  }
+
+  async function darUmaVolta(p) {
+    if (p.ocupado || p.estado !== 'sentado') return;
+    const destino = ESTACOES[pick(['cafe', 'quadro', 'descanso'])];
+    p.estado = 'andando';
+    await irPara(p, destino);
+    if (p.ocupado) return;
+    p.estado = 'falando';
+    await dizer(p, pick(SOZINHO), 1300);
+    if (p.ocupado) return;
+    p.estado = 'andando';
+    await irPara(p, assento(p));
+  }
+
+  function socializar() {
+    if (Math.random() > 0.6) return; // não em toda batida do relógio — mais orgânico
+    const disponiveis = livres();
+    if (!disponiveis.length) return;
+    if (disponiveis.length >= 2 && Math.random() < 0.55) {
+      const shuf = disponiveis.slice().sort(() => Math.random() - 0.5);
+      bateBoca(shuf[0], shuf[1]).catch(() => {});
+    } else {
+      darUmaVolta(pick(disponiveis)).catch(() => {});
+    }
   }
 
   /* ---------- vitais ---------- */
@@ -436,7 +500,7 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     S.DB.estudios.unshift(e);
     S.DB.atual = e.id;
     S.state.gravarJa();
-    S.factory.prospectar(e, 3);
+    S.factory.prospectar(e, 3).catch(err => console.error('prospectar', err));
     S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
     S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
     return e;
@@ -471,12 +535,14 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     const alvo = meu == null ? token : meu;
     motorTimer = setInterval(() => { ciclo(alvo).catch(err => console.error('ciclo', err)); }, 6000);
     vitaisTimer = setInterval(tickVitais, 7000);
+    socialTimer = setInterval(socializar, 4500);
     if (!animacao) laco();
   }
   function parar() {
     if (motorTimer) clearInterval(motorTimer);
     if (vitaisTimer) clearInterval(vitaisTimer);
-    motorTimer = vitaisTimer = null;
+    if (socialTimer) clearInterval(socialTimer);
+    motorTimer = vitaisTimer = socialTimer = null;
   }
 
   /* ============================================================

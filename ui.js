@@ -647,11 +647,19 @@
     };
     $('#ordemInput').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#ordemBtn').click(); });
 
-    $('#buscarContratoBtn').onclick = () => {
+    $('#buscarContratoBtn').onclick = async () => {
       const e = S.state.atual(); if (!e) return;
-      const n = S.factory.prospectar(e, 2);
-      toast(n > 0 ? n + ' contrato(s) na mesa.' : 'Já há contratos esperando decisão.');
-      pintarContratos();
+      const btn = $('#buscarContratoBtn');
+      btn.disabled = true; const rotulo = btn.textContent; btn.textContent = 'Prospectando…';
+      try {
+        const n = await S.factory.prospectar(e, 2);
+        toast(n > 0 ? n + ' contrato(s) na mesa.' : 'Já há contratos esperando decisão.');
+      } catch (err) {
+        toast('Não deu para prospectar agora.', 'erro');
+      } finally {
+        btn.disabled = false; btn.textContent = rotulo;
+        pintarContratos();
+      }
     };
     $('#limparLogBtn').onclick = () => { const e = S.state.atual(); if (e) { e.log = []; S.state.gravarJa(); pintarLog(); } };
 
