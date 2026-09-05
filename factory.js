@@ -688,7 +688,7 @@ Sem numeração, sem markdown.`;
        de qualidade para deixar claro que não passou pela produção da IA. */
     const bruta = aferir(kit, campos, arquivos, agente);
     const qualidade = viaIA ? bruta : Math.min(36, bruta);
-    const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
+    const classe = !viaIA ? 'esboco' : qualidade >= 82 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
     return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
   }
 
@@ -723,9 +723,10 @@ Sem numeração, sem markdown.`;
     const mem = agente && Array.isArray(agente.memoria) ? agente.memoria : [];
     const memoria = mem.slice(-10).map(m => typeof m === 'string' ? m : m.texto).filter(Boolean)
       .map((x,i) => `${i + 1}. ${x}`).join('\n') || 'Nenhuma memória registrada.';
-    const equipe = (e.equipe || []).map(f =>
-      `${f.nome} | ${f.cargo} | especialidade=${f.especialidade} | energia=${Math.round(f.energia || 0)} | foco=${f.foco || 'disponível'} | pensamento=${f.pensamento || '—'}`
-    ).join('\n');
+    const equipe = (e.equipe || []).map(f => {
+      const p = f.personalidade || {};
+      return `${f.nome} | ${f.cargo} | especialidade=${f.especialidade} | energia=${Math.round(f.energia || 0)} | foco=${f.foco || 'disponível'} | pensamento=${f.pensamento || '—'} | personalidade=${(p.tracos||[]).join(', ')} | comunicação=${p.comunicacao||'direta'} | prioridades=${p.prioridades||'qualidade e utilidade'} | colaboração=${p.colaboracao||'handoff claro'}`;
+    }).join('\n');
     const arquivos = ((projeto && projeto.arquivoIds) || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
       .slice(0, 9).map(a => `### ${a.nome} | ${a.classe} | v${a.versao || 1} | qualidade=${a.qualidade || 0}\n${String(a.conteudo || '').slice(0, 1250)}`).join('\n\n') || 'Nenhum artefato anterior.';
     const tarefas = ((projeto && projeto.tarefaIds) || []).map(id => e.tarefas.find(t => t.id === id)).filter(Boolean)
@@ -735,7 +736,7 @@ Sem numeração, sem markdown.`;
     const eventos = (e.log || []).slice(-8).map(l => `${new Date(l.t || Date.now()).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} — ${l.texto}`).join('\n') || 'Nenhum evento recente.';
     const objetivo = projetoReal ? projetoReal.objetivo : e.missao;
     const briefing = String(op.briefing || '').slice(0, 900);
-    return `CONTEXTO OPERACIONAL COMPLETO — NÃO INVENTE FATOS\n\nESTÚDIO\nNome: ${e.nome}\nRamo: ${e.ramo}\nMissão: ${e.missao}\nPúblico: ${e.publico}\nTom: ${e.tom}\n\nPROJETO PERSISTENTE\nNome: ${projetoReal ? projetoReal.nome : 'Projeto principal'}\nObjetivo: ${objetivo}\nBriefing da etapa: ${briefing}\n\nTAREFA ATUAL\n${tarefa ? `${tarefa.titulo} | status=${tarefa.status} | handoff=${tarefa.handoff || 'nenhum'}` : 'A tarefa deve ser inferida apenas do briefing e do projeto.'}\n\nMEMÓRIA DO FUNCIONÁRIO — use para manter continuidade\n${memoria}\n\nEQUIPE E CONTEXTO SOCIAL\n${equipe}\n\nARTEFATOS EXISTENTES — evolua o que já existe quando fizer sentido\n${arquivos}\n\nPRODUTOS JÁ PUBLICADOS — produtos finais devem continuar consumíveis pelo público\n${produtos}\n\nETAPAS DO PROJETO\n${tarefas}\n\nEVENTOS RECENTES\n${eventos}\n\nCRITÉRIO CENTRAL\nO trabalho precisa contribuir explicitamente para um produto final utilizável pelo público. Preserve dados, conteúdo e decisões anteriores. Não substitua um produto existente por um rascunho sem necessidade. Se depender do trabalho de outra pessoa, incorpore esse trabalho. Entregue algo completo, não uma ideia, promessa ou placeholder.`.slice(0, 11500);
+    return `CONTEXTO OPERACIONAL COMPLETO — NÃO INVENTE FATOS\n\nESTÚDIO\nNome: ${e.nome}\nRamo: ${e.ramo}\nMissão: ${e.missao}\nPúblico: ${e.publico}\nTom: ${e.tom}\n\nPROJETO PERSISTENTE\nNome: ${projetoReal ? projetoReal.nome : 'Projeto principal'}\nObjetivo: ${objetivo}\nBriefing da etapa: ${briefing}\n\nTAREFA ATUAL\n${tarefa ? `${tarefa.titulo} | status=${tarefa.status} | handoff=${tarefa.handoff || 'nenhum'}` : 'A tarefa deve ser inferida apenas do briefing e do projeto.'}\n\nMEMÓRIA DO FUNCIONÁRIO — use para manter continuidade\n${memoria}\n\nEQUIPE E CONTEXTO SOCIAL\n${equipe}\n\nARTEFATOS EXISTENTES — evolua o que já existe quando fizer sentido\n${arquivos}\n\nPRODUTOS JÁ PUBLICADOS — produtos finais devem continuar consumíveis pelo público\n${produtos}\n\nETAPAS DO PROJETO\n${tarefas}\n\nEVENTOS RECENTES\n${eventos}\n\nCRITÉRIO CENTRAL\nO trabalho precisa contribuir explicitamente para um produto final utilizável pelo público. Preserve dados, conteúdo e decisões anteriores. Não substitua um produto existente por um rascunho sem necessidade. Se depender do trabalho de outra pessoa, incorpore esse trabalho. Entregue algo completo, não uma ideia, promessa ou placeholder.\nAUTONOMIA OPERACIONAL\nNão interrompa uma tarefa interna esperando aprovação do dono, orçamento interno ou confirmação de briefing. A gerente e a equipe resolvem decisões operacionais. Só pare se houver uma dependência real, falta de informação essencial ou ação externa/irreversível que o estúdio não possa decidir sozinho.`.slice(0, 11500);
   }
 
   function contextoCurto(e) {

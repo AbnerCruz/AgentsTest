@@ -41,16 +41,9 @@
     return MODELOS_MIGRADOS[id] || MODELOS[0].id;
   }
 
-  const RITMOS = {
-    economico: { intervalo: 10 * 60 * 1000, rotulo: 'econômico' },
-    normal:    { intervalo: 5 * 60 * 1000,  rotulo: 'normal' },
-    intenso:   { intervalo: 2 * 60 * 1000,  rotulo: 'intenso' }
-  };
-
-  const REF_DIARIA = { requisicoes: 1000, tokens: 200000 };
 
   const cfg = Object.assign(
-    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b', ritmo: 'normal' },
+    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
   cfg.decisao = migrarModelo(cfg.decisao);
@@ -178,8 +171,6 @@
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
     }
     const q = usoHoje();
-    if (q.requisicoes >= REF_DIARIA.requisicoes) throw new Error('Referência diária local de requisições atingida.');
-
     const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'revisao' ? cfg.revisao : cfg.decisao);
     const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1000);
     // GPT-OSS na Groq responde melhor com tudo no papel "user".
@@ -195,7 +186,8 @@
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
+          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low',
+          service_tier: 'auto'
         })
       });
       let dados = null;
@@ -285,7 +277,6 @@
     if (MODELOS.some(m => m.id === decisao)) cfg.decisao = decisao;
     if (MODELOS.some(m => m.id === producao)) cfg.producao = producao;
     if (MODELOS.some(m => m.id === revisao)) cfg.revisao = revisao;
-    if (RITMOS[ritmo]) cfg.ritmo = ritmo;
     if (chave) S.local.set(K_CHAVE, chave); else S.local.del(K_CHAVE);
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0;
@@ -297,24 +288,19 @@
     const h = q.headers;
     const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
     const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
-    // Sempre que a Groq já disse (pelos cabeçalhos) qual é o limite real da
-    // janela, o percentual usa esse número. Só cai no teto local (uma trava
-    // de segurança do app, não a cota oficial) antes da primeira resposta.
-    const pctTokens = temTok
-      ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100)
-      : clamp((q.tokens / REF_DIARIA.tokens) * 100, 0, 100);
-    const pctReq = temReq
-      ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100)
-      : clamp((q.requisicoes / REF_DIARIA.requisicoes) * 100, 0, 100);
+    // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
+    // sabemos a janela real da organização; depois dela, usamos os headers da Groq.
+    const pctTokens = temTok ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100) : null;
+    const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'local',
-      ref: REF_DIARIA, headers: h, porModelo: q.porModelo
+      pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'aguardando headers',
+      ref: null, headers: h, porModelo: q.porModelo
     };
   }
 
   S.ai = {
-    MODELOS, RITMOS, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
+    MODELOS, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
     orcamento, pronta, disponivel, reservarAutonomia, faltaParaAutonomia, msDeHeader,
     temChave: () => Boolean(chave),
     chaveMascarada: () => (chave ? chave.slice(0, 7) + '••••••' + chave.slice(-4) : ''),

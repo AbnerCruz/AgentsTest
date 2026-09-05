@@ -37,8 +37,9 @@
 
   const ESTACOES = {
     cafe: { x: 90, y: 300, rotulo: 'café' },
-    descanso: { x: 320, y: 300, rotulo: 'descanso' },
-    quadro: { x: 550, y: 300, rotulo: 'quadro' }
+    reuniao: { x: 320, y: 300, rotulo: 'sala de reunião' },
+    quadro: { x: 550, y: 300, rotulo: 'quadro' },
+    descanso: { x: 320, y: 346, rotulo: 'descanso' }
   };
 
   function montar() {
@@ -75,67 +76,71 @@
     p.balao = null; p.estado = 'sentado';
   }
 
-  /* ---------- vida social — o chão vira um "sims" mixado. Gente livre
-     sai andando sozinha ou puxa assunto com um colega, sem custar
-     nenhuma chamada de IA: só figurino, pra dar vida ao estúdio. ---------- */
-  async function dizer(p, texto, ms) {
-    p.balao = texto;
-    await sleep(ms || 1400);
-    p.balao = null;
-  }
-  const PAPOS = [
-    ['Como tá indo aí?', 'Quase lá.'],
-    ['Bora um café daqui a pouco?', 'Só termino essa parte.'],
-    ['Viu o prazo de hoje?', 'Vi, ainda dá tempo.'],
-    ['Curti sua última entrega.', 'Valeu, capricho nisso!'],
-    ['O cliente já respondeu?', 'Silêncio total ainda.'],
-    ['Travei numa ideia agora.', 'Dá uma volta, ajuda a pensar.'],
-    ['Semana corrida, hein.', 'Nem me fala.'],
-    ['Você viu o que saiu no projeto?', 'Vi, vou aproveitar na próxima etapa.'],
-    ['Gostei da mesa nova.', 'Fica melhor assim mesmo.']
-  ];
-  const SOZINHO = ['Só esticando as pernas.', 'Pensando na próxima ideia.', 'Um respiro rápido.', 'Café resolve tudo.'];
+  /* ---------- vida social e colaboração ----------
+     Conversas casuais não são frases pré-fabricadas. Quando duas pessoas
+     têm disponibilidade e existe um contexto plausível (projeto, tarefa,
+     entrega ou rotina), elas conversam com a própria personalidade. A fala
+     vira também memória e log individual dos dois participantes. */
+  const livres = () => rt.filter(p => !p.ocupado && p.estado === 'sentado' && p.ref.energia > 28);
 
-  const livres = () => rt.filter(p => !p.ocupado && p.estado === 'sentado');
-
-  async function bateBoca(a, b) {
-    if (a.ocupado || b.ocupado || a.estado !== 'sentado' || b.estado !== 'sentado') return;
-    const meio = { x: clamp((a.mesa.x + b.mesa.x) / 2 + (Math.random() * 30 - 15), 40, 600), y: 300 + (Math.random() * 16 - 8) };
-    a.estado = 'andando'; b.estado = 'andando';
-    await Promise.all([irPara(a, meio), irPara(b, { x: meio.x + 24, y: meio.y })]);
-    if (a.ocupado || b.ocupado) return;
-    a.estado = 'falando'; b.estado = 'falando';
-    const [fa, fb] = pick(PAPOS);
-    await dizer(a, fa, 1500);
-    if (!b.ocupado) await dizer(b, fb, 1500);
-    await sleep(200);
-    if (!a.ocupado) { a.estado = 'andando'; await irPara(a, assento(a)); }
-    if (!b.ocupado) { b.estado = 'andando'; await irPara(b, assento(b)); }
+  function perfilTexto(p) {
+    const f = p.ref || {};
+    const per = f.personalidade || {};
+    return `${p.nome} | ${p.cargo} | especialidade=${p.especialidade}\nTraços: ${(per.tracos||[]).join(', ')}\nComunicação: ${per.comunicacao||'direta e cordial'}\nPrioridades: ${per.prioridades||'qualidade e utilidade'}\nEstilo: ${per.estilo||'prático'}\nColaboração: ${per.colaboracao||'faz handoff claro'}\nEvita: ${per.aversoes||'retrabalho'}\nExperiência: ${per.experiencia||p.cargo}`;
   }
 
-  async function darUmaVolta(p) {
-    if (p.ocupado || p.estado !== 'sentado') return;
-    const destino = ESTACOES[pick(['cafe', 'quadro', 'descanso'])];
-    p.estado = 'andando';
-    await irPara(p, destino);
-    if (p.ocupado) return;
-    p.estado = 'falando';
-    await dizer(p, pick(SOZINHO), 1300);
-    if (p.ocupado) return;
-    p.estado = 'andando';
-    await irPara(p, assento(p));
+  function contextoSocial(a,b) {
+    const e=S.state.atual(); if(!e) return '';
+    const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
+    const tarefas=e.tarefas.filter(t=>t.status!=='feita').slice(0,6).map(t=>`${t.titulo} | ${t.status} | responsável=${(e.equipe.find(x=>x.id===t.para)||{}).nome||'livre'}`).join('\n')||'sem tarefas abertas';
+    const arquivos=e.arquivos.slice(0,8).map(x=>`${x.nome} | ${x.classe} | q${x.qualidade}`).join('\n')||'sem entregas recentes';
+    return `Projeto: ${projeto?projeto.nome:'principal'} | objetivo=${projeto?projeto.objetivo:e.missao}\nTarefas abertas:\n${tarefas}\nEntregas recentes:\n${arquivos}\n\n${perfilTexto(a)}\n\n${perfilTexto(b)}`.slice(0,7000);
+  }
+
+  function memorizarInteracao(a,b,texto) {
+    const t=Date.now();
+    const pares=[a,b];
+    pares.forEach(p=>{
+      const f=p.ref; if(!f) return;
+      f.memoria=(f.memoria||[]).concat({texto:`Interação com ${p===a?b.nome:a.nome}: ${texto}`.slice(0,220),t}).slice(-24);
+    });
+  }
+
+  async function bateBoca(a,b) {
+    if (!a || !b || a.ocupado || b.ocupado || a.estado !== 'sentado' || b.estado !== 'sentado') return;
+    const meio={x:clamp((a.mesa.x+b.mesa.x)/2,70,570),y:300};
+    a.estado='andando'; b.estado='andando';
+    await Promise.all([irPara(a,meio),irPara(b,{x:meio.x+24,y:meio.y})]);
+    if(a.ocupado||b.ocupado) return;
+    a.estado=b.estado='falando';
+    const e=S.state.atual(); const projeto=e && (e.projetos.find(x=>x.status==='ativo')||e.projetos[0]);
+    const historico=(e && e.reuniao && e.reuniao.mensagens || []).slice(-6).map(m=>`[${m.quem}] ${m.texto}`).join('\n');
+    const base=`Vocês são dois colegas reais no mesmo estúdio. Esta é uma conversa espontânea de trabalho, não uma reunião formal. Não use frases genéricas nem invente acontecimentos. Fale a partir da tarefa, projeto, personalidade e memória reais. A conversa deve ter utilidade: trocar informação, pedir ajuda, avisar de um risco, reconhecer uma entrega ou combinar um próximo passo. Pode ser breve e humana.\n\nCONTEXTO:\n${contextoSocial(a,b)}\n\nProjeto atual: ${projeto?projeto.nome:'principal'}\nHistórico social/reunião recente:\n${historico||'nenhum'}`;
+    let fa='',fb='';
+    try {
+      const ra=await S.ai.perguntar({sistema:base+`\n\nVocê é ${a.nome}. Responda somente:\nFALA: <até 45 palavras>`,pedido:`Você encontrou ${b.nome} no estúdio. Inicie uma conversa que tenha relação com o trabalho atual.`,tokens:120,agente:a.nome,motivo:'interação entre colegas'});
+      fa=ra?String(ra.campos.fala||'').trim():'';
+      if(fa){ registrarReuniao(a.nome,fa,'interacao'); logPessoa(a,`conversou com ${b.nome}: ${fa}`,'interacao'); a.ref.pensamento=fa.slice(0,220); }
+      const rb=await S.ai.perguntar({sistema:base+`\n\nVocê é ${b.nome}. Responda somente:\nFALA: <até 45 palavras>`,pedido:`${a.nome} disse: ${fa||'Quero alinhar o que estamos fazendo.'}\nResponda naturalmente, acrescente informação ou faça uma pergunta útil.`,tokens:120,agente:b.nome,motivo:'interação entre colegas'});
+      fb=rb?String(rb.campos.fala||'').trim():'';
+      if(fb){ registrarReuniao(b.nome,fb,'interacao'); logPessoa(b,`conversou com ${a.nome}: ${fb}`,'interacao'); b.ref.pensamento=fb.slice(0,220); }
+      if(fa||fb) memorizarInteracao(a,b,`${fa||'…'} ${fb||''}`.trim());
+    } catch(err) {
+      // Sem IA, não inventamos diálogo. Apenas registramos que a interação não ocorreu.
+      logPessoa(a,`encontrou ${b.nome}, mas a conversa não foi gerada porque a IA estava indisponível.`,'interacao');
+      logPessoa(b,`encontrou ${a.nome}, mas a conversa não foi gerada porque a IA estava indisponível.`,'interacao');
+    }
+    await sleep(500);
+    if(!a.ocupado){a.estado='andando';await irPara(a,assento(a));}
+    if(!b.ocupado){b.estado='andando';await irPara(b,assento(b));}
+    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe');
   }
 
   function socializar() {
-    if (Math.random() > 0.6) return; // não em toda batida do relógio — mais orgânico
-    const disponiveis = livres();
-    if (!disponiveis.length) return;
-    if (disponiveis.length >= 2 && Math.random() < 0.55) {
-      const shuf = disponiveis.slice().sort(() => Math.random() - 0.5);
-      bateBoca(shuf[0], shuf[1]).catch(() => {});
-    } else {
-      darUmaVolta(pick(disponiveis)).catch(() => {});
-    }
+    const disponiveis=livres();
+    if(disponiveis.length<2 || Math.random()>0.38) return;
+    const shuf=disponiveis.slice().sort(()=>Math.random()-0.5);
+    bateBoca(shuf[0],shuf[1]).catch(()=>{});
   }
 
   /* ---------- vitais ---------- */
@@ -558,99 +563,23 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   }
 
   async function idearComEquipe() {
-    const e = S.state.atual(); if (!e) return false;
-    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
-    if (!projeto) return false;
-    const abertas = (e.tarefas || []).filter(t => t.status !== 'feita');
-    const pendentes = (e.arquivos || []).filter(a => ['candidato','prototipo'].includes(a.classe) && !a.avaliado);
-    if (abertas.length || pendentes.length) return false;
-    const marco = marcoIdeacao(e);
-    if (e.estrategia && e.estrategia.ultimoMarcoIdeacao === marco) return false;
-
-    const pessoas = rt.filter(p => p.papel === 'func' && p.ref.energia > 25).slice(0, 3);
-    const g = gerente();
-    if (g && g.ref.energia > 25) pessoas.push(g);
-    if (pessoas.length < 2) return false;
-
-    const contexto = pessoas.map(p => `${p.id}|${p.nome}|${p.cargo}|especialidade=${p.especialidade}|foco=${p.ref.foco||'livre'}|memoria=${(p.ref.memoria||[]).slice(-3).map(x=>typeof x==='string'?x:x.texto).join(' / ')}`).join('\n');
-    const arquivos = (projeto.arquivoIds || []).slice(0,10).map(id => e.arquivos.find(a=>a.id===id)).filter(Boolean)
-      .map(a => `${a.nome}|${a.classe}|q${a.qualidade}|kit=${a.kit}`).join('\n') || 'nenhum';
-    const kits = kitsDisponiveis().map(k => `${k.id}:${k.nome}`).join(', ');
-
-    pessoas.forEach(p => { p.ref.foco = 'Observando oportunidades para o próximo produto/projeto'; p.ref.pensamento = 'Estou procurando uma próxima iniciativa que aproveite o que a equipe já construiu e seja útil ao objetivo do estúdio.'; });
-    const r = await S.ai.perguntar({
-      sistema: `Você é um facilitador de uma equipe real de estúdio. Não trate a gerente como única fonte de ideias: cada participante deve contribuir a partir de sua especialidade e do trabalho existente.
-ESTÚDIO: ${e.nome} | missão=${e.missao} | público=${e.publico}
-PROJETO ATUAL: ${projeto.nome} | objetivo=${projeto.objetivo}
-ARTEFATOS EXISTENTES:\n${arquivos}
-PARTICIPANTES:\n${contexto}
-TIPOS DE ENTREGA DISPONÍVEIS: ${kits}
-A equipe está sem tarefas abertas e sem entregas aguardando revisão. Gere uma conversa curta de descoberta, com 2 ou 3 contribuições individuais e uma decisão coletiva. Não invente dados externos. Priorize evolução, integração ou um novo produto que faça sentido a partir do que já existe.
-RETORNE SOMENTE:
-FALA1_QUEM: <id>
-FALA1: <até 45 palavras>
-FALA2_QUEM: <id>
-FALA2: <até 45 palavras>
-FALA3_QUEM: <id ou vazio>
-FALA3: <até 45 palavras>
-IDEIA: <título da iniciativa, até 12 palavras>
-OBJETIVO: <até 30 palavras>
-DECISAO: <por que a equipe escolheu essa ideia, até 35 palavras>
-PROJETO: <nome curto para novo projeto ou vazio se deve continuar no projeto atual>
-KIT: <id de entrega ou vazio se o planejamento deve começar antes da produção>
-BRIEF: <primeira etapa concreta, até 35 palavras>`,
-      pedido: `Façam a próxima conversa estratégica do estúdio. O ponto de partida é o trabalho real já concluído; não repitam entregas existentes.`,
-      tokens: 650, agente: 'equipe', motivo: 'ideação coletiva'
-    });
-    if (!r) return false;
-
-    const campos = r.campos || {};
-    const participantes = [];
-    ['1','2','3'].forEach(n => {
-      const id = String(campos['fala'+n+'_quem'] || '').trim();
-      const texto = String(campos['fala'+n] || '').trim();
-      const p = pessoas.find(x => x.id === id);
-      if (p && texto) {
-        participantes.push({ id:p.id, nome:p.nome, fala:texto.slice(0,500) });
-        registrarReuniao(p.nome, texto, 'ideia');
-        lembrar(p, `Na conversa da equipe, contribuí com uma oportunidade: ${texto.slice(0,140)}`);
-        logPessoa(p, `contribuiu para a ideação da equipe: ${texto.slice(0,180)}`, 'ideia');
-      }
-    });
-    const titulo = String(campos.ideia || '').trim() || 'Próxima iniciativa do estúdio';
-    const objetivo = String(campos.objetivo || '').trim() || `Avançar a missão do estúdio aproveitando o que já foi produzido em ${projeto.nome}.`;
-    const decisao = String(campos.decisao || '').trim();
-    const projetoNome = String(campos.projeto || '').trim();
-    let destino = projeto;
-    if (projetoNome) {
-      destino = { id: uid('proj'), nome: projetoNome.slice(0,80), objetivo, status:'ativo', criadoEm:Date.now(), tarefaIds:[], arquivoIds:[], atividade:[] };
-      e.projetos.forEach(pr => { if (pr.id !== projeto.id && pr.status === 'ativo') pr.status = 'pausado'; });
-      e.projetos.unshift(destino);
-      S.state.registrar(`A equipe abriu o projeto "${destino.nome}" a partir de uma decisão coletiva.`, 'info');
-    }
-    const kitId = String(campos.kit || '').trim();
-    const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(String(campos.brief || '')));
-    const brief = String(campos.brief || '').trim();
-    registrarIdeia({ titulo, objetivo, proposta: decisao || brief, participantes, projetoId: destino.id });
-    registrarReuniao('Equipe', `Decisão coletiva: ${titulo}. ${decisao || objetivo}`, 'decisao');
-    destino.atividade = destino.atividade || [];
-    destino.atividade.unshift({ t:Date.now(), tipo:'ideia', texto:`Equipe decidiu: ${titulo}.` });
-    if (kit && kit.nivel <= S.state.nivelDe(e.xp)) {
-      const alvo = pessoas.find(p => p.papel === 'func' && p.ref.especialidade === kit.especialidade) || pessoas.find(p => p.papel === 'func');
-      const t = novaTarefa({ titulo:`${kit.nome}: ${brief || kit.desc}`, kit:kit.id, briefing:brief || kit.desc, para:alvo ? alvo.id : null, projectId:destino.id, origem:'decisão da equipe' });
-      if (t) {
-        const q = alvo ? alvo.nome : 'distribuição automática';
-        registrarReuniao('Sistema', `Primeira etapa criada: ${t.titulo} → ${q}.`, 'ordem');
-      }
-    } else {
-      registrarReuniao('Sistema', `A iniciativa "${titulo}" entrou em planejamento; a próxima etapa será definida pela equipe.`, 'planejamento');
-    }
-    e.estrategia = e.estrategia || {};
-    e.estrategia.ultimoMarcoIdeacao = marco;
-    e.estrategia.ultimaIdeia = Date.now();
-    S.state.gravar();
-    S.bus.emit('estudio'); S.bus.emit('reuniao'); S.bus.emit('negocio');
-    return true;
+    const e=S.state.atual(); if(!e) return false;
+    const projeto=e.projetos.find(p=>p.status==='ativo')||e.projetos[0]; if(!projeto) return false;
+    const abertas=e.tarefas.filter(t=>t.status!=='feita');
+    const pendentes=e.arquivos.filter(a=>['candidato','prototipo'].includes(a.classe)&&!a.avaliado);
+    if(abertas.length||pendentes.length) return false;
+    const marco=marcoIdeacao(e); if(e.estrategia&&e.estrategia.ultimoMarcoIdeacao===marco) return false;
+    const r=await reuniaoInterna('definir a próxima iniciativa do estúdio');
+    if(!r) return false;
+    const d=r.decisao||{};
+    const titulo=d.texto||'Próxima iniciativa definida pela equipe';
+    const brief=d.brief||'Transformar a decisão da reunião em uma primeira etapa concreta usando o trabalho já existente.';
+    const kit=S.factory.porId(d.kit)||S.factory.porId(kitPorPalavra(brief));
+    const participantes=(r.participantes||[]).map(p=>({id:p.id,nome:p.nome,fala:(r.falas||[]).find(x=>x.id===p.id)?.texto||''}));
+    registrarIdeia({titulo,objetivo:brief,proposta:d.texto||brief,participantes,projetoId:projeto.id});
+    projeto.atividade.unshift({t:Date.now(),tipo:'ideia',texto:`Equipe decidiu em reunião: ${titulo}.`});
+    if(kit){const alvo=r.participantes.find(p=>p.papel==='func'&&p.ref.especialidade===kit.especialidade)||r.participantes.find(p=>p.papel==='func');const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:alvo?alvo.id:null,projectId:projeto.id,origem:'reunião da equipe'});if(t)registrarReuniao('Sistema',`Primeira etapa da decisão: ${t.titulo}${alvo?' → '+alvo.nome:''}.`,'ordem');}
+    e.estrategia=e.estrategia||{};e.estrategia.ultimoMarcoIdeacao=marco;e.estrategia.ultimaIdeia=Date.now();S.state.gravar();S.bus.emit('ideias');return true;
   }
 
   /* O usuário observa; a equipe decide e distribui o trabalho autonomamente. */
@@ -702,6 +631,63 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
     if (abertas.length > Math.max(3, funcs.length * 3) && faltantes.length) S.state.registrar(`${g.nome} recomenda avaliar nova contratação para ${faltantes[0]}.`, 'info', g.id);
     S.state.gravar(); S.bus.emit('equipe'); S.bus.emit('gerencia');
   }
+
+  /* ---------- reuniões internas presenciais ---------- */
+  async function reuniaoInterna(motivo, opcoes) {
+    const e=S.state.atual(); if(!e) return null;
+    e.reuniao=e.reuniao||{mensagens:[],relatorios:[],reunioes:[]};
+    if(e.reuniao.reuniaoAtiva) return null;
+    const pessoas=rt.filter(p=>p.ref.energia>30 && !p.ocupado && p.estado==='sentado');
+    const g=gerente();
+    if(g && !pessoas.includes(g)) pessoas.push(g);
+    const participantes=pessoas.slice(0,4);
+    if(participantes.length<2) return null;
+    e.reuniao.reuniaoAtiva={inicio:Date.now(),motivo,participantes:participantes.map(p=>p.id)};
+    registrarReuniao('Sistema',`Reunião interna iniciada: ${motivo}. Participantes: ${participantes.map(p=>p.nome).join(', ')}.`,'reuniao-inicio');
+    S.state.registrar(`Reunião interna iniciada para ${motivo}.`,'reuniao');
+    const mesa={x:ESTACOES.reuniao.x,y:ESTACOES.reuniao.y};
+    participantes.forEach(p=>{p.ocupado=true;p.estado='andando';p.alvo=mesa;});
+    await Promise.all(participantes.map(p=>irPara(p,{x:mesa.x+(participantes.indexOf(p)-1.5)*24,y:mesa.y})));
+    participantes.forEach(p=>{p.estado='falando';p.ref.foco=`Reunião: ${motivo}`;});
+    const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
+    const base=`Você está em uma reunião presencial do estúdio. Não revele raciocínio interno. Fale apenas o que um colega poderia dizer em voz alta. Use sua personalidade e fatos reais.\nESTÚDIO=${e.nome}; MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}; OBJETIVO=${projeto?projeto.objetivo:e.missao}\nPERSONALIDADE:\n${participantes.map(perfilTexto).join('\n---\n')}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.titulo+' ['+t.status+']').join(' | ')||'nenhuma'}\nENTREGAS=${e.arquivos.slice(0,8).map(a=>a.nome+' ['+a.classe+', q'+a.qualidade+']').join(' | ')||'nenhuma'}\nMOTIVO DA REUNIÃO=${motivo}`.slice(0,9000);
+    const falas=[];
+    for(const p of participantes.filter(x=>x!==g)){
+      const historico=falas.map(x=>`[${x.nome}] ${x.texto}`).join('\n')||'ninguém falou ainda';
+      const r=await S.ai.perguntar({sistema:base+`\n\nVocê é ${p.nome}. Responda somente:\nFALA: <até 55 palavras>`,pedido:`Histórico desta reunião:\n${historico}\nContribua de forma concreta para ${motivo}. Se outro colega precisar de algo, mencione a dependência.`,tokens:140,agente:p.nome,motivo:'reunião interna'});
+      const texto=r?String(r.campos.fala||'').trim():'';
+      if(texto){falas.push({id:p.id,nome:p.nome,texto});registrarReuniao(p.nome,texto,'reuniao');logPessoa(p,`na reunião sobre ${motivo}: ${texto}`,'reuniao');p.ref.memoria=(p.ref.memoria||[]).concat({texto:`Reunião com a equipe sobre ${motivo}: ${texto}`.slice(0,220),t:Date.now()}).slice(-24);p.ref.pensamento=texto.slice(0,220);}
+    }
+    let decisao=null;
+    if(g){
+      const historico=falas.map(x=>`[${x.nome}] ${x.texto}`).join('\n')||'sem contribuições';
+      const r=await S.ai.perguntar({sistema:base+`\n\nVocê é ${g.nome}, sócia-gerente. Escute as falas e feche a reunião sem microgerenciar. Responda somente:\nFALA: <até 55 palavras>\nDECISAO: <decisão prática, até 45 palavras>\nKIT: <kit existente ou vazio>\nBRIEF: <primeira etapa concreta, até 35 palavras>`,pedido:`Falas dos colegas:\n${historico}\nFeche a reunião com uma decisão que mantenha o trabalho em movimento. Não exija aprovação do dono para decisões internas, orçamento interno ou brief; só escale o que for irreversível ou externo.`,tokens:220,agente:g.nome,motivo:'decisão de reunião'});
+      if(r){const c=r.campos||{};const fala=String(c.fala||'').trim();decisao={texto:String(c.decisao||'').trim(),kit:String(c.kit||'').trim(),brief:String(c.brief||'').trim()};if(fala){falas.push({id:g.id,nome:g.nome,texto:fala});registrarReuniao(g.nome,fala,'reuniao');logPessoa(g,`conduziu a reunião sobre ${motivo}: ${fala}`,'reuniao');g.ref.memoria=(g.ref.memoria||[]).concat({texto:`Reunião sobre ${motivo}: ${fala}`.slice(0,220),t:Date.now()}).slice(-24);}}
+    }
+    registrarReuniao('Sistema',`Reunião encerrada: ${decisao&&decisao.texto||'sem decisão registrada'}`,'reuniao-fim');
+    e.reuniao.reunioes.unshift({id:uid('reu'),t:Date.now(),motivo,participantes:participantes.map(p=>p.nome),falas:falas.slice(-8),decisao:decisao&&decisao.texto||''});
+    e.reuniao.reunioes=e.reuniao.reunioes.slice(0,30); delete e.reuniao.reuniaoAtiva;
+    participantes.forEach(p=>{p.ocupado=false;p.estado='andando';p.ref.foco='';});
+    await Promise.all(participantes.map(p=>irPara(p,assento(p))));
+    S.state.gravar();S.bus.emit('reuniao');S.bus.emit('equipe');
+    return {participantes,falas,decisao};
+  }
+
+  function liberarAprovacoesInternas() {
+    const e=S.state.atual(); if(!e) return 0;
+    let n=0;
+    e.tarefas.forEach(t=>{
+      if(t.status==='aguardando_aprovacao' || t.status==='aguardando_aprovação'){
+        // Aprovação do dono não é uma dependência do trabalho interno. A gerente decide.
+        t.status='aberta'; t.aprovacaoInterna=true; t.aprovadoEm=Date.now(); n++;
+        const p=rt.find(x=>x.id===t.para);
+        if(p) logPessoa(p,`a etapa foi liberada pela gerência; não ficou aguardando aprovação externa.`,'supervisao');
+      }
+    });
+    if(n){S.state.registrar(`A gerência liberou ${n} etapa(s) internas que estavam aguardando aprovação.`,'info',gId());S.state.gravar();}
+    return n;
+  }
+  function gId(){const g=gerente();return g?g.id:null;}
 
   /* ============================================================
      Sala de reuniões — canal persistente entre você e a equipe.
@@ -808,6 +794,18 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
     return {ok:true,falas};
   }
 
+  function personalidadeInicial(especialidade, nome) {
+    const perfis={
+      criacao:{tracos:['criativo','curioso','observador'],comunicacao:'visual e direta',prioridades:'clareza, experiência e coerência',estilo:'explora alternativas antes de escolher',colaboracao:'pede referências e compartilha versões',aversoes:'repetição sem propósito'},
+      comercial:{tracos:['persuasivo','prático','atento a contexto'],comunicacao:'objetiva e orientada a impacto',prioridades:'clareza, proposta de valor e conversão',estilo:'procura a mensagem mais útil',colaboracao:'transforma ideias em mensagens acionáveis',aversoes:'mensagens vagas'},
+      dados:{tracos:['analítico','metódico','cauteloso'],comunicacao:'precisa e organizada',prioridades:'consistência, dados e rastreabilidade',estilo:'confere antes de consolidar',colaboracao:'documenta fontes e dependências',aversoes:'dados sem origem'},
+      producao:{tracos:['detalhista','pragmático','persistente'],comunicacao:'curta e concreta',prioridades:'qualidade, acabamento e estabilidade',estilo:'melhora o que já existe',colaboracao:'faz revisão e handoff detalhado',aversoes:'começar de novo sem necessidade'},
+      geral:{tracos:['adaptável','curioso','colaborativo'],comunicacao:'direta e cordial',prioridades:'utilidade e continuidade',estilo:'entra onde existe gargalo',colaboracao:'pergunta antes de assumir uma dependência',aversoes:'trabalho desconectado'}
+    };
+    const base=perfis[especialidade]||perfis.geral;
+    return Object.assign({},base,{experiencia:`experiência prática em ${especialidade}`});
+  }
+
   /* ---------- contratação ---------- */
   function custoContratacao(e) { return 600 + (e.equipe.length - 1) * 350; }
   function contratar(nome, especialidade) {
@@ -815,10 +813,12 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
     const custo = custoContratacao(e);
     if (!S.market.debitar(e, custo, 'contratação')) return 'sem-caixa';
     const esp = ESPECIALIDADES.find(x => x.id === especialidade) || ESPECIALIDADES[4];
+    const novoNome = nome || pick(NOMES);
     e.equipe.push({
-      id: uid('a'), nome: nome || pick(NOMES), papel: 'func', cargo: esp.cargo,
+      id: uid('a'), nome: novoNome, papel: 'func', cargo: esp.cargo,
       especialidade: esp.id, cor: S.state.PALETA[e.equipe.length % S.state.PALETA.length],
-      energia: 85, humor: 72, entregas: 0, memoria: [], uso: { chamadas: 0, tokens: 0 }
+      energia: 85, humor: 72, entregas: 0, memoria: [], uso: { chamadas: 0, tokens: 0 },
+      personalidade: personalidadeInicial(esp.id, novoNome)
     });
     S.state.registrar(`${e.equipe[e.equipe.length - 1].nome} entrou na equipe como ${esp.cargo}.`, 'ok');
     S.state.gravar(); montar();
@@ -844,9 +844,9 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
         status: 'ativo', criadoEm: Date.now(), tarefaIds: [], arquivoIds: [], atividade: []
       }],
       equipe: [
-        { id: 'a0', nome: dados.gerente || 'Ana', papel: 'gerente', cargo: 'Sócia-gerente', especialidade: 'geral', cor: S.state.PALETA[0], energia: 88, humor: 74 },
-        { id: 'a1', nome: pick(NOMES), papel: 'func', cargo: 'Criação', especialidade: 'criacao', cor: S.state.PALETA[1], energia: 85, humor: 70 },
-        { id: 'a2', nome: pick(NOMES.filter(n => n !== 'Lia')), papel: 'func', cargo: 'Comercial', especialidade: 'comercial', cor: S.state.PALETA[2], energia: 85, humor: 70 }
+        { id: 'a0', nome: dados.gerente || 'Ana', papel: 'gerente', cargo: 'Sócia-gerente', especialidade: 'geral', cor: S.state.PALETA[0], energia: 88, humor: 74, personalidade: {tracos:['estratégica','responsável','criteriosa','acolhedora'],comunicacao:'clara e firme',prioridades:'qualidade, continuidade e capacidade da equipe',estilo:'coordena sem microgerenciar',colaboracao:'escuta a equipe e remove bloqueios',aversoes:'gargalos invisíveis e retrabalho',experiencia:'gestão de projetos, pessoas e qualidade'} },
+        { id: 'a1', nome: pick(NOMES), papel: 'func', cargo: 'Criação', especialidade: 'criacao', cor: S.state.PALETA[1], energia: 85, humor: 70, personalidade: personalidadeInicial('criacao','') },
+        { id: 'a2', nome: pick(NOMES.filter(n => n !== 'Lia')), papel: 'func', cargo: 'Comercial', especialidade: 'comercial', cor: S.state.PALETA[2], energia: 85, humor: 70, personalidade: personalidadeInicial('comercial','') }
       ]
     });
     S.market.normalizar(e);
@@ -864,6 +864,7 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
     const e = S.state.atual();
     if (!e) return;
     S.bus.emit('relogio');
+    liberarAprovacoesInternas();
 
     // A supervisão operacional não depende de IA: a gerente sempre acompanha
     // carga, gargalos e capacidade mesmo quando a produção de conteúdo está parada.
@@ -878,6 +879,12 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
         if (!S.ai.pronta()) { await executar(livre, t); return; }
       }
+    }
+    // Gargalo social/operacional: dependências persistentes que merecem alinhamento viram reunião real.
+    const bloqueadas=e.tarefas.filter(t=>t.status!=='feita' && (t.dependsOn||[]).some(id=>{const d=e.tarefas.find(x=>x.id===id);return d && d.status!=='feita';}));
+    if(bloqueadas.length && !e.reuniao.reuniaoAtiva && g && !g.ocupado && S.ai.disponivel() && S.ai.reservarAutonomia()){
+      await reuniaoInterna(`desbloquear ${bloqueadas[0].titulo}`);
+      return;
     }
     // Gerência: quando há IA, usa análise; sem IA, mantém uma linha operacional local.
     if (g && !g.ocupado) {
@@ -1072,7 +1079,7 @@ BRIEF: <primeira etapa concreta, até 35 palavras>`,
   }
 
   S.studio = {
-    reuniaoFalar, relatorioReuniao, registrarReuniao, gerarRelatorioLocal, idearComEquipe,
+    reuniaoFalar, reuniaoInterna, relatorioReuniao, registrarReuniao, gerarRelatorioLocal, idearComEquipe,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,

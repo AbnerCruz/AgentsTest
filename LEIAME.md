@@ -44,7 +44,7 @@ O chão do estúdio é uma representação visual dos agentes: deslocamento, tra
 `index.html` é a versão modular recomendada. `estudio-arquivo-unico.html` é uma versão independente para uso simples.
 
 
-## IA — arquitetura econômica
+## IA — autonomia contínua e arquitetura econômica
 
 - **Pré-produção/coordenação:** GPT-OSS 20B por padrão, com contexto detalhado e saída curta.
 - **Produção:** GPT-OSS 120B por padrão, reservado para criar o produto final.
@@ -52,13 +52,15 @@ O chão do estúdio é uma representação visual dos agentes: deslocamento, tra
 - O contexto enviado inclui projeto, tarefa, memória relevante do agente, equipe, artefatos anteriores, produtos publicados, etapas e eventos recentes.
 - O contexto é limitado por caracteres para evitar crescimento infinito, mas é deliberadamente mais rico que versões anteriores.
 - Movimentação, animações e interações sociais simples não usam IA.
-- A IA é chamada apenas quando uma decisão ou produção realmente precisa dela.
+- Não existe mais cronômetro, ritmo ou cota diária artificial no Estúdio: a IA pode ser chamada sempre que houver uma necessidade operacional real.
+- O cliente usa `service_tier: auto`, permitindo à Groq escolher automaticamente a melhor capacidade disponível para a conta.
+- Os limites de requisições/tokens mostrados no Motor vêm dos headers reais devolvidos pela Groq; antes da primeira resposta, o Estúdio não inventa uma cota local.
 
 Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que os modelos Qwen disponíveis; o GPT-OSS 120B continua sendo a escolha forte para produção. Os modelos Qwen 3.6/3.8 ficam disponíveis como alternativas, mas são mais caros e por isso não são usados automaticamente.
 
 
 ## Sala de reuniões
-A versão v5 adiciona uma sala persistente para conversa direta com a equipe. Mensagens, relatórios e ordens ficam registrados no estúdio. Ordens claras podem virar até duas tarefas no projeto ativo usando o modelo de decisão econômico. A sala envia contexto amplo do projeto e mantém a saída curta para reduzir custo.
+A versão atual mantém uma sala persistente para conversa direta com a equipe. Mensagens, relatórios e ordens ficam registrados no estúdio. Ordens claras podem virar até duas tarefas no projeto ativo usando o modelo de decisão econômico. A sala envia contexto amplo do projeto e mantém a saída curta para reduzir custo.
 
 
 ## Governança da produção

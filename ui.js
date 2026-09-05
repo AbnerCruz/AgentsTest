@@ -92,7 +92,8 @@
         <span class="avatar" style="background:${esc(p.cor)}">${esc(p.nome.slice(0, 2).toUpperCase())}</span>
         <span class="member-body">
           <span class="member-name">${esc(p.nome)} ${p.ocupado ? '<i class="thinking">trabalhando</i>' : ''}</span>
-          <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · decide o que publica' : ''}</span>
+          <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · coordena e remove bloqueios' : ''}</span>
+          <span class="member-personality">${esc((((f.personalidade&&f.personalidade.tracos)||[]).slice(0,2).join(' · ')) || 'perfil em formação')}</span>
           <span class="member-status">${esc(estado)}</span>
         </span>
         <span class="bars">
@@ -149,6 +150,15 @@
     folha(`
       <h2>${esc(p.nome)}</h2>
       <p class="sub">${esc(p.cargo)} · ${esc(esp ? esp.desc : '')}</p>
+      <div class="panel" style="margin:12px 0;padding:12px"><div class="panel-label">Ficha profissional</div>
+        <div class="item-meta"><span>Experiência: ${esc((f.personalidade&&f.personalidade.experiencia)||'em formação')}</span></div>
+        <p class="panel-foot"><strong>Traços:</strong> ${esc(((f.personalidade&&f.personalidade.tracos)||[]).join(', ')||'não definido')}</p>
+        <p class="panel-foot"><strong>Comunicação:</strong> ${esc((f.personalidade&&f.personalidade.comunicacao)||'direta e cordial')}</p>
+        <p class="panel-foot"><strong>Prioridades:</strong> ${esc((f.personalidade&&f.personalidade.prioridades)||'qualidade e utilidade')}</p>
+        <p class="panel-foot"><strong>Estilo:</strong> ${esc((f.personalidade&&f.personalidade.estilo)||'prático')}</p>
+        <p class="panel-foot"><strong>Colaboração:</strong> ${esc((f.personalidade&&f.personalidade.colaboracao)||'handoff claro')}</p>
+        <p class="panel-foot"><strong>Evita:</strong> ${esc((f.personalidade&&f.personalidade.aversoes)||'retrabalho')}</p>
+      </div>
       <div class="panel" style="margin:12px 0;padding:12px"><div class="panel-label">Foco atual</div><p class="panel-foot">${esc(f.pensamento || 'Observando como contribuir com o produto e com a equipe.')}</p></div>
       <div class="stats">
         <div class="stat"><span>Energia</span><b>${Math.round(f.energia)}/100</b></div>
@@ -261,7 +271,7 @@
         </div>
 
       </div>`).join('')}
-      <p class="panel-foot">A gerente avalia os candidatos automaticamente. Quando um artefato é aprovado, a versão é congelada e permanece no histórico do projeto.</p>`;
+      <p class="panel-foot">A gerente avalia os candidatos automaticamente. Aprovações internas não dependem de você: a equipe resolve briefings, distribuição e decisões operacionais sozinha. Só decisões externas ou irreversíveis são escaladas.</p>`;
   }
 
 
@@ -414,13 +424,12 @@
     $('#modeloDecisaoSel').innerHTML = opcoes('decisao');
     $('#modeloProducaoSel').innerHTML = opcoes('producao');
     $('#modeloRevisaoSel').innerHTML = opcoes('revisao');
-    $('#ritmoSel').value = S.ai.cfg.ritmo;
 
     const o = S.ai.orcamento();
     const h = o.headers;
     $('#consumoPanel').innerHTML = `
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
-      <div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>
+      ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
         <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
         <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
@@ -431,8 +440,8 @@
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
       <p class="panel-foot">${o.fonte === 'groq'
-        ? 'A barra e os números acima vêm direto dos cabeçalhos que a Groq devolve na última resposta — sem cálculo por fora.'
-        : 'Ainda sem resposta da Groq nesta sessão: a barra usa um teto local só de referência até a primeira chamada trazer os números reais.'}</p>`;
+        ? 'Os limites de janela vêm dos cabeçalhos que a Groq devolve na última resposta. O Estúdio não impõe uma cota diária artificial.'
+        : 'Ainda sem resposta da Groq nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -567,10 +576,13 @@
      ============================================================ */
   function pintarReuniao() {
     const e=S.state.atual(); if(!e) return;
-    const r=e.reuniao||{mensagens:[],relatorios:[]};
+    const r=e.reuniao||{mensagens:[],relatorios:[],reunioes:[]};
     const pessoas=e.equipe||[];
     const mp=$('#meetingPeople');
     if(mp) mp.innerHTML=pessoas.map(f=>`<div class="meeting-person"><span class="avatar" style="background:${esc(f.cor)}">${esc(f.nome.slice(0,2).toUpperCase())}</span><span><b>${esc(f.nome)}</b><small>${esc(f.cargo)} · ${f.foco?esc(f.foco):'disponível'}</small></span></div>`).join('');
+    const active=r.reuniaoAtiva;
+    const head=document.querySelector('.meeting-room-head .panel-foot');
+    if(head) head.textContent=active ? `Reunião em andamento: ${active.motivo}. As falas e decisões são registradas automaticamente.` : 'A equipe usa esta sala para alinhamentos reais, decisões e conversas internas. As interações ficam na ata e também na memória individual.';
     const box=$('#meetingMessages');
     if(!box) return;
     const msgs=(r.mensagens||[]).slice(-80);
@@ -624,7 +636,7 @@
     $('#salvarIABtn').onclick = () => {
       try {
         const digitada = $('#apiKeyInput').value.trim();
-        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value, $('#modeloRevisaoSel').value);
+        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, undefined, $('#modeloRevisaoSel').value);
         $('#apiKeyInput').value = '';
         toast('Configuração salva.', 'ok');
         pintarMotor();
@@ -633,7 +645,7 @@
     $('#testarIABtn').onclick = async () => {
       const b = $('#testarIABtn'); b.disabled = true; b.textContent = 'testando…';
       try {
-        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value, $('#modeloRevisaoSel').value);
+        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, undefined, $('#modeloRevisaoSel').value);
         const r = await S.ai.testar();
         toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
