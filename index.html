@@ -446,6 +446,7 @@ let workerReadyResolve = null;
 let workerReadyReject = null;
 let aiGeneration = 0;
 let ultimoSinalWorker = 0;
+let chamadasNaFila = 0;
 let iaPronta = false;
 let iaTentativaEmAndamento = false; let iaBloqueadaAte = 0;
 const workerPendentes = new Map();
@@ -708,6 +709,59 @@ async function limparCacheModelos(){
   setAIStatus('idle','Tudo zerado ✓','Empresas, histórico e seleção de modelo foram apagados. O modelo local será baixado novamente quando necessário.');
 }
 
+/* Extrai o texto do formato do Transformers.js. Sem isto, toda chamada
+   quebrava com ReferenceError antes de entregar qualquer resposta. */
+function extrairTextoGerado(result){
+  const primeiro = Array.isArray(result) ? result[0] : result;
+  if(!primeiro) return '';
+  const g = primeiro.generated_text ?? primeiro;
+  if(typeof g === 'string') return g;
+  if(Array.isArray(g)){
+    const ultima = [...g].reverse().find(m => m && m.role === 'assistant') || g[g.length-1];
+    return String(ultima?.content || '');
+  }
+  return String(g?.content || '');
+}
+
+/* Modelos pequenos raramente fecham um JSON valido. Aceitamos tambem
+   linhas "CHAVE: valor", que eles acertam com muito mais frequencia. */
+function lerCampos(texto){
+  const out = {}; let achou = false;
+  for(const linha of String(texto||'').split(/\n+/)){
+    const m = linha.match(/^\s*[-*]?\s*([A-Za-zÀ-ú_ ]{2,24}?)\s*[:=]\s*(.+)$/);
+    if(!m) continue;
+    const chave = m[1].trim().toLowerCase().replace(/\s+/g,'_')
+      .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    let valor = m[2].trim().replace(/^["'<]+|["'>]+$/g,'').trim();
+    const b = valor.toLowerCase();
+    if(b==='true'||b==='sim') valor = true;
+    else if(b==='false'||b==='nao'||b==='não') valor = false;
+    out[chave] = valor; achou = true;
+  }
+  return achou ? out : null;
+}
+
+/* A gerente decide se a proposta do funcionario segue adiante. */
+async function pedirPermissao(rt, ideia, manager){
+  const emp = empresaAtual();
+  if(!emp || !manager) return { aprovado:true, motivo:'sem gerente disponivel' };
+  const sys = `Voce e ${manager.name}, socia-gerente da ${emp.nome} (${emp.ramo}). Um funcionario propoe uma tarefa. Autorize se ela ajuda o produto final; recuse se for vaga ou redundante. Decisoes de rotina sao suas.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+APROVADO: sim ou nao
+MOTIVO: <ate 14 palavras>
+AJUSTE: <ajuste concreto, ou vazio>
+PRECISA_USUARIO: sim ou nao`;
+  const usr = `${contextoDaEmpresa()}\nFuncionario: ${rt.name} (${rt.cargo})\nProposta: ${ideia}`;
+  const out = await askAI(sys, usr, 90, MODEL_GERENTE, manager.id);
+  if(!out) return { aprovado:true, motivo:'a gerente nao respondeu; segue por padrao' };
+  return {
+    aprovado: out.aprovado !== false,
+    motivo: String(out.motivo||''),
+    ajuste: String(out.ajuste||''),
+    precisa_usuario: out.precisa_usuario === true
+  };
+}
+
 async function chamarAPI(system, userText, maxTokens, model, agentId){
   if(!modeloInstalado(modeloSelecionado)) throw new Error('Nenhum modelo de IA instalado. Abra IA / Modelos e baixe um modelo gratuito.');
   await carregarIA();
@@ -718,28 +772,38 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
   const sysText=String(system||'').slice(0,1100);
   const userTextSafe=String(userText||'').slice(0,1100);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
+  chamadasNaFila++;
   try{
     const trabalho = filaIA.catch(()=>{}).then(async () => {
       return await new Promise((resolve,reject)=>{
         const id=++workerSeq;
-        workerPendentes.set(id,{resolve,reject});
-        if(!workerIA || !iaPronta){ workerPendentes.delete(id); reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
+        if(!workerIA || !iaPronta){ reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
+        // O prazo so comeca quando chega a vez desta chamada na fila. Antes,
+        // o relogio corria durante a espera e quase tudo estourava.
+        const teto = 20000 + limite*1800;
+        const t = setTimeout(()=>{
+          workerPendentes.delete(id);
+          reject(new Error(`A geração passou de ${Math.round(teto/1000)}s e foi interrompida.`));
+        }, teto);
+        workerPendentes.set(id,{
+          resolve:v=>{ clearTimeout(t); resolve(v); },
+          reject:e=>{ clearTimeout(t); reject(e); }
+        });
         workerIA.postMessage({type:'generate',id,modelId:modeloSelecionado,dtype:configModelo().dtype,messages,maxTokens:limite,runtimeSource:runtimeOfflineSource,allowRemote:false});
       });
     });
     filaIA = trabalho.catch(()=>{});
-    const result = await Promise.race([
-      trabalho,
-      new Promise((_,reject)=>setTimeout(()=>reject(new Error('A geração local demorou demais e foi interrompida para não travar o celular.')),45000))
-    ]);
+    const result = await trabalho;
     const text=extrairTextoGerado(result);
     if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
     setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
-    contabilizar(modeloSelecionado,null,agentId);
+    contabilizar(modeloSelecionado,{input_tokens:Math.round((sysText.length+userTextSafe.length)/4),output_tokens:Math.round(text.length/4)},agentId);
     return {text,cortado:false};
   }catch(err){
     setAIStatus('error','Erro ao gerar resposta',String(err?.message || err || 'erro desconhecido'),null);
     throw err;
+  }finally{
+    chamadasNaFila--;
   }
 }
 
@@ -773,7 +837,7 @@ function repararJSON(bruto){
 async function askAI(system, userText, maxTokens, model, agentId){
   try{
     const { text } = await chamarAPI(system, userText, maxTokens, model, agentId);
-    const out = repararJSON(text);
+    const out = repararJSON(text) || lerCampos(text);
     if(!out) console.warn('Resposta ilegivel da IA:', text.slice(0,200));
     return out;
   }catch(err){ console.error('IA falhou:', err); return null; }
@@ -972,7 +1036,13 @@ async function pensarContribuicao(rt){
   const emp = empresaAtual(); if(!emp) return null;
   garantirNorte(rt);
   const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você existe para fazer o negócio avançar, não para parecer ocupado. Escolha UMA ação concreta e executável agora, coerente com seu cargo e com o estado real da empresa. Priorize produzir ou melhorar algo que possa ser usado pelo produto final ou por um colega.
-Responda SOMENTE JSON: {"ideia":"ação concreta até 18 palavras","tipo":"criar|editar|tarefa|revisar|pausa","alvo":"arquivo exato se editar/revisar, senão vazio","produto":"resposta à pergunta de contribuição ao produto, até 22 palavras","equipe":"resposta à pergunta de contribuição aos colegas, até 22 palavras","pausa":"comer|beber|pensar"}.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+IDEIA: <ação concreta até 14 palavras>
+TIPO: criar, editar, tarefa, revisar ou pausa
+ALVO: <nome do arquivo se editar/revisar, senão vazio>
+PRODUTO: <como isso ajuda o produto final, até 14 palavras>
+EQUIPE: <como isso ajuda os colegas, até 14 palavras>
+PAUSA: comer, beber ou pensar
 PERGUNTAS-CORE OBRIGATÓRIAS:
 1. Como o que estou fazendo agora contribui para o produto final da empresa?
 2. Como posso contribuir com os meus colegas de equipe?
@@ -984,7 +1054,7 @@ NORTE:
 Seu cargo: ${rt.cargo}. Histórico recente: ${(emp.equipe.find(f=>f.id===rt.id)?.historico||[]).slice(0,4).map(x=>x.text).join(' | ') || 'nenhum'}
 Escolha a próxima contribuição. É obrigatório produzir, melhorar ou ajudar alguém, salvo pausa.`;
   addLog(`${rt.name} está pensando no próximo trabalho: produto + equipe.`, 'info', rt.id);
-  const out = await askAI(sys, usr, 220, modeloDe(rt), rt.id);
+  const out = await askAI(sys, usr, 130, modeloDe(rt), rt.id);
   if(out){
     garantirNorte(rt);
     rt.norte.produto = String(out.produto||'').trim();
@@ -995,16 +1065,21 @@ Escolha a próxima contribuição. É obrigatório produzir, melhorar ou ajudar 
 
 async function revisarEntrega(rt, entrega){
   const emp = empresaAtual(); if(!emp || !entrega) return null;
-  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Faça controle de qualidade do que acabou de produzir. Responda SOMENTE JSON: {"qualidade":"boa|precisa_melhora|inadequada","nota":0-10,"problema":"principal problema, até 20 palavras","melhoria":"uma melhoria concreta que deve ser feita agora, até 24 palavras","pronto":"true|false"}. Seja exigente: algo só é bom se for útil para o produto final, coerente com a empresa e reutilizável pelos colegas.`;
+  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Faça controle de qualidade do que acabou de produzir. Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+QUALIDADE: boa, precisa_melhora ou inadequada
+NOTA: <numero de 0 a 10>
+PROBLEMA: <ate 14 palavras>
+MELHORIA: <melhoria concreta, ate 16 palavras>
+PRONTO: sim ou nao Seja exigente: algo só é bom se for útil para o produto final, coerente com a empresa e reutilizável pelos colegas.`;
   const usr = `${contextoDaEmpresa()}
 Entrega de ${rt.name}: ${entrega}
 Contribuição ao produto: ${rt.norte?.produto||''}
 Contribuição à equipe: ${rt.norte?.equipe||''}`;
   addLog(`${rt.name} está verificando a qualidade da própria entrega.`, 'info', rt.id);
-  const out = await askAI(sys, usr, 170, modeloDe(rt), rt.id);
+  const out = await askAI(sys, usr, 110, modeloDe(rt), rt.id);
   if(out){
     rt.qualidade = { nota:Number(out.nota)||0, status:String(out.qualidade||''), problema:String(out.problema||''), melhoria:String(out.melhoria||''), ts:Date.now() };
-    if(out.qualidade === 'boa' || String(out.pronto).toLowerCase()==='true') addLog(`${rt.name} aprovou a qualidade (${rt.qualidade.nota}/10): ${rt.qualidade.status}.`, 'ok', rt.id);
+    if(out.qualidade === 'boa' || out.pronto === true) addLog(`${rt.name} aprovou a qualidade (${rt.qualidade.nota}/10): ${rt.qualidade.status}.`, 'ok', rt.id);
     else addLog(`${rt.name} encontrou problema de qualidade (${rt.qualidade.nota}/10): ${rt.qualidade.problema||out.melhoria||'precisa melhorar'}.`, 'pend', rt.id);
   }
   return out;
@@ -1015,7 +1090,19 @@ async function auditoriaGerente(manager, motivo='auditoria periódica'){
   const equipe = runtime.filter(r=>r.papel==='func').map(r=>`${r.id}=${r.name} (${r.cargo}); tarefa=${r.currentTask||'nenhuma'}; produto=${r.norte?.produto||'—'}; equipe=${r.norte?.equipe||'—'}; qualidade=${r.qualidade?.nota??'—'}`).join('\n');
   const m=emp.metricas||{};
   const sys = `Você é ${manager.name}, sócia-gerente e núcleo operacional da ${emp.nome} (${emp.ramo}). Você tem autonomia executiva: deve manter a empresa funcionando mesmo quando o usuário não responde. Você APROVA OU REJEITA todo produto/entrega dos funcionários, cobra correções, delega, contrata e demite quando os dados justificarem. Nunca fique parada esperando o usuário.
-Responda SOMENTE JSON: {"decisao":"aprovar_produto|rejeitar_produto|delegar|revisar|contratar|demitir|nenhuma|pedir_usuario","diagnostico":"leitura objetiva dos dados, até 24 palavras","justificativa":"por que esta decisão é boa para o negócio, com base em métricas ou evidências, até 30 palavras","funcionario":"id do funcionário, ou vazio","tarefa":"ação objetiva, até 18 palavras","produto":"como move o produto final, até 20 palavras","equipe":"como ajuda a equipe, até 20 palavras","arquivo":"nome exato do arquivo, ou vazio","necessidade":"perfil/cargo a contratar, ou vazio","motivo_demitir":"motivo objetivo para desligamento, ou vazio","precisa_usuario":true|false,"pergunta_usuario":"pergunta curta sobre uma decisão estratégica ou sobre o rumo, ou vazio"}.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+DECISAO: aprovar_produto, rejeitar_produto, delegar, revisar, contratar, demitir, nenhuma ou pedir_usuario
+DIAGNOSTICO: <leitura dos dados, ate 16 palavras>
+JUSTIFICATIVA: <por que decidiu assim, ate 18 palavras>
+FUNCIONARIO: <id do funcionario, ou vazio>
+TAREFA: <acao objetiva, ate 12 palavras>
+PRODUTO: <como move o produto final, ate 12 palavras>
+EQUIPE: <como ajuda a equipe, ate 12 palavras>
+ARQUIVO: <nome exato do arquivo, ou vazio>
+NECESSIDADE: <cargo a contratar, ou vazio>
+MOTIVO_DEMITIR: <motivo, ou vazio>
+PRECISA_USUARIO: sim ou nao
+PERGUNTA_USUARIO: <pergunta curta, ou vazio>
 REGRAS: decisões rotineiras e de gestão são suas; não peça autorização para aprovar/rejeitar produtos, contratar, demitir ou reorganizar trabalho. Só use pedir_usuario para uma escolha estratégica em que a preferência do dono realmente importe. Mesmo quando pedir_usuario=true, registre a pendência e continue administrando o restante da empresa.`;
   const usr = `${contextoDaEmpresa()}
 Métricas atuais: vendas=${m.vendas||0}, visitas=${m.visitas||0}, seguidores=${m.seguidores||0}, tarefas=${m.tarefas||0}.
@@ -1026,7 +1113,7 @@ Você precisa escolher o próximo movimento e justificar ao dono.`;
   manager.thinking=true; manager.icon='📋';
   addLog(`${manager.name} iniciou auditoria executiva: ${motivo}.`, 'info', manager.id);
   try{
-    const out=await askAI(sys,usr,280,MODEL_GERENTE,manager.id);
+    const out=await askAI(sys,usr,180,MODEL_GERENTE,manager.id);
     if(out){
       manager.norte = { produto:String(out.produto||'').trim(), equipe:String(out.equipe||'').trim() };
       addLog(`${manager.name} decidiu: ${out.decisao||'nenhuma'} — ${out.justificativa||out.diagnostico||'sem justificativa'}`, out.decisao==='pedir_usuario'?'pend':'info', manager.id);
@@ -1040,7 +1127,11 @@ async function aprovarEntregaGerente(rt, plano, entrega){
   if(!emp||!manager||!entrega) return {aprovado:true};
   const arquivo = plano.tipo==='criar' ? (emp.arquivos||[]).find(f=>f.nome===entrega.nome) : null;
   const conteudo = arquivo?.conteudo ? arquivo.conteudo.slice(0,2200) : '';
-  const sys=`Você é ${manager.name}, sócia-gerente da ${emp.nome}. Toda entrega de funcionário passa por sua aprovação. Seja exigente e prática. APROVE ou REJEITE com base em utilidade para o produto final, coerência com a missão, qualidade e evidências. Se rejeitar, indique uma correção concreta. Responda SOMENTE JSON: {"aprovado":true|false,"nota":0-10,"motivo":"até 28 palavras","correcao":"correção concreta, até 30 palavras"}.`;
+  const sys=`Você é ${manager.name}, sócia-gerente da ${emp.nome}. Toda entrega de funcionário passa por sua aprovação. Seja exigente e prática. APROVE ou REJEITE com base em utilidade para o produto final, coerência com a missão, qualidade e evidências. Se rejeitar, indique uma correção concreta. Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+APROVADO: sim ou nao
+NOTA: <numero de 0 a 10>
+MOTIVO: <ate 16 palavras>
+CORRECAO: <correcao concreta, ate 18 palavras>`;
   const usr=`${contextoDaEmpresa()}
 Funcionário: ${rt.name} (${rt.cargo})
 Tarefa: ${plano.ideia}
@@ -1050,8 +1141,8 @@ Entrega: ${entrega.resultado||''}${conteudo?'\nConteúdo do arquivo (trecho): '+
   manager.thinking=true; manager.icon='✅';
   addLog(`${manager.name} está avaliando e precisa aprovar/rejeitar a entrega de ${rt.name}.`, 'info', manager.id);
   try{
-    const out=await askAI(sys,usr,190,MODEL_GERENTE,manager.id);
-    const aprovado=!!out?.aprovado;
+    const out=await askAI(sys,usr,120,MODEL_GERENTE,manager.id);
+    const aprovado = out?.aprovado !== false;
     addLog(`${manager.name} ${aprovado?'APROVOU':'REJEITOU'} a entrega de ${rt.name} (${Number(out?.nota)||0}/10): ${out?.motivo||'avaliação concluída'}.`, aprovado?'ok':'pend', manager.id);
     if(!aprovado && out?.correcao){
       addLog(`${manager.name} determinou correção para ${rt.name}: ${out.correcao}`, 'info', manager.id);
@@ -1073,7 +1164,9 @@ function registrarPendenciaUsuario({tipo='estrategica',quem='Gerente',texto,just
 
 async function contratarPorDecisaoGerente(manager, necessidade, justificativa){
   const emp=empresaAtual(); if(!emp) return null;
-  const sys=`Você é a gerente de RH da ${emp.nome}. Escolha uma contratação coerente com a necessidade. Responda SOMENTE JSON: {"nome":"primeiro nome","cargo":"cargo curto"}.`;
+  const sys=`Você é a gerente de RH da ${emp.nome}. Escolha uma contratação coerente com a necessidade. Responda EXATAMENTE nestas linhas:
+NOME: <primeiro nome>
+CARGO: <cargo curto>`;
   const out=await askAI(sys,`Necessidade: ${necessidade}. Justificativa gerencial: ${justificativa}`,90,MODEL_GERENTE,manager.id);
   const nome=String(out?.nome||'Nova pessoa').trim(); const cargo=String(out?.cargo||necessidade||'especialista').trim();
   const novo={id:'a'+Date.now(),nome,papel:'func',cargo,cor:PALETA[emp.equipe.length%PALETA.length],historico:[],norte:{produto:'',equipe:''}};
@@ -1119,7 +1212,7 @@ RESULTADO: <o que você fez, até 16 palavras>
 VENDAS: <numero>
 VISITAS: <numero>
 SEGUIDORES: <numero>`;
-  const out=await askAIBlock(sys,plano.ideia,pedeArquivo?384:150,MODEL_BARATO,rt.id);
+  const out=await askAIBlock(sys,plano.ideia,pedeArquivo?320:110,MODEL_BARATO,rt.id);
   rt.thinking=false; rt.icon=null;
   if(!out || (!out.resultado && !out.conteudo?.trim())){
     rt.currentTask=null; addLog(`${rt.name} tentou executar, mas não entregou resultado.`, 'pend', rt.id); return null;
@@ -1132,7 +1225,7 @@ SEGUIDORES: <numero>`;
   renderMetrics();
   rt.currentTask=null;
   const q=await revisarEntrega(rt, resumo + (pedeArquivo ? ` | arquivo ${out.nome}` : ''));
-  if(q && q.qualidade!=='boa' && String(q.pronto).toLowerCase()!=='true' && q.melhoria){
+  if(q && q.qualidade!=='boa' && q.pronto !== true && q.melhoria){
     addLog(`${rt.name} vai corrigir a própria entrega: ${q.melhoria}`, 'info', rt.id);
     const plano2={...plano, tipo:'tarefa', ideia:q.melhoria, produto:rt.norte.produto, equipe:rt.norte.equipe};
     await executarCorrecao(rt, plano2);
@@ -1149,7 +1242,7 @@ async function executarCorrecao(rt, plano){
   const emp=empresaAtual(); if(!emp) return;
   rt.state='acting'; rt.icon='🔧'; rt.thinking=true; rt.currentTask=plano.ideia;
   const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Corrija concretamente a entrega anterior. Responda EXATAMENTE, sem markdown:\nRESULTADO: <o que foi corrigido, até 18 palavras>\nVENDAS: 0\nVISITAS: 0\nSEGUIDORES: 0`;
-  const out=await askAIBlock(sys,plano.ideia,130,MODEL_BARATO,rt.id);
+  const out=await askAIBlock(sys,plano.ideia,100,MODEL_BARATO,rt.id);
   rt.thinking=false; rt.icon=null; rt.currentTask=null;
   if(out?.resultado) addLog(`${rt.name} MELHOROU → ${out.resultado}`, 'ok', rt.id);
   else addLog(`${rt.name} não conseguiu aplicar a melhoria agora.`, 'pend', rt.id);
@@ -1177,8 +1270,9 @@ async function autonomiaAmbiente(rt,token){
 
 async function autonomiaDecisao(rt,token){
   while(token===autonomyToken){
-    await sleep(30000+Math.floor(Math.random()*26000));
+    await sleep(60000+Math.floor(Math.random()*60000));
     if(token!==autonomyToken||rt.forced)continue;
+    if(chamadasNaFila>0)continue; // nao empilhar pedidos: o modelo local atende um por vez
     const emp=empresaAtual(); if(!emp)continue;
     const manager=runtime.find(r=>r.papel==='gerente'); rt.forced=true;
     try{
@@ -1212,8 +1306,9 @@ async function autonomiaDecisao(rt,token){
 
 async function revisarProdutoContinuamente(rt,token){
   while(token===autonomyToken){
-    await sleep(65000+Math.floor(Math.random()*35000));
+    await sleep(240000+Math.floor(Math.random()*120000));
     if(token!==autonomyToken||rt.forced) continue;
+    if(chamadasNaFila>0) continue;
     const emp=empresaAtual(); if(!emp) continue;
     const arquivos=(emp.arquivos||[]).filter(f=>f.conteudo?.trim());
     if(!arquivos.length){
@@ -1223,12 +1318,16 @@ async function revisarProdutoContinuamente(rt,token){
     rt.forced=true; rt.thinking=true; rt.icon='🔎';
     try{
       const lista=arquivos.slice(-8).map(f=>`${f.nome} (${f.tipo||'arquivo'})`).join('; ');
-      const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você participa do controle contínuo de qualidade do produto. Escolha o arquivo mais importante para o produto final e decida se precisa de melhoria. Responda SOMENTE JSON: {"arquivo":"nome exato","precisa_melhora":true|false,"problema":"até 20 palavras","melhoria":"instrução concreta de melhoria até 28 palavras"}. Só diga que está bom se realmente estiver coerente com a missão, útil ao cliente e aproveitável pela equipe.`;
-      const out=await askAI(sys,`${contextoDaEmpresa()}\nArquivos para auditoria: ${lista}\nPerguntas-core: ${METRICAS_CORE[0]} / ${METRICAS_CORE[1]}`,180,modeloDe(rt),rt.id);
+      const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você participa do controle contínuo de qualidade do produto. Escolha o arquivo mais importante para o produto final e decida se precisa de melhoria. Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+ARQUIVO: <nome exato>
+PRECISA_MELHORA: sim ou nao
+PROBLEMA: <ate 14 palavras>
+MELHORIA: <instrucao concreta, ate 18 palavras> Só diga que está bom se realmente estiver coerente com a missão, útil ao cliente e aproveitável pela equipe.`;
+      const out=await askAI(sys,`${contextoDaEmpresa()}\nArquivos para auditoria: ${lista}\nPerguntas-core: ${METRICAS_CORE[0]} / ${METRICAS_CORE[1]}`,120,modeloDe(rt),rt.id);
       if(!out) continue;
       const f=arquivos.find(x=>x.nome===out.arquivo)||arquivos.find(x=>out.arquivo&&x.nome.includes(out.arquivo));
       if(!f){addLog(`${rt.name} não encontrou o arquivo indicado para revisão.`,'pend',rt.id);continue;}
-      if(!out.precisa_melhora){addLog(`${rt.name} revisou ${f.nome}: qualidade considerada suficiente por enquanto.`,'ok',rt.id);continue;}
+      if(out.precisa_melhora !== true){addLog(`${rt.name} revisou ${f.nome}: qualidade considerada suficiente por enquanto.`,'ok',rt.id);continue;}
       const melhoria=out.melhoria||`Melhore ${f.nome} para ficar mais coerente com a missão da empresa e mais útil aos colegas.`;
       addLog(`${rt.name} encontrou uma melhoria em ${f.nome}: ${out.problema||melhoria}`,'info',rt.id);
       const manager=runtime.find(r=>r.papel==='gerente');
@@ -1250,8 +1349,9 @@ async function revisarProdutoContinuamente(rt,token){
 
 async function autonomiaGerente(manager,token){
   while(token===autonomyToken){
-    await sleep(20000+Math.floor(Math.random()*14000));
+    await sleep(90000+Math.floor(Math.random()*60000));
     if(token!==autonomyToken||manager.forced)continue;
+    if(chamadasNaFila>0)continue;
     manager.forced=true;
     try{
       const emp=empresaAtual(); if(!emp) continue;
@@ -1259,7 +1359,7 @@ async function autonomiaGerente(manager,token){
       const plano=await auditoriaGerente(manager,'gestão contínua: pessoas, produtos, métricas, gargalos e direção');
       if(token!==autonomyToken||!plano)continue;
 
-      if(plano.precisa_usuario || plano.decisao==='pedir_usuario'){
+      if(plano.precisa_usuario === true || plano.decisao==='pedir_usuario'){
         const pergunta=String(plano.pergunta_usuario||`O rumo atual da ${emp.nome} está agradando você?`).trim();
         registrarPendenciaUsuario({tipo:'estrategica',quem:manager.name,texto:pergunta,justificativa:String(plano.justificativa||plano.diagnostico||''),plano:null});
       }
