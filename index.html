@@ -382,8 +382,6 @@
           <button class="btn small" id="monReligarBtn">Religar motor</button>
           <button class="btn small" id="monDestravarBtn">Destravar fila e equipe</button>
           <button class="btn small" id="monDetalheBtn">Mostrar prompts</button>
-          <button class="btn small" id="monCopiarBtn">Copiar diagnóstico</button>
-          <button class="btn small" id="monCopiarTudoBtn">Copiar tudo (com prompts)</button>
         </div>
         <div class="stage-note">O navegador não executa o app com o site fechado: ao sair, a simulação congela e volta exatamente de onde parou quando você abre de novo. O que esta aba resolve é enxergar o que a IA está fazendo e destravar quando ela parar.</div>
       </div>
@@ -457,16 +455,12 @@ const MODELOS = {
   forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,1 GB', detalhe:'Melhor qualidade de decisão e escrita. Cada resposta demora bem mais e exige aparelho folgado de memória.', memoria:'Alta', licenca:'Apache-2.0' },
 };const MODEL_PADRAO = MODELOS.recomendado.id;
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-  navigator.serviceWorker.register('sw.js').then(reg => {
-    // O Service Worker injeta COOP/COEP; eles so valem depois que ele assume a
-    // pagina. Uma recarga unica liga o modo turbo (WASM multi-thread).
-    const semTurbo = new URLSearchParams(location.search).has('semturbo');
-    if(!semTurbo && !self.crossOriginIsolated && navigator.serviceWorker.controller
-       && !sessionStorage.getItem('turbo-reload')){
-      sessionStorage.setItem('turbo-reload','1');
-      location.reload();
-    }
-  }).catch(()=>{});
+  // O Service Worker so serve para cachear os arquivos do runtime/modelo para
+  // uso offline. O "modo turbo" (WASM multi-thread via SharedArrayBuffer) foi
+  // desligado: em celulares com pouca RAM ele derrubava o processo do Worker
+  // sem gerar excecao (o app so via "navegador encerrou o processo da IA").
+  // Rodar sempre em 1 thread e mais lento, porem muito mais estavel no celular.
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
 let modeloSelecionado = localStorage.getItem('modelo-ia-ativo') || MODEL_PADRAO;
 if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
@@ -595,11 +589,11 @@ async function initRuntime(source, allowRemote=false){
     env.allowRemoteModels=true; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
     try{ if(env.backends?.onnx?.wasm){
       env.backends.onnx.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
-      // Com cross-origin isolation ligado (headers COOP/COEP servidos pelo
-      // Service Worker) o ONNX pode usar varios nucleos. Sem isso, 1 thread.
-      const nucleos = (typeof navigator!=='undefined' && navigator.hardwareConcurrency) || 2;
-      env.backends.onnx.wasm.numThreads = self.crossOriginIsolated ? Math.max(2, Math.min(4, nucleos-1)) : 1;
-      postMessage({type:'threads', threads: env.backends.onnx.wasm.numThreads, isolado: !!self.crossOriginIsolated});
+      // Sempre 1 thread. Multi-thread (SharedArrayBuffer) foi testado e derruba
+      // o processo do Worker por falta de memoria em celulares mais simples.
+      // E mais lento, mas e a unica configuracao que nao crasha no aparelho.
+      env.backends.onnx.wasm.numThreads = 1;
+      postMessage({type:'threads', threads: 1, isolado: !!self.crossOriginIsolated});
     } }catch(e){}
     return mod;
   })();
@@ -637,32 +631,17 @@ self.onmessage = async (ev)=>{
   if(msg.type==='generate'){
     try{
       const p=await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote);
-      const pegar=(r)=>{
-        const primeiro=Array.isArray(r)?r[0]:r; if(!primeiro) return '';
-        const g=(primeiro.generated_text!==undefined&&primeiro.generated_text!==null)?primeiro.generated_text:primeiro;
-        if(typeof g==='string') return g;
-        if(Array.isArray(g)){ const u=g.slice().reverse().find(m=>m&&m.role==='assistant')||g[g.length-1]; return String((u&&u.content)||''); }
-        return String((g&&g.content)||'');
-      };
-      const planificar=(msgs)=>msgs.map(m=>m.content).join('\n\n')+'\n\nResposta:\n';
-      const base={max_new_tokens:msg.maxTokens||128,do_sample:true,temperature:msg.temperatura||0.7,top_p:0.9,repetition_penalty:1.12,return_full_text:false};
-      // Tentativa 1: template de chat. Se vier vazio, o proprio worker refaz
-      // como texto corrido e depois exigindo um minimo de tokens novos, que e
-      // o que impede o modelo de emitir o fim logo no primeiro passo.
-      let via='chat';
-      let result=await p(msg.messages, base);
-      let texto=pegar(result).trim();
-      if(!texto){
-        via='texto-corrido';
-        result=await p(planificar(msg.messages), base);
-        texto=pegar(result).trim();
-      }
-      if(!texto){
-        via='texto-corrido+minimo';
-        result=await p(planificar(msg.messages), Object.assign({}, base, {temperature:1.0, top_k:50, min_new_tokens:12}));
-        texto=pegar(result).trim();
-      }
-      postMessage({type:'result',id:msg.id,result,texto,via,forma: texto?'':JSON.stringify(result).slice(0,400)});
+      // Greedy puro (do_sample:false) em modelo minusculo costuma emitir o token
+      // de fim na primeira posicao e devolver texto vazio. Amostragem resolve.
+      const result=await p(msg.messages,{
+        max_new_tokens: msg.maxTokens||128,
+        do_sample: true,
+        temperature: msg.temperatura || 0.7,
+        top_p: 0.9,
+        repetition_penalty: 1.12,
+        return_full_text: false
+      });
+      postMessage({type:'result',id:msg.id,result});
     }
     catch(e){ postMessage({type:'error',id:msg.id,error:String(e?.message||e)}); }
   }
@@ -741,9 +720,6 @@ function criarWorkerIA(){
     if(m.type==='result' || m.type==='error'){
       const p=workerPendentes.get(m.id); if(!p) return;
       workerPendentes.delete(m.id);
-      // O worker responde num envelope {type,id,result,texto}. Antes o envelope
-      // inteiro ia para o extrator, que nunca achava texto: TODA chamada
-      // terminava como "modelo terminou sem produzir texto".
       if(m.type==='result') p.resolve(m); else p.reject(new Error(m.error||'Erro na IA local.'));
     }
   };
@@ -847,14 +823,6 @@ async function limparCacheModelos(){
 
 /* Extrai o texto do formato do Transformers.js. Sem isto, toda chamada
    quebrava com ReferenceError antes de entregar qualquer resposta. */
-/* O worker devolve {type,id,result,texto}. Aceitamos as duas formas para nao
-   depender da ordem em que os campos chegam. */
-function textoDoEnvelope(env){
-  if(!env) return '';
-  if(typeof env.texto === 'string' && env.texto.trim()) return env.texto;
-  if(env.result !== undefined) return extrairTextoGerado(env.result);
-  return extrairTextoGerado(env);
-}
 function extrairTextoGerado(result){
   const primeiro = Array.isArray(result) ? result[0] : result;
   if(!primeiro) return '';
@@ -929,10 +897,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
     agente: nomeDeAgente(agentId),
     motivo: (sysText.match(/^[^\n.]{0,60}/)||[''])[0].trim() || 'chamada de IA',
     teto: tetoMon,
-    pedido: userTextSafe.slice(0,1500),
-    sistema: sysText.slice(0,1500),
-    modelo: modeloDoTipo(tipo),
-    tipoChamada: tipo,
+    pedido: userTextSafe.slice(0,400),
   });
   try{
     const trabalho = filaIA.catch(()=>{}).then(async () => {
@@ -952,25 +917,24 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
         });
         workerIA.postMessage({type:'generate',id,modelId:modeloDaChamada,dtype:configModelo(modeloDaChamada).dtype,messages:msgs,maxTokens:limite,temperatura,runtimeSource:runtimeOfflineSource,allowRemote:false});
       });
-      let env = await enviar(messages, 0.7);
-      if(!textoDoEnvelope(env).trim()){
+      let bruto = await enviar(messages, 0.7);
+      if(!extrairTextoGerado(bruto).trim()){
+        // Modelo pequeno costuma ignorar o papel "system" e devolver vazio.
+        // Segunda tentativa com tudo em uma mensagem so e mais temperatura.
         monEvento(`${nomeDeAgente(agentId)}: resposta veio vazia; tentando de novo com o pedido em bloco unico.`,'aviso');
-        if(env && env.forma) monEvento('Formato bruto devolvido pelo modelo: '+String(env.forma).slice(0,200),'aviso');
-        env = await enviar([{role:'user',content:sysText+'\n\n'+userTextSafe}], 0.95);
+        bruto = await enviar([{role:'user',content:sysText+'\n\n'+userTextSafe}], 0.95);
       }
-      return env;
+      return bruto;
     });
     filaIA = trabalho.catch(()=>{});
-    const envelope = await trabalho;
-    const text = textoDoEnvelope(envelope);
-    if(envelope && envelope.via && envelope.via !== 'chat')
-      monEvento(`Resposta de ${nomeDeAgente(agentId)} so saiu no modo "${envelope.via}".`,'aviso');
+    const result = await trabalho;
+    const text=extrairTextoGerado(result);
     if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
     setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
     // Sem contagem de tokens exposta, o tamanho serve de indicio: texto que
     // encosta no teto quase sempre foi cortado no meio.
     var truncado = text.length > limite*3.2;
-    monFim(monId, truncado ? 'cortado' : 'ok', {resposta:text.slice(0,1500), erro: truncado ? 'bateu no limite de tokens; pode estar incompleta' : ''});
+    monFim(monId, truncado ? 'cortado' : 'ok', {resposta:text.slice(0,400), erro: truncado ? 'bateu no limite de tokens; pode estar incompleta' : ''});
     if(truncado) monEvento(`Resposta de ${nomeDeAgente(agentId)} bateu no limite de ${limite} tokens; pode ter vindo incompleta.`,'aviso');
     contabilizar(modeloSelecionado,{ms:Date.now()-inicioGeracao},agentId);
     return {text,cortado:truncado};
@@ -3130,72 +3094,6 @@ document.getElementById('aiRetryBtn')?.addEventListener('click', async () => {
 /* ============================================================
    Controles do monitor
    ============================================================ */
-function relatorioDiagnostico(completo){
-  const emp = empresaAtual();
-  const L = [];
-  L.push('=== DIAGNOSTICO DO MOTOR — '+new Date().toLocaleString('pt-BR')+' ===');
-  L.push('Empresa: '+(emp?emp.nome+' ('+emp.ramo+')':'nenhuma'));
-  L.push('Motor: '+estadoMotor().txt+' · threads: '+MOTOR_THREADS+(self.crossOriginIsolated?' (turbo)':' (sem turbo)'));
-  L.push('Modelo decisao: '+configModelo(MODEL_DECISAO).nome+' | producao: '+configModelo(MODEL_PRODUCAO).nome);
-  L.push('Instalados: '+(modelosInstalados.join(', ')||'nenhum'));
-  L.push('Fila: '+chamadasNaFila+' · religadas sozinho: '+MON.autoReinicios+' · falhas seguidas: '+MON.falhasSeguidas);
-  L.push('Memoria declarada pelo aparelho: '+(navigator.deviceMemory||'?')+' GB · nucleos: '+(navigator.hardwareConcurrency||'?'));
-  L.push('Navegador: '+navigator.userAgent);
-  L.push('');
-  L.push('--- EQUIPE ---');
-  runtime.forEach(rt=>L.push(rt.name+' ('+rt.cargo+') — '+rt.state+(rt.thinking?' pensando':'')+(rt.forced?' ocupado':'')+' · tarefa: '+(rt.currentTask||'nenhuma')+' · humor '+Math.round(rt.vitais.humor)));
-  L.push('');
-  L.push('--- CHAMADAS ('+MON.chamadas.length+') ---');
-  const lista = completo ? MON.chamadas : MON.chamadas.slice(0,10);
-  lista.forEach(c=>{
-    L.push('['+monHora(c.fim)+'] '+c.agente+' · '+(c.tipoChamada||'?')+' · '+(c.modelo||'?')+' · '+monTempo(c.ms)+' · '+c.status);
-    if(c.status!=='ok') L.push('  erro: '+(c.erro||'—'));
-    if(completo){
-      L.push('  SYSTEM: '+String(c.sistema||'').replace(/\n/g,' | '));
-      L.push('  USER: '+String(c.pedido||'').replace(/\n/g,' | '));
-      L.push('  RESPOSTA: '+String(c.resposta||'(vazia)').replace(/\n/g,' | '));
-    }
-  });
-  L.push('');
-  L.push('--- DIARIO TECNICO ---');
-  MON.eventos.slice(0, completo?80:25).forEach(e=>L.push('['+monHora(e.ts)+'] ['+e.tipo+'] '+e.texto));
-  if(emp && emp.log && emp.log.length){
-    L.push('');
-    L.push('--- LOG DA EMPRESA (ultimos 20) ---');
-    emp.log.slice(-20).forEach(l=>L.push('['+l.ts+'] '+(l.tag||'info')+' · '+l.text));
-  }
-  return L.join('\n');
-}
-async function copiarTexto(txt, botao, rotuloOriginal){
-  let ok = false;
-  try{ await navigator.clipboard.writeText(txt); ok = true; }
-  catch(e){
-    // Fallback para WebView/contexto sem permissao de clipboard.
-    try{
-      const ta=document.createElement('textarea');
-      ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
-      document.body.appendChild(ta); ta.focus(); ta.select();
-      ok=document.execCommand('copy'); document.body.removeChild(ta);
-    }catch(e2){ ok=false; }
-  }
-  if(botao){
-    botao.textContent = ok ? 'Copiado ✓' : 'Não deu — segure e copie abaixo';
-    setTimeout(()=>{ botao.textContent = rotuloOriginal; }, 2500);
-  }
-  if(!ok){
-    // Ultimo recurso: mostra o texto para copiar na mao.
-    openModal('<h2>Copie o diagnostico</h2><div class="msub">Segure o texto abaixo para selecionar e copiar.</div>'+
-      '<textarea readonly style="width:100%;height:240px;font-size:12px;">'+escapeHtml(txt)+'</textarea>'+
-      '<div class="modal-actions"><button class="btn" onclick="document.getElementById(\'modalBackdrop\').hidden=true">Fechar</button></div>');
-  }
-  return ok;
-}
-document.getElementById('monCopiarBtn')?.addEventListener('click', function(){
-  copiarTexto(relatorioDiagnostico(false), this, 'Copiar diagnóstico');
-});
-document.getElementById('monCopiarTudoBtn')?.addEventListener('click', function(){
-  copiarTexto(relatorioDiagnostico(true), this, 'Copiar tudo (com prompts)');
-});
 function atualizarBotoesMonitor(){
   const p=document.getElementById('monPausarBtn');
   if(p) p.textContent = motorPausado ? 'Retomar equipe' : 'Pausar equipe';
