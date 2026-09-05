@@ -3,21 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Escritório — Simulador com IA Local Gratuita</title>
+<title>Escritório — Simulador de Empresas com IA</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<!-- Importação do WebLLM para rodar IA 100% no navegador sem chaves ou custos -->
-<script type="module">
-  try {
-    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
-    window.webllm = webllm;
-    window.webllmLoaded = true;
-  } catch(err) {
-    console.error("Falha ao importar WebLLM:", err);
-    window.webllmLoaded = false;
-    window.webllmLoadError = err.message || "Erro desconhecido ao importar módulo";
-  }
-</script>
 <style>
   :root{
     --paper:#EDF1F5; --grid:#D8E2EA; --ink:#1B2733; --ink-soft:#5B6B7A;
@@ -60,11 +48,29 @@
     border-radius:3px; background:var(--grid); color:var(--ink-soft);
   }
   .model-tag.pro{ background:rgba(232,163,61,.25); color:#8A6212; }
+  .token-card .row{
+    display:flex; justify-content:space-between; gap:10px; padding:5px 0;
+    border-top:1px dashed var(--grid); font-size:12px;
+  }
+  .token-card .row:first-of-type{ border-top:none; }
+  .token-card .row .val{ font-family:'JetBrains Mono',monospace; }
 
   .storage-warn{
     background:#FFF4F2; border:1.5px solid var(--brick); border-radius:6px;
     padding:9px 12px; font-size:11.5px; line-height:1.45; margin-bottom:10px; color:#7A2A22;
   }
+  .ai-status{
+    background:var(--white); border:1.5px solid var(--line); border-radius:6px;
+    padding:9px 12px; font-size:11.5px; line-height:1.45; margin-bottom:10px;
+    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
+  }
+  .ai-status strong{font-size:11.5px;}
+  .ai-status .ai-detail{color:var(--ink-soft);}
+  .ai-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;}
+  .ai-dot.ready{background:var(--sage);}
+  .ai-dot.error{background:var(--brick);}
+  .ai-progress{width:100%;height:5px;background:var(--grid);border-radius:99px;overflow:hidden;}
+  .ai-progress > span{display:block;height:100%;width:0%;background:var(--amber);transition:width .2s;}
 
   /* ---------- abas ---------- */
   .tabs{ display:flex; gap:4px; border-bottom:1.5px solid var(--line); margin-bottom:12px; }
@@ -184,7 +190,7 @@
     display:flex; gap:8px; line-height:1.5;
   }
   .log-line .ts{ color:#5B7085; flex-shrink:0; }
-  .tag-status{ padding:0 5px; border-radius:3px; font-size:10.5px; flex-shrink:0; height:fit-content; }
+  .tag-status{ padding:0 5px; border-radius:3px; font-size:10px; flex-shrink:0; height:fit-content; }
   .tag-ok{ background:rgba(107,144,128,.25); color:#9FC2AE; }
   .tag-pend{ background:rgba(196,69,54,.25); color:#E28A7E; }
   .tag-info{ background:rgba(232,163,61,.2); color:#F0C077; }
@@ -192,7 +198,7 @@
   /* ---------- config ---------- */
   .form-row{ display:flex; flex-direction:column; gap:4px; margin-bottom:10px; }
   .form-row label{ font-size:11.5px; color:var(--ink-soft); font-weight:500; }
-  .card{ background:var(--white); border:1.5px solid var(--line); border-radius:6px; padding:13px 14px; margin-bottom:10px; }
+  .card{ background:var(--white); border:1.5px solid var(--line); border-radius:6px; padding:13px 14px; }
   .card h3{ margin:0 0 10px; font-size:13.5px; }
   .staff-item{
     display:flex; align-items:center; gap:9px; padding:8px 0; border-top:1px dashed var(--grid); font-size:12px;
@@ -219,48 +225,14 @@
   .modal-actions .btn{ flex:1; }
   [hidden]{ display:none !important; }
 
-  /* ---------- loader erro / simulação ---------- */
-  .loader-error{ color:#E28A7E; font-size:12.5px; margin:12px 0; line-height:1.5; }
-  .loader-error code{ background:#2A3A48; padding:2px 6px; border-radius:3px; font-size:11px; }
-  .loader-actions{ display:flex; gap:8px; margin-top:12px; }
-  .loader-actions .btn{ flex:1; }
-  .sim-badge{
-    display:inline-block; font-size:10px; font-weight:600; padding:2px 8px;
-    border-radius:999px; background:rgba(196,69,54,.25); color:#E28A7E; margin-left:6px;
+  @media (max-width:430px){
+    .agents-row{ grid-template-columns:1fr; }
+    .top-actions{ width:100%; margin-left:0; }
+    select.company-select{ flex:1; min-width:0; }
   }
-  .webgpu-ok .sim-badge{ background:rgba(107,144,128,.25); color:#9FC2AE; }
-
-
-  /* ---------- carregamento da IA local ---------- */
-  #loaderOverlay{
-    position:fixed; inset:0; background:rgba(27,39,51,0.92); z-index:100;
-    display:flex; flex-direction:column; align-items:center; justify-content:center;
-    color:#FFF; padding:20px; text-align:center; font-family:'Space Grotesk',sans-serif;
-  }
-  .loader-box{ max-width:420px; width:100%; background:var(--panel); border:1.5px solid var(--panel-line); border-radius:8px; padding:24px; }
-  .loader-box h2{ margin:0 0 8px; font-size:18px; color:var(--amber); }
-  .loader-box p{ font-size:12.5px; color:#A7B6C2; line-height:1.5; margin-bottom:16px; }
-  .progress-bar{ width:100%; background:#2A3A48; border-radius:4px; height:8px; overflow:hidden; margin-bottom:12px; }
-  .progress-fill{ width:0%; background:var(--amber); height:100%; transition:width 0.2s ease; }
-  .loader-status{ font-family:'JetBrains Mono',monospace; font-size:11px; color:#7E93A5; }
 </style>
 </head>
 <body>
-
-<!-- Tela de carregamento do WebLLM (Modelo 100% Gratuito no Navegador) -->
-<div id="loaderOverlay">
-  <div class="loader-box">
-    <h2 id="loaderTitle">Carregando IA no Navegador</h2>
-    <p id="loaderDesc">O simulador roda um modelo leve inteligente diretamente na sua placa de vídeo (WebGPU), totalmente gratuito e sem gastar créditos externos.</p>
-    <div class="progress-bar" id="progressBarWrap"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="loader-status" id="loaderStatus">Verificando compatibilidade...</div>
-    <div class="loader-error" id="loaderError" hidden></div>
-    <div class="loader-actions" id="loaderActions" hidden>
-      <button class="btn" id="retryLoadBtn">Tentar de novo</button>
-      <button class="btn primary" id="simModeBtn">Usar modo simulação</button>
-    </div>
-  </div>
-</div>
 
 <div class="app">
   <div class="topbar">
@@ -269,7 +241,7 @@
       <small id="brandSub">nenhuma empresa fundada</small>
     </div>
     <div class="top-actions">
-      <div class="token-pill" id="tokenPill" hidden>0 tok · 100% Gratuito</div>
+      <div class="token-pill" id="tokenPill" hidden>0 tok · US$ 0,000</div>
       <select class="company-select" id="companySelect" hidden></select>
       <button class="btn small" id="newCompanyBtn">+ Nova empresa</button>
     </div>
@@ -277,6 +249,13 @@
 
   <div class="storage-warn" id="storageWarn" hidden>
     Salvamento indisponível nesta sessão — a empresa funciona normalmente, mas não fica guardada ao fechar.
+  </div>
+
+  <div class="ai-status" id="aiStatus">
+    <span class="ai-dot" id="aiDot"></span>
+    <strong id="aiStatusTitle">IA local pronta para carregar</strong>
+    <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
+    <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
   </div>
 
   <!-- estado vazio -->
@@ -301,9 +280,9 @@
       <canvas id="stage" width="620" height="400"></canvas>
       <label class="toggle-row">
         <input type="checkbox" id="autoToggle">
-        vida autônoma (a equipe tem ideias, pede permissão à gerente e produz sozinha — roda na sua máquina)
+        vida autônoma (a equipe tem ideias, pede permissão à gerente e produz sozinha — roda a IA local)
       </label>
-      <div class="stage-note">Toque num agente no escritório ou num card abaixo para inspecionar. Quem está com 🤔 e brilho no chão está aguardando uma decisão do modelo local.</div>
+      <div class="stage-note">Toque num agente no escritório ou num card abaixo para inspecionar. Quem está com 🤔 e brilho no chão está aguardando uma decisão real do modelo.</div>
       <div class="agents-row" id="agentsRow"></div>
       <div class="inspector" id="inspector" hidden></div>
     </section>
@@ -345,10 +324,10 @@
       <button class="btn" id="analyzeBtn">Pedir análise à gerente</button>
       <div class="card" id="analysisCard" hidden></div>
       <div class="card token-card">
-        <h3>Motor de IA <span id="motorStatus">Local</span></h3>
+        <h3>Consumo de IA</h3>
         <div id="tokenBreakdown"></div>
-        <div class="stage-note" style="margin-top:9px;" id="motorDesc">
-          Toda a simulação roda localmente na sua placa de vídeo via WebGPU, sem servidores externos e com custo zero financeiro ou de chaves de API.
+        <div class="stage-note" style="margin-top:9px;">
+          Toda a equipe e a gerente usam uma IA local leve. Os tokens exibidos são estimativas de processamento; o custo de API é US$ 0,00 porque não há chamada para serviço pago.
         </div>
       </div>
     </section>
@@ -383,179 +362,101 @@
   <div class="modal" id="modalBox"></div>
 </div>
 
-<script>
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
+
 /* ============================================================
-   Motor de IA 100% Gratuito no Navegador (WebLLM Engine)
+   IA LOCAL — tudo roda no navegador. O modelo é baixado uma vez
+   e fica em cache do navegador; nenhuma chave/API paga é usada.
    ============================================================ */
-let engine = null;
-let simMode = false;           // true = fallback sem WebGPU
-const SELECTED_MODEL = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
+const MODEL_LOCAL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
+const MODEL_BARATO = MODEL_LOCAL;
+const MODEL_GERENTE = MODEL_LOCAL;
+const NOME_CURTO = { [MODEL_LOCAL]: 'SmolLM2 360M · local' };
+const PRECO = { [MODEL_LOCAL]: { in:0, out:0 } };
 
-/* ---------- detecção de WebGPU ---------- */
-function hasWebGPU(){
-  return !!(navigator.gpu && typeof navigator.gpu.requestAdapter === 'function');
+let localPipeline = null;
+let localLoading = null;
+let aiBusy = false;
+
+function setAIStatus(title, detail, state='loading', progress=null){
+  const t=document.getElementById('aiStatusTitle');
+  const d=document.getElementById('aiStatusDetail');
+  const dot=document.getElementById('aiDot');
+  const wrap=document.getElementById('aiProgress');
+  const bar=document.getElementById('aiProgressBar');
+  if(t) t.textContent=title;
+  if(d) d.textContent=detail;
+  if(dot) dot.className='ai-dot '+(state==='ready'?'ready':state==='error'?'error':'');
+  if(wrap){ wrap.hidden = progress===null; }
+  if(bar && progress!==null) bar.style.width=Math.max(0,Math.min(100,progress))+'%';
 }
 
-/* ---------- UI do loader ---------- */
-function setLoaderError(msg, showRetry){
-  const errEl = document.getElementById('loaderError');
-  const actEl = document.getElementById('loaderActions');
-  const barEl = document.getElementById('progressBarWrap');
-  const statusEl = document.getElementById('loaderStatus');
-  const titleEl = document.getElementById('loaderTitle');
-
-  titleEl.textContent = 'Não foi possível carregar a IA local';
-  statusEl.textContent = 'Verificação concluída';
-  barEl.style.opacity = '0.3';
-  errEl.hidden = false;
-  errEl.innerHTML = msg;
-  if(showRetry) actEl.hidden = false;
+async function carregarIA(){
+  if(localPipeline) return localPipeline;
+  if(localLoading) return localLoading;
+  localLoading=(async()=>{
+    try{
+      const webgpu = !!(navigator.gpu && env.IS_WEBGPU_AVAILABLE !== false);
+      const device = webgpu ? 'webgpu' : 'wasm';
+      const dtype = webgpu ? 'q4f16' : 'q4';
+      setAIStatus('Preparando IA local', webgpu ? 'Aceleração WebGPU disponível. Primeiro uso baixa o modelo (~273 MB).' : 'WebGPU não disponível; usando WASM. Pode ficar mais lento no celular.', 'loading', 0);
+      localPipeline = await pipeline('text-generation', MODEL_LOCAL, {
+        device, dtype,
+        progress_callback: p => {
+          if(p && typeof p.progress === 'number'){
+            setAIStatus('Baixando/preparando IA local', `${p.file || 'modelo'} · ${Math.round(p.progress)}%`, 'loading', p.progress);
+          }
+        }
+      });
+      setAIStatus('IA local pronta', webgpu ? 'Rodando no seu navegador com WebGPU. Sem API e sem custo por token.' : 'Rodando no seu navegador com WASM. Sem API e sem custo por token.', 'ready', 100);
+      return localPipeline;
+    }catch(err){
+      localPipeline=null;
+      setAIStatus('Não foi possível carregar a IA local', 'Verifique a internet e recarregue a página. Nenhuma API paga foi chamada.', 'error', null);
+      console.error('Falha ao carregar IA local:',err);
+      throw err;
+    }finally{ localLoading=null; }
+  })();
+  return localLoading;
 }
 
-function hideLoader(){
-  document.getElementById('loaderOverlay').hidden = true;
+function extrairTextoGerado(result){
+  const g=result?.[0]?.generated_text;
+  if(typeof g==='string') return g.trim();
+  if(Array.isArray(g)){
+    const last=g[g.length-1];
+    return typeof last==='string' ? last.trim() : String(last?.content || '').trim();
+  }
+  return '';
 }
 
-/* ---------- inicialização ---------- */
-async function initWebLLM(){
-  const statusEl = document.getElementById('loaderStatus');
-  const fillEl = document.getElementById('progressFill');
-  const errEl = document.getElementById('loaderError');
-  const actEl = document.getElementById('loaderActions');
-
-  // Reset UI
-  errEl.hidden = true; actEl.hidden = true;
-  fillEl.style.width = '5%';
-
-  // 1) Verifica se o módulo carregou
-  if(!window.webllmLoaded || !window.webllm){
-    const importErr = window.webllmLoadError ? `<br><code>${escapeHtml(window.webllmLoadError)}</code>` : '';
-    setLoaderError(
-      `O módulo WebLLM não pôde ser importado. Isso pode ser bloqueio de rede, CORS no GitHub Pages, ou extensão do navegador.${importErr}<br><br>
-      <b>Navegadores compatíveis:</b> Chrome 113+, Edge 113+, Opera 99+ (com WebGPU ativado). Firefox e Safari ainda não suportam WebGPU.`,
-      true
-    );
-    return;
-  }
-
-  // 2) Verifica WebGPU
-  if(!hasWebGPU()){
-    setLoaderError(
-      `Seu navegador não suporta <b>WebGPU</b>.<br><br>
-      <b>Soluções:</b><br>
-      • Use <b>Chrome 113+</b> ou <b>Edge 113+</b><br>
-      • No Chrome, vá em <code>chrome://flags</code> e ative "WebGPU"<br>
-      • No Windows, atualize os drivers da placa de vídeo<br><br>
-      Você pode usar o <b>modo simulação</b> abaixo — a equipe ainda funciona, mas com respostas pré-programadas.`,
-      true
-    );
-    return;
-  }
-
-  statusEl.textContent = 'Inicializando motor local...';
-
-  try {
-    const initProgressCallback = (report) => {
-      statusEl.textContent = report.text;
-      const match = report.text.match(/(\d+)%/);
-      if(match){ fillEl.style.width = match[1] + '%'; }
-      else {
-        let w = parseFloat(fillEl.style.width) || 0;
-        if(w < 90) fillEl.style.width = (w + 2) + '%';
-      }
-    };
-
-    engine = await window.webllm.CreateMLCEngine(
-      SELECTED_MODEL,
-      { initProgressCallback: initProgressCallback }
-    );
-
-    fillEl.style.width = '100%';
-    statusEl.textContent = 'Pronto!';
-    setTimeout(hideLoader, 400);
-  } catch(err) {
-    console.error("Erro ao iniciar WebLLM:", err);
-    const errMsg = err.message || String(err);
-    setLoaderError(
-      `Erro ao iniciar o modelo:<br><code>${escapeHtml(errMsg)}</code><br><br>
-      Causas comuns:<br>
-      • Modelo não disponível no cache — tente recarregar a página<br>
-      • Memória insuficiente (o modelo precisa de ~2 GB de VRAM)<br>
-      • WebGPU desativado ou driver desatualizado<br>
-      • GitHub Pages pode bloquear cache do Service Worker em alguns casos<br><br>
-      <b>Dica:</b> abra o console (F12 → Console) para ver o erro completo.`,
-      true
-    );
-  }
-}
-
-/* ---------- fallback de simulação ---------- */
-const SIM_RESPOSTAS = {
-  fundacao: {"nome":"Café & Cria","ramo":"cafeteria criativa","missao":"Servir café com propósito e conectar pessoas","tom":"acolhedor e criativo","gerente":{"nome":"Marina"},"equipe":[{"nome":"Lucas","cargo":"barista"},{"nome":"Julia","cargo":"marketing"},{"nome":"Pedro","cargo":"estoque"}]},
-
-  ideia: {"ideia":"criar post para Instagram","tipo":"criar","alvo":"","pausa":""},
-
-  permissao: {"aprovado":true,"motivo":"boa ideia","ajuste":"","precisa_usuario":false},
-
-  delegar: {"funcionario":"a1","tarefa":"criar conteúdo","precisa_aprovacao":false},
-
-  execucao: {"resultado":"Post criado com sucesso","nome":"post-instagram","tipo":"md","vendas":0,"visitas":12,"seguidores":3,"conteudo":"# Novidade no Café & Cria!\n\nHoje lançamos nosso blend especial da semana. Venha experimentar! ☕\n\n---\nCafé & Cria — café com propósito.","cortado":false},
-
-  analise: {"leitura":"Visitas cresceram 12% esta semana. Engajamento está bom.","proxima_acao":"lançar promoção de segunda-feira"},
-
-  contratar: {"nome":"Camila","cargo":"atendente"},
-
-  escolher: {"funcionario":"a1"},
-
-  edicao: {"resultado":"arquivo atualizado","conteudo":"# Novidade no Café & Cria!\n\nHoje lançamos nosso blend especial da semana com 20% OFF. Venha experimentar! ☕\n\n---\nCafé & Cria — café com propósito.","cortado":false}
-};
-
-function simularResposta(tipo, system, userText){
-  // Tenta extrair do texto do usuário qual simulação usar
-  if(tipo === 'json'){
-    if(userText.includes('Negócio:')) return SIM_RESPOSTAS.fundacao;
-    if(system.includes('sócia-gerente') && system.includes('aprovado')) return SIM_RESPOSTAS.permissao;
-    if(system.includes('sócia-gerente') && system.includes('funcionario')) return SIM_RESPOSTAS.delegar;
-    if(system.includes('sócia-gerente') && system.includes('nome')) return SIM_RESPOSTAS.contratar;
-    if(system.includes('sócia-gerente') && system.includes('Quem')) return SIM_RESPOSTAS.escolher;
-    if(system.includes('contribuir')) return SIM_RESPOSTAS.ideia;
-    if(system.includes('números')) return SIM_RESPOSTAS.analise;
-    return SIM_RESPOSTAS.ideia;
-  }
-  if(tipo === 'block'){
-    if(system.includes('editar')) return SIM_RESPOSTAS.edicao;
-    return SIM_RESPOSTAS.execucao;
-  }
-  return null;
+function estimarUso(system,userText,text){
+  return { input_tokens:Math.ceil((String(system).length+String(userText).length)/4), output_tokens:Math.ceil(String(text).length/4) };
 }
 
 async function chamarAPI(system, userText, maxTokens, model, agentId){
-  if(simMode){
-    await sleep(800 + Math.random()*1200);
-    const fake = simularResposta('block', system, userText);
-    const text = fake ? (fake.conteudo || JSON.stringify(fake)) : 'Simulação: tarefa concluída.';
-    contabilizar({ prompt_tokens: 120, completion_tokens: 180 }, agentId);
-    return { text, cortado: false };
-  }
-
-  if(!engine) throw new Error("Motor de IA local ainda não inicializado.");
-
-  const messages = [
-    { role: "system", content: system },
-    { role: "user", content: userText }
-  ];
-
-  const reply = await engine.chat.completions.create({
-    messages: messages,
-    temperature: 0.7,
-    max_tokens: maxTokens || 400,
-  });
-
-  const usage = reply.usage || { prompt_tokens: 50, completion_tokens: 50 };
-  contabilizar(usage, agentId);
-
-  const text = reply.choices[0].message.content || '';
-  return { text, cortado: reply.choices[0].finish_reason === 'length' };
+  if(aiBusy) await new Promise(r=>setTimeout(r,80));
+  aiBusy=true;
+  try{
+    const pipe=await carregarIA();
+    const limite=Math.min(Number(maxTokens)||180, maxTokens>=1000 ? 900 : 420);
+    const messages=[
+      {role:'system',content:String(system||'')},
+      {role:'user',content:String(userText||'')}
+    ];
+    setAIStatus('IA trabalhando…','A decisão está sendo calculada no aparelho.', 'loading', null);
+    const result=await pipe(messages,{
+      max_new_tokens:limite,
+      do_sample:false,
+      temperature:0.15,
+      return_full_text:false
+    });
+    const text=extrairTextoGerado(result);
+    contabilizar(MODEL_LOCAL, estimarUso(system,userText,text), agentId);
+    setAIStatus('IA local pronta','Roda neste navegador; sem chave de API e sem custo por token.', 'ready', 100);
+    return {text,cortado:text.length>=limite*3.5};
+  }finally{ aiBusy=false; }
 }
 
 // Conserta JSON truncado ou com quebras de linha cruas dentro das aspas.
@@ -567,12 +468,11 @@ function repararJSON(bruto){
   let saida = '', dentro = false, escape = false;
   for(const c of t){
     if(escape){ saida += c; escape = false; continue; }
-    if(c === '\'){ saida += c; escape = true; continue; }
+    if(c === '\\'){ saida += c; escape = true; continue; }
     if(c === '"'){ dentro = !dentro; saida += c; continue; }
-    if(dentro && c === '
-'){ saida += '\n'; continue; }
-    if(dentro && c === ''){ continue; }
-    if(dentro && c === '	'){ saida += '\t'; continue; }
+    if(dentro && c === '\n'){ saida += '\\n'; continue; }
+    if(dentro && c === '\r'){ continue; }
+    if(dentro && c === '\t'){ saida += '\\t'; continue; }
     saida += c;
   }
   try{ return JSON.parse(saida); }catch(e){}
@@ -588,13 +488,6 @@ function repararJSON(bruto){
 
 async function askAI(system, userText, maxTokens, model, agentId){
   try{
-    if(simMode){
-      await sleep(600 + Math.random()*800);
-      const out = simularResposta('json', system, userText);
-      if(!out) console.warn('Simulação não encontrou resposta para:', userText.slice(0,100));
-      contabilizar({ prompt_tokens: 80, completion_tokens: 120 }, agentId);
-      return out;
-    }
     const { text } = await chamarAPI(system, userText, maxTokens, model, agentId);
     const out = repararJSON(text);
     if(!out) console.warn('Resposta ilegivel da IA:', text.slice(0,200));
@@ -602,30 +495,18 @@ async function askAI(system, userText, maxTokens, model, agentId){
   }catch(err){ console.error('IA falhou:', err); return null; }
 }
 
+/* Conteudo longo nao usa JSON: aspas, quebras de linha e codigo dentro do
+   arquivo quebravam o parse. O modelo responde em blocos de texto simples. */
 async function askAIBlock(system, userText, maxTokens, model, agentId){
   try{
-    if(simMode){
-      await sleep(700 + Math.random()*1000);
-      const out = simularResposta('block', system, userText);
-      contabilizar({ prompt_tokens: 100, completion_tokens: 250 }, agentId);
-      return out || {
-        resultado: 'Tarefa simulada', nome: 'arquivo-simulado', tipo: 'md',
-        vendas: Math.floor(Math.random()*5), visitas: Math.floor(Math.random()*20),
-        seguidores: Math.floor(Math.random()*3), conteudo: '# Simulação
-
-Este arquivo foi gerado no modo simulação (sem WebGPU).',
-        cortado: false, bruto: ''
-      };
-    }
     const { text, cortado } = await chamarAPI(system, userText, maxTokens, model, agentId);
     const limpo = text.replace(/```[a-z]*/gi,'').trim();
     const campo = k => {
-      const m = limpo.match(new RegExp('^'+k+':\s*(.*)$','mi'));
+      const m = limpo.match(new RegExp('^'+k+':\\s*(.*)$','mi'));
       return m ? m[1].trim() : '';
     };
     const corte = limpo.indexOf('---');
-    const conteudo = corte >= 0 ? limpo.slice(corte+3).replace(/^
-/,'') : '';
+    const conteudo = corte >= 0 ? limpo.slice(corte+3).replace(/^\n/,'') : '';
     return {
       resultado: campo('RESULTADO'),
       nome: campo('NOME'), tipo: campo('TIPO').toLowerCase(),
@@ -644,25 +525,290 @@ TIPO: <md|txt|html|css|js|csv|json>
 ---
 <aqui o conteudo completo do arquivo, quantas linhas forem precisas>`;
 
-function contabilizar(usage, agentId){
+function contabilizar(model, usage, agentId){
   const emp = empresaAtual(); if(!emp || !usage) return;
-  if(!emp.tokens) emp.tokens = { entrada:0, saida:0, chamadas:0 };
-  const ent = usage.prompt_tokens || 0, sai = usage.completion_tokens || 0;
+  if(!emp.tokens) emp.tokens = { entrada:0, saida:0, chamadas:0, custo:0 };
+  const ent = usage.input_tokens || 0, sai = usage.output_tokens || 0;
+  const p = PRECO[model] || PRECO[MODEL_BARATO];
+  const custo = (ent/1e6)*p.in + (sai/1e6)*p.out;
 
   emp.tokens.entrada += ent; emp.tokens.saida += sai;
-  emp.tokens.chamadas += 1;
+  emp.tokens.chamadas += 1;  emp.tokens.custo += custo;
 
   if(agentId){
     const f = emp.equipe.find(x => x.id === agentId);
     if(f){
-      if(!f.tokens) f.tokens = { entrada:0, saida:0, chamadas:0 };
+      if(!f.tokens) f.tokens = { entrada:0, saida:0, chamadas:0, custo:0 };
       f.tokens.entrada += ent; f.tokens.saida += sai;
-      f.tokens.chamadas += 1;
+      f.tokens.chamadas += 1;  f.tokens.custo += custo;
     }
   }
   renderTokens(); saveDB();
 }
 function fmtNum(n){ return n >= 1000 ? (n/1000).toFixed(1).replace('.',',')+'k' : String(n); }
+function fmtCusto(c){ return 'US$ ' + (c < 0.01 ? c.toFixed(4) : c.toFixed(3)); }
+function modeloDe(rt){ return rt.papel === 'gerente' ? MODEL_GERENTE : MODEL_BARATO; }
+
+/* ============================================================
+   Estado / persistência
+   ============================================================ */
+const STORE_KEY = 'empresas-all';
+let DB = { empresas: [], atual: null };
+let saveTimer = null;
+let storageOK = true;
+let storageWarned = false;
+
+function warnNoStorage(){
+  if(storageWarned) return;
+  storageWarned=true;
+  const el=document.getElementById('storageWarn');
+  if(el) el.hidden=false;
+}
+
+async function loadDB(){
+  try{
+    const raw=localStorage.getItem(STORE_KEY);
+    if(raw) DB=JSON.parse(raw);
+  }catch(e){ storageOK=false; warnNoStorage(); }
+  if(!DB.empresas) DB.empresas=[];
+  if(!DB.logGlobal) DB.logGlobal=[];
+}
+
+function saveDB(){
+  if(!storageOK) return;
+  clearTimeout(saveTimer);
+  saveTimer=setTimeout(()=>{
+    try{ localStorage.setItem(STORE_KEY,JSON.stringify(DB)); }
+    catch(e){ storageOK=false; warnNoStorage(); }
+  },300);
+}
+
+function empresaAtual(){ return DB.empresas.find(e => e.id === DB.atual) || null; }
+
+const PALETA = ['#E8A33D','#3E6E8E','#B34C7A','#5C8A5C','#8A6BAF','#C4653D','#3E8E86','#9A5B5B'];
+
+/* ============================================================
+   Escritório — layout, sprites, física
+   ============================================================ */
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+const SPEED = 70;
+
+const FURNITURE = {
+  eat:  {pos:{x:150,y:330}, icon:'🍎'},
+  drink:{pos:{x:310,y:330}, icon:'💧'},
+  think:{pos:{x:470,y:330}, icon:'💭'},
+};
+const ACAO_KEY = { comer:'eat', beber:'drink', pensar:'think' };
+
+let runtime = [];           // agentes vivos em memória (posição, estado)
+let selectedAgentId = null;
+let autonomyToken = 0;      // invalida loops de empresas anteriores
+
+function deskPos(index){
+  const perRow = 4, gapX = 140, x0 = 90, y0 = 90, gapY = 118;
+  const row = Math.floor(index/perRow), col = index%perRow;
+  return { x: x0 + col*gapX, y: y0 + row*gapY };
+}
+function seatOf(rt){ return { x: rt.desk.x, y: rt.desk.y + 56 }; }
+
+function buildRuntime(){
+  const emp = empresaAtual();
+  autonomyToken++;
+  const token = autonomyToken;
+  runtime = (emp ? emp.equipe : []).map((f, i) => {
+    const desk = deskPos(i);
+    const rt = {
+      id: f.id, name: f.nome, papel: f.papel, cargo: f.cargo, color: f.cor,
+      desk, pos:{ x: desk.x, y: desk.y + 56 }, target:null, state:'sitting',
+      icon:null, bubbleText:null, forced:false, currentTask:null, thinking:false,
+    };
+    return rt;
+  });
+  runtime.forEach(rt => autonomyLoop(rt, token));
+  renderAgentCards();
+}
+function rtById(id){ return runtime.find(r => r.id === id); }
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+function moveTo(rt, target){
+  rt.state = 'walking'; rt.target = target;
+  return new Promise(res => { rt._resolve = res; });
+}
+
+let lastTs = performance.now();
+function physics(now){
+  const dt = Math.min((now-lastTs)/1000, .05); lastTs = now;
+  for(const rt of runtime){
+    if(rt.state === 'walking' && rt.target){
+      const dx = rt.target.x - rt.pos.x, dy = rt.target.y - rt.pos.y;
+      const d = Math.hypot(dx,dy), step = SPEED*dt;
+      if(d <= step){
+        rt.pos = {...rt.target}; rt.target = null;
+        if(rt._resolve){ const r = rt._resolve; rt._resolve = null; r(); }
+      } else { rt.pos.x += dx/d*step; rt.pos.y += dy/d*step; }
+    }
+  }
+}
+
+/* ---------- vida autônoma ----------
+   Todo ciclo o agente se faz a mesma pergunta: "de que forma eu posso,
+   no presente momento, contribuir com a empresa?". Se tiver uma ideia,
+   leva até a gerente e pede permissão. Só produz se ela aprovar.        */
+
+function contextoDaEmpresa(){
+  const emp = empresaAtual(); if(!emp) return '';
+  const arqs = (emp.arquivos||[]).slice(0,6).map(f => f.nome).join(', ') || 'nenhum';
+  const ultimos = (emp.log||[]).slice(-4).map(l => l.text).join(' | ') || 'nada ainda';
+  const m = emp.metricas;
+  return `Empresa: ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Arquivos existentes: ${arqs}. Últimos acontecimentos: ${ultimos}. Números: ${m.vendas} vendas, ${m.visitas} visitas, ${m.seguidores} seguidores.`;
+}
+
+async function pensarContribuicao(rt){
+  const emp = empresaAtual(); if(!emp) return null;
+  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Responda SOMENTE JSON: {"ideia":"o que você quer fazer agora, até 12 palavras","tipo":"criar|editar|tarefa|pausa","alvo":"nome exato do arquivo, só se tipo=editar","pausa":"comer|beber|pensar"}. Use tipo=pausa se no momento a melhor coisa for descansar; nesse caso preencha "pausa".`;
+  const usr = `${contextoDaEmpresa()}\nDe que forma você pode, no presente momento, contribuir com a empresa? Escolha algo dentro do seu cargo e que ainda não foi feito.`;
+  return await askAI(sys, usr, 130, modeloDe(rt), rt.id);
+}
+
+async function pedirPermissao(rt, ideia, manager){
+  const emp = empresaAtual();
+  const sys = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Um membro da equipe pede permissão para agir. Responda SOMENTE JSON: {"aprovado":true|false,"motivo":"até 8 palavras","ajuste":"correção de rumo, ou vazio","precisa_usuario":true|false}. precisa_usuario=true só se envolver gasto real de dinheiro ou publicação pública irreversível. Recuse ideias repetidas, fora do cargo da pessoa ou que não ajudem agora.`;
+  const usr = `${contextoDaEmpresa()}\n${rt.name} (${rt.cargo}) propõe: ${ideia}`;
+  return await askAI(sys, usr, 120, MODEL_GERENTE, manager.id);
+}
+
+async function executarIdeia(rt, plano){
+  const emp = empresaAtual();
+
+  if(plano.tipo === 'editar'){
+    const alvo = (emp.arquivos||[]).find(f => f.nome === plano.alvo)
+              || (emp.arquivos||[]).find(f => plano.alvo && f.nome.includes(plano.alvo));
+    if(alvo){ await aplicarEdicaoArquivo(alvo.id, plano.ideia, rt.id); return; }
+    plano.tipo = 'criar'; // arquivo citado não existe: cria em vez de editar
+  }
+
+  rt.state = 'acting'; rt.icon = plano.tipo === 'criar' ? '📄' : '📝'; rt.thinking = true;
+  rt.currentTask = plano.ideia;
+
+  const pedeArquivo = plano.tipo === 'criar';
+  const sys = pedeArquivo
+    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Produza o material de verdade, pronto para uso. ${FORMATO_ARQUIVO}`
+    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Responda EXATAMENTE neste formato, sem markdown:
+RESULTADO: <o que voce fez, ate 14 palavras>
+VENDAS: <numero>
+VISITAS: <numero>
+SEGUIDORES: <numero>`;
+  const out = await askAIBlock(sys, plano.ideia, pedeArquivo ? 2200 : 150, MODEL_BARATO, rt.id);
+
+  rt.thinking = false; rt.icon = null; rt.currentTask = null;
+  if(!out || (!out.resultado && !out.conteudo.trim())){
+    addLog(`${rt.name} tentou "${plano.ideia}" mas não concluiu.`, 'pend', rt.id); return;
+  }
+
+  const m = emp.metricas;
+  m.vendas += out.vendas; m.visitas += out.visitas;
+  m.seguidores += out.seguidores; m.tarefas += 1;
+
+  if(pedeArquivo && out.conteudo.trim()) salvarArquivo({ nome: out.nome, tipo: out.tipo, conteudo: out.conteudo }, rt);
+  addLog(`${rt.name} → ${out.resultado || plano.ideia}`, 'ok', rt.id);
+  renderMetrics();
+}
+
+async function fazerPausa(rt, tipo){
+  const key = ACAO_KEY[tipo] || 'think';
+  const spot = FURNITURE[key];
+  await moveTo(rt, spot.pos);
+  rt.state = 'acting'; rt.icon = spot.icon;
+  await sleep(key==='eat' ? 3000 : key==='drink' ? 1800 : 3200);
+  rt.icon = null;
+  await moveTo(rt, seatOf(rt));
+  rt.state = 'sitting';
+}
+
+async function autonomyLoop(rt, token){
+  while(token === autonomyToken){
+    if(rt.forced){ await sleep(400); continue; }
+    rt.state = 'sitting'; rt.icon = null;
+    await sleep(22000 + Math.floor(Math.random()*14000)); // só o intervalo é temporizado
+    if(token !== autonomyToken) return;
+    if(rt.forced || !document.getElementById('autoToggle').checked) continue;
+
+    const emp = empresaAtual(); if(!emp) continue;
+    const manager = runtime.find(r => r.papel === 'gerente');
+    rt.forced = true;
+
+    try{
+      // 1. pensa em como contribuir
+      rt.thinking = true; rt.icon = '🤔';
+      const plano = await pensarContribuicao(rt);
+      rt.thinking = false; rt.icon = null;
+      if(token !== autonomyToken) return;
+      if(!plano || !plano.ideia){ rt.forced = false; continue; }
+
+      if(plano.tipo === 'pausa'){
+        addLog(`${rt.name} fez uma pausa: ${plano.pausa || 'pensar'}`, 'info', rt.id);
+        await fazerPausa(rt, plano.pausa);
+        rt.forced = false; continue;
+      }
+
+      // 2. a própria gerente não pede permissão a ninguém
+      if(rt.papel === 'gerente'){
+        addLog(`${rt.name} decidiu por conta própria: ${plano.ideia}`, 'info', rt.id);
+        await executarIdeia(rt, plano);
+        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
+      }
+
+      // 3. leva a ideia até a mesa da gerente
+      if(!manager){ rt.forced = false; continue; }
+      await moveTo(rt, { x: seatOf(manager).x - 40, y: seatOf(manager).y });
+      if(token !== autonomyToken) return;
+      rt.state = 'talking';
+      rt.bubbleText = plano.ideia.length > 36 ? plano.ideia.slice(0,36)+'…' : plano.ideia;
+      addLog(`${rt.name} pediu permissão: "${plano.ideia}"`, 'info', rt.id);
+
+      manager.thinking = true; manager.icon = '🤔';
+      const resposta = await pedirPermissao(rt, plano.ideia, manager);
+      manager.thinking = false; manager.icon = null;
+      rt.bubbleText = null;
+      if(token !== autonomyToken) return;
+
+      const aprovado = resposta ? resposta.aprovado : false;
+      manager.state = 'talking';
+      manager.bubbleText = aprovado ? 'Pode ir ✓' : 'Agora não';
+      await sleep(1400);
+      manager.bubbleText = null; manager.state = 'sitting';
+
+      if(!aprovado){
+        addLog(`${manager.name} negou a ${rt.name}: ${resposta && resposta.motivo ? resposta.motivo : 'sem justificativa'}`, 'pend', rt.id);
+        await moveTo(rt, seatOf(rt));
+        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
+      }
+
+      if(resposta.ajuste) plano.ideia = `${plano.ideia} (ajuste da gerente: ${resposta.ajuste})`;
+      addLog(`${manager.name} autorizou ${rt.name}: ${resposta.motivo || 'aprovado'}`, 'ok', manager.id);
+
+      // 4. se envolve custo real, o usuário decide antes
+      if(resposta.precisa_usuario){
+        emp.aprovacoes.push({ id:'p'+Date.now(), quem: rt.name, texto: plano.ideia });
+        addLog(`${rt.name} → "${plano.ideia}" aguarda a SUA aprovação`, 'pend', rt.id);
+        renderApprovals();
+        await moveTo(rt, seatOf(rt));
+        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
+      }
+
+      // 5. volta pra mesa e produz
+      await moveTo(rt, seatOf(rt));
+      if(token !== autonomyToken) return;
+      await executarIdeia(rt, plano);
+      rt.state = 'sitting';
+    } finally {
+      rt.forced = false;
+      saveDB();
+    }
+  }
+}
+
 /* ============================================================
    Log
    ============================================================ */
@@ -745,7 +891,7 @@ function foundCompanyFlow(){
     const sys = `Você monta empresas. Responda SOMENTE JSON:
 {"nome":"nome curto da empresa","ramo":"ramo em até 4 palavras","missao":"uma frase","tom":"tom de voz em até 5 palavras","gerente":{"nome":"primeiro nome"},"equipe":[{"nome":"primeiro nome","cargo":"cargo em até 5 palavras"}]}
 A equipe deve ter 3 funcionários adequados ao negócio (não inclua a gerente nela).`;
-    const out = await askAI(sys, `Negócio: ${idea}`, 400);
+    const out = await askAI(sys, `Negócio: ${idea}`, 400, MODEL_GERENTE);
     if(!out){
       document.getElementById('modalBox').innerHTML = `
         <h2>Não deu certo</h2>
@@ -769,7 +915,7 @@ A equipe deve ter 3 funcionários adequados ao negócio (não inclua a gerente n
       id, nome: out.nome || 'Nova Empresa', ramo: out.ramo || idea,
       missao: out.missao || '', tom: out.tom || 'direto e amigável',
       equipe, log: [], metricas:{ vendas:0, visitas:0, seguidores:0, tarefas:0 },
-      aprovacoes: [], analise: null, arquivos: [], tokens:{ entrada:0, saida:0, chamadas:0 },
+      aprovacoes: [], analise: null, arquivos: [], tokens:{ entrada:0, saida:0, chamadas:0, custo:0 },
     });
     DB.atual = id;
     saveDB(); closeModal(); renderAll();
@@ -792,7 +938,7 @@ async function runCycle(order){
   manager.forced = true; manager.thinking = true; manager.icon = '🤔';
   const lista = funcs.map(f => `${f.id}=${f.name} (${f.cargo})`).join('; ');
   const sysD = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Equipe: ${lista}. Responda SOMENTE JSON: {"funcionario":"<id>","tarefa":"instrução objetiva até 12 palavras","precisa_aprovacao":true|false}. precisa_aprovacao=true só se houver gasto real de dinheiro ou publicação pública irreversível.`;
-  const del = await askAI(sysD, order, 120, null, manager.id) || {funcionario: funcs[0].id, tarefa: order, precisa_aprovacao:false};
+  const del = await askAI(sysD, order, 120, MODEL_GERENTE, manager.id) || {funcionario: funcs[0].id, tarefa: order, precisa_aprovacao:false};
   manager.thinking = false; manager.icon = null;
 
   const emp2 = rtById(del.funcionario) || funcs[0];
@@ -815,7 +961,7 @@ NOME: <nome-do-arquivo, ou "nenhum" se a tarefa nao produz arquivo>
 TIPO: <md|txt|html|css|js|csv|json, ou vazio>
 ---
 <conteudo completo do arquivo, se houver; deixe vazio se nao houver>`;
-  const exec = await askAIBlock(sysE, del.tarefa, 1600, null, emp2.id) ||
+  const exec = await askAIBlock(sysE, del.tarefa, 1600, MODEL_BARATO, emp2.id) ||
     { resultado:'Tarefa concluída.', vendas:0, visitas:0, seguidores:0, nome:'nenhum', tipo:'', conteudo:'' };
   const temArquivo = exec.conteudo && exec.conteudo.trim() && exec.nome && !/^nenhum$/i.test(exec.nome);
   if(temArquivo) salvarArquivo({ nome: exec.nome, tipo: exec.tipo, conteudo: exec.conteudo }, emp2);
@@ -846,7 +992,7 @@ TIPO: <md|txt|html|css|js|csv|json, ou vazio>
 }
 
 /* ============================================================
-   Análise de métricas
+   Análise de métricas (decidida pela IA)
    ============================================================ */
 async function analyzeMetrics(){
   const emp = empresaAtual(); if(!emp) return;
@@ -854,12 +1000,12 @@ async function analyzeMetrics(){
   const card = document.getElementById('analysisCard');
   const btn = document.getElementById('analyzeBtn');
   btn.disabled = true;
-  card.hidden = false; card.textContent = simMode ? 'Gerando análise simulada...' : 'A gerente está analisando os números...';
+  card.hidden = false; card.textContent = 'A gerente está analisando os números...';
   if(manager){ manager.thinking = true; manager.icon = '📊'; }
 
   const m = emp.metricas;
   const sys = `Você é ${manager ? manager.name : 'a gerente'}, sócia-gerente da ${emp.nome} (${emp.ramo}). Responda SOMENTE JSON: {"leitura":"o que os números dizem, até 25 palavras","proxima_acao":"uma ação concreta, até 12 palavras"}.`;
-  const out = await askAI(sys, `Vendas ${m.vendas}, visitas ${m.visitas}, seguidores ${m.seguidores}, tarefas concluídas ${m.tarefas}.`, 180, null, manager?.id);
+  const out = await askAI(sys, `Vendas ${m.vendas}, visitas ${m.visitas}, seguidores ${m.seguidores}, tarefas concluídas ${m.tarefas}.`, 180, MODEL_GERENTE, manager?.id);
 
   if(manager){ manager.thinking = false; manager.icon = null; }
   btn.disabled = false;
@@ -890,7 +1036,7 @@ function hireFlow(){
     if(!need) return;
     document.getElementById('modalBox').innerHTML = `<h2>Contratando...</h2><div class="msub">A gerente está escolhendo a pessoa certa.</div>`;
     const sys = `Você é a sócia-gerente da ${emp.nome} (${emp.ramo}). Responda SOMENTE JSON: {"nome":"primeiro nome","cargo":"cargo em até 5 palavras"}.`;
-    const out = await askAI(sys, `Necessidade: ${need}`, 80);
+    const out = await askAI(sys, `Necessidade: ${need}`, 80, MODEL_GERENTE);
     if(!out){ closeModal(); addLog('Contratação falhou ao consultar o modelo.', 'pend'); return; }
     const novo = {
       id:'a'+Date.now(), nome:out.nome, papel:'func', cargo:out.cargo,
@@ -912,7 +1058,6 @@ function renderAll(){
   const sel = document.getElementById('companySelect');
   sel.hidden = DB.empresas.length < 2;
   sel.innerHTML = DB.empresas.map(e => `<option value="${e.id}" ${e.id===DB.atual?'selected':''}>${escapeHtml(e.nome)}</option>`).join('');
-
   if(!emp){
     document.getElementById('brandName').textContent = 'Escritório';
     document.getElementById('brandSub').textContent = 'nenhuma empresa fundada';
@@ -950,7 +1095,7 @@ function renderAgentCards(){
       <div class="ac-avatar" style="background:${rt.color}">${escapeHtml(rt.name[0])}</div>
       <div class="ac-body">
         <div class="ac-name">${escapeHtml(rt.name)} <span class="ac-role">· ${escapeHtml(rt.cargo)}</span>
-          <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?'Gerente Local':'Equipe Local'}</span></div>
+          <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></div>
         <div class="ac-status" id="status-${rt.id}">—</div>
       </div>`;
     card.onclick = () => { selectedAgentId = rt.id; renderInspector(); };
@@ -958,7 +1103,7 @@ function renderAgentCards(){
   });
 }
 function statusLabel(rt){
-  if(rt.thinking) return 'pensando (IA local)...';
+  if(rt.thinking) return 'pensando (consultando a IA)...';
   if(rt.state === 'walking') return 'andando pelo escritório';
   if(rt.state === 'talking') return `falando: "${rt.bubbleText||''}"`;
   if(rt.state === 'acting'){
@@ -998,8 +1143,8 @@ function renderInspector(){
     <div class="role">${escapeHtml(rt.cargo)} · ${escapeHtml(emp.nome)}</div>
     <div class="field"><b>Estado:</b> ${escapeHtml(statusLabel(rt))}</div>
     <div class="field"><b>Tarefa atual:</b> ${escapeHtml(rt.currentTask || '— nenhuma —')}</div>
-    <div class="field"><b>Modelo:</b> <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?'Gerente Local':'Equipe Local'}</span></div>
-    <div class="field"><b>Consumo:</b> ${f && f.tokens ? `${fmtNum(f.tokens.entrada+f.tokens.saida)} tokens processados` : 'nenhuma chamada ainda'}</div>
+    <div class="field"><b>Modelo:</b> <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></div>
+    <div class="field"><b>Consumo:</b> ${f && f.tokens ? `${fmtNum(f.tokens.entrada+f.tokens.saida)} tokens em ${f.tokens.chamadas} chamadas · ${fmtCusto(f.tokens.custo)}` : 'nenhuma chamada ainda'}</div>
     <div class="field"><b>Últimos eventos:</b></div>
     ${(f && f.historico.length) ? f.historico.map(h=>`<div class="hist-item">${h.ts} — ${escapeHtml(h.text)}</div>`).join('') : '<div class="hist-item">sem eventos ainda</div>'}`;
   document.getElementById('closeInspector').onclick = () => { selectedAgentId = null; renderInspector(); };
@@ -1084,7 +1229,7 @@ async function pedirEntregavel(pedido){
     const lista = funcs.map(f => `${f.id}=${f.name} (${f.cargo})`).join('; ');
     const esc = await askAI(
       `Você é ${manager.name}, sócia-gerente da ${emp.nome}. Equipe: ${lista}. Responda SOMENTE JSON: {"funcionario":"<id>"}.`,
-      `Quem produz melhor isto: ${pedido}`, 40, null, manager.id);
+      `Quem produz melhor isto: ${pedido}`, 40, MODEL_GERENTE, manager.id);
     manager.thinking = false; manager.icon = null; manager.forced = false;
     alvo = rtById(esc && esc.funcionario) || funcs[0];
   }
@@ -1094,7 +1239,7 @@ async function pedirEntregavel(pedido){
   alvo.state = 'acting'; alvo.icon = '📄'; alvo.thinking = true;
 
   const sys = `Você é ${alvo.name}, ${alvo.cargo} da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Tom da marca: ${emp.tom}. Produza o material pedido de verdade, pronto para uso. ${FORMATO_ARQUIVO}`;
-  const out = await askAIBlock(sys, pedido, 2500, null, alvo.id);
+  const out = await askAIBlock(sys, pedido, 2500, MODEL_BARATO, alvo.id);
 
   alvo.thinking = false; alvo.icon = null; alvo.currentTask = null;
   const ok = out && out.conteudo.trim();
@@ -1150,7 +1295,7 @@ async function aplicarEdicaoArquivo(fileId, instrucao, escolhaId){
     const lista = funcs.map(x => `${x.id}=${x.name} (${x.cargo})`).join('; ');
     const esc = await askAI(
       `Você é ${manager.name}, sócia-gerente da ${emp.nome}. Equipe: ${lista}. Responda SOMENTE JSON: {"funcionario":"<id>"}.`,
-      `Quem deve editar o arquivo "${f.nome}" para: ${instrucao}`, 40, null, manager.id);
+      `Quem deve editar o arquivo "${f.nome}" para: ${instrucao}`, 40, MODEL_GERENTE, manager.id);
     manager.thinking = false; manager.icon = null; manager.forced = false;
     alvo = rtById(esc && esc.funcionario) || funcs[0];
   }
@@ -1169,7 +1314,7 @@ RESULTADO: <o que mudou, ate 12 palavras>
 ${f.conteudo}
 
 ALTERAÇÃO PEDIDA: ${instrucao}`;
-  const out = await askAIBlock(sys, usr, 2500, null, alvo.id);
+  const out = await askAIBlock(sys, usr, 2500, MODEL_BARATO, alvo.id);
 
   alvo.thinking = false; alvo.icon = null; alvo.currentTask = null;
   alvo.state = 'talking'; alvo.bubbleText = (out && out.conteudo.trim()) ? 'Arquivo atualizado ✓' : 'Não consegui editar';
@@ -1195,21 +1340,20 @@ function renderTokens(){
   const pill = document.getElementById('tokenPill');
   const box = document.getElementById('tokenBreakdown');
   if(!emp){ if(pill) pill.hidden = true; return; }
-  const t = emp.tokens || { entrada:0, saida:0, chamadas:0 };
+  const t = emp.tokens || { entrada:0, saida:0, chamadas:0, custo:0 };
   const total = t.entrada + t.saida;
-  const modoLabel = simMode ? 'SIMULAÇÃO' : 'GRATUITO LOCAL';
-  if(pill){ pill.hidden = false; pill.textContent = `${fmtNum(total)} tok · ${modoLabel}`; }
+  if(pill){ pill.hidden = false; pill.textContent = `${fmtNum(total)} tok · ${fmtCusto(t.custo)}`; }
   if(!box) return;
 
   const linhas = [
-    `<div class="row"><span>Total de chamadas locais</span><span class="val">${t.chamadas}</span></div>`,
+    `<div class="row"><span>Total de chamadas</span><span class="val">${t.chamadas}</span></div>`,
     `<div class="row"><span>Tokens de entrada</span><span class="val">${fmtNum(t.entrada)}</span></div>`,
     `<div class="row"><span>Tokens de saída</span><span class="val">${fmtNum(t.saida)}</span></div>`,
-    `<div class="row"><span><b>Custo financeiro</b></span><span class="val"><b>US$ 0,00 (100% Local)</b></span></div>`,
+    `<div class="row"><span><b>Custo estimado</b></span><span class="val"><b>${fmtCusto(t.custo)}</b></span></div>`,
   ];
   const porAgente = emp.equipe.filter(f => f.tokens && f.tokens.chamadas).map(f => {
     const pro = f.papel === 'gerente';
-    return `<div class="row"><span>${escapeHtml(f.nome)} <span class="model-tag ${pro?'pro':''}">${pro?'Gerente':'Equipe'}</span></span><span class="val">${fmtNum(f.tokens.entrada+f.tokens.saida)} tok</span></div>`;
+    return `<div class="row"><span>${escapeHtml(f.nome)} <span class="model-tag ${pro?'pro':''}">${pro?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></span><span class="val">${fmtNum(f.tokens.entrada+f.tokens.saida)} tok · ${fmtCusto(f.tokens.custo)}</span></div>`;
   });
   box.innerHTML = linhas.join('') +
     (porAgente.length ? `<div class="row" style="border-top:1.5px solid var(--grid);margin-top:4px;"><span><b>Por pessoa</b></span><span></span></div>` + porAgente.join('') : '');
@@ -1257,7 +1401,7 @@ function renderStaff(){
   document.getElementById('staffList').innerHTML = emp.equipe.map(f => `
     <div class="staff-item">
       <div class="ac-avatar" style="background:${f.cor}">${escapeHtml(f.nome[0])}</div>
-      <div><b>${escapeHtml(f.nome)}</b> <span class="model-tag ${f.papel==='gerente'?'pro':''}">${f.papel==='gerente'?'Gerente':'Equipe'}</span><div class="ac-role">${escapeHtml(f.cargo)}</div></div>
+      <div><b>${escapeHtml(f.nome)}</b> <span class="model-tag ${f.papel==='gerente'?'pro':''}">${f.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span><div class="ac-role">${escapeHtml(f.cargo)}</div></div>
       ${f.papel==='func' ? `<div style="margin-left:auto"><button class="btn small danger" data-fire="${f.id}">Demitir</button></div>` : ''}
     </div>`).join('');
   document.querySelectorAll('[data-fire]').forEach(b => b.onclick = () => {
@@ -1304,7 +1448,7 @@ function drawFurniture(){
   ctx.beginPath(); ctx.arc(t.x+34,yBase-4,7,0,Math.PI*2); ctx.fillStyle='#6B9080'; ctx.fill();
   ctx.beginPath(); ctx.moveTo(t.x+34,yBase-24); ctx.lineTo(t.x+27,yBase-10); ctx.lineTo(t.x+41,yBase-10);
   ctx.closePath(); ctx.fill();
-  
+  // sincroniza destinos com o piso atual
   FURNITURE.eat.pos.y = yBase; FURNITURE.drink.pos.y = yBase; FURNITURE.think.pos.y = yBase;
 }
 function drawSprite(rt, now){
@@ -1361,6 +1505,7 @@ function render(now){
 }
 function loop(now){ physics(now); render(now); requestAnimationFrame(loop); }
 
+/* clique no canvas seleciona agente */
 canvas.addEventListener('click', e => {
   const r = canvas.getBoundingClientRect();
   const scale = canvas.width / r.width;
@@ -1399,7 +1544,7 @@ document.querySelectorAll('.scope-btn').forEach(b => b.onclick = () => {
 document.getElementById('clearGlobalBtn').onclick = () => {
   openModal(`
     <h2>Limpar histórico global?</h2>
-    <div class="msub">Apaga o log de todas as empresas. Os logs individuais continuam intactos.</div>
+    <div class="msub">Apaga o log de todas as empresas. Os logs individuais de cada empresa continuam intactos.</div>
     <div class="modal-actions">
       <button class="btn" id="cancelClear">Cancelar</button>
       <button class="btn primary danger" id="confirmClear">Limpar</button>
@@ -1417,7 +1562,6 @@ document.getElementById('deliverableInput').addEventListener('keydown', e => {
 });
 document.getElementById('analyzeBtn').onclick = analyzeMetrics;
 document.getElementById('hireBtn').onclick = hireFlow;
-
 document.getElementById('saveCfgBtn').onclick = () => {
   const emp = empresaAtual(); if(!emp) return;
   emp.nome = document.getElementById('cfgNome').value.trim() || emp.nome;
@@ -1450,14 +1594,11 @@ document.getElementById('modalBackdrop').onclick = e => {
    Boot
    ============================================================ */
 (async function init(){
-  loadDB();
+  await loadDB();
   if(DB.empresas.length && !DB.atual) DB.atual = DB.empresas[0].id;
   renderAll();
   setInterval(tickCards, 350);
   requestAnimationFrame(loop);
-  
-  // Inicia o WebLLM em background
-  await initWebLLM();
 })();
 </script>
 
