@@ -97,18 +97,16 @@
   function disponivel() {
     return pronta() && Date.now() >= estado.bloqueadaAte && estado.emVoo === 0;
   }
-  /* A autonomia da equipe é limitada pelo ritmo escolhido. Pedidos feitos
-     pelo usuário não passam por aqui — eles têm prioridade. */
+  /* A autonomia não possui um cronômetro artificial.
+     A equipe pode agir sempre que houver uma decisão ou trabalho real.
+     O próprio estado emVoo impede chamadas simultâneas; o ciclo operacional
+     continua sendo o responsável por não duplicar trabalho. */
   function reservarAutonomia() {
-    const intervalo = (RITMOS[cfg.ritmo] || RITMOS.normal).intervalo;
-    if (Date.now() - estado.ultimaAutonoma < intervalo) return false;
+    if (!disponivel()) return false;
     estado.ultimaAutonoma = Date.now();
     return true;
   }
-  function faltaParaAutonomia() {
-    const intervalo = (RITMOS[cfg.ritmo] || RITMOS.normal).intervalo;
-    return Math.max(0, intervalo - (Date.now() - estado.ultimaAutonoma));
-  }
+  function faltaParaAutonomia() { return 0; }
 
   /* ---------- cota real, lida dos headers da resposta ---------- */
   function msDeHeader(v) {

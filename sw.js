@@ -1,7 +1,7 @@
 /* Service worker do Estúdio.
    Só o shell é cacheado. A IA é remota (Groq) e nunca passa por aqui:
    requisições para outras origens são ignoradas de propósito. */
-const CACHE = 'estudio-v6-governanca-chat';
+const CACHE = 'estudio-v10-autonomia';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './app.css',

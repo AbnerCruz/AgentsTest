@@ -398,6 +398,32 @@
     return null;
   }
 
+  function planejarLocal(g) {
+    const e = S.state.atual(); if (!e || !g) return 0;
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    if (!projeto) return 0;
+    const abertas = e.tarefas.filter(t => t.status !== 'feita');
+    if (abertas.length >= 2) return 0;
+    const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+    const temSite = arquivos.some(a => a.classe === 'produto' && a.kit === 'landing');
+    const temCatalogo = arquivos.some(a => /cat[aá]logo/i.test(a.nome) || a.kit === 'catalogo');
+    let spec = null;
+    if (!temSite) spec = { kit:'landing', titulo:'Construir a presença inicial do projeto', briefing:'Criar a primeira página completa usando a missão, público e identidade já definidos.' };
+    else if (temCatalogo) spec = { kit:'landing', titulo:'Revisar e integrar o catálogo ao site existente', briefing:'Verificar se o site apresenta corretamente os produtos já produzidos e integrar o que estiver faltando.' };
+    else spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar os produtos existentes em um catálogo coerente para alimentar as próximas etapas do projeto.' };
+    const kit = S.factory.porId(spec.kit);
+    if (!kit || kit.nivel > S.state.nivelDe(e.xp)) return 0;
+    const funcs = rt.filter(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
+    const alvo = funcs.find(p => p.ref.especialidade === kit.especialidade) || funcs[0];
+    const t = novaTarefa({ titulo: spec.titulo, kit: kit.id, briefing: spec.briefing, para: alvo ? alvo.id : null, projectId: projeto.id, origem:'supervisão local' });
+    if (t) {
+      logPessoa(g, `revisou o estado do projeto sem depender de IA e abriu a próxima etapa: "${t.titulo}".`, 'supervisao');
+      S.state.registrar(`${g.nome} manteve o projeto em movimento com uma etapa operacional local.`, 'info', g.id);
+      return 1;
+    }
+    return 0;
+  }
+
   async function planejar(g) {
     const e = S.state.atual(); if (!e) return;
     const kits = kitsDisponiveis();
@@ -688,20 +714,24 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     // carga, gargalos e capacidade mesmo quando a produção de conteúdo está parada.
     const g = gerente();
     if (g) monitorarEquipe(g);
-    if (!S.ai.disponivel()) return;
-
-    // Prioridade 1: alguém livre com tarefa aberta.
+    // A operação básica nunca depende de a API estar disponível.
+    // A IA melhora decisões e entregas, mas não pode fazer o escritório parar.
     const livre = rt.find(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && (p.ref.energia > 20));
     if (livre) {
       const t = proximaPara(livre);
-      if (t && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
+      if (t) {
+        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
+        if (!S.ai.pronta()) { await executar(livre, t); return; }
+      }
     }
-    // Prioridade 2: gerência.
-    if (g && !g.ocupado && S.ai.reservarAutonomia()) {
+    // Gerência: quando há IA, usa análise; sem IA, mantém uma linha operacional local.
+    if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
-      if (candidato) await avaliar(g);
-      else if (tarefasAbertas().length < 2) await planejar(g);
-      else monitorarEquipe(g);
+      if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) await avaliar(g);
+      else if (tarefasAbertas().length < 2) {
+        if (S.ai.disponivel() && S.ai.reservarAutonomia()) await planejar(g);
+        else planejarLocal(g);
+      } else monitorarEquipe(g);
     }
   }
 

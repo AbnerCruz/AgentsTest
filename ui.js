@@ -401,7 +401,6 @@
 
     const o = S.ai.orcamento();
     const h = o.headers;
-    const espera = S.ai.faltaParaAutonomia();
     $('#consumoPanel').innerHTML = `
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       <div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>
@@ -411,7 +410,7 @@
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela (Groq)</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
-        <div class="stat"><span>Próxima ação autônoma</span><b>${espera > 0 ? 'em ' + F.dur(espera) : 'liberada'}</b></div>
+        <div class="stat"><span>Autonomia</span><b>${S.ai.disponivel() ? 'disponível' : st.emVoo ? 'em execução' : st.pausado ? 'pausada' : 'aguardando'}</b></div>
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
       <p class="panel-foot">${o.fonte === 'groq'
