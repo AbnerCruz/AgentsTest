@@ -136,12 +136,11 @@
     S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe');
   }
 
-  function socializar() {
-    const disponiveis=livres();
-    if(disponiveis.length<2 || Math.random()>0.38) return;
-    const shuf=disponiveis.slice().sort(()=>Math.random()-0.5);
-    bateBoca(shuf[0],shuf[1]).catch(()=>{});
-  }
+  // Conversas sociais não entram no ciclo automático.
+  // O tempo e os tokens da equipe são reservados para produção, revisão e
+  // resolução de dependências reais. A sala continua disponível para reuniões
+  // de trabalho e para mensagens iniciadas pelo dono.
+  function socializar() { return; }
 
   /* ---------- vitais ---------- */
   function tickVitais() {
@@ -403,6 +402,41 @@
     return null;
   }
 
+  function garantirTrabalhoInicial(g) {
+    const e = S.state.atual(); if (!e || !g) return 0;
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    if (!projeto) return 0;
+    if (e.tarefas.some(t => t.status !== 'feita')) return 0;
+
+    const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+    const publicados = arquivos.filter(a => a.classe === 'produto');
+    const tem = kit => publicados.some(a => a.kit === kit);
+    const sequencia = tem('landing')
+      ? (tem('catalogo') ? (tem('artigo') ? (tem('emails') ? (tem('anuncios') ? 'landing' : 'anuncios') : 'emails') : 'artigo') : 'catalogo')
+      : 'landing';
+    const kit = S.factory.porId(sequencia);
+    if (!kit) return 0;
+
+    const alvo = rt.find(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20 && p.ref.especialidade === kit.especialidade)
+      || rt.find(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
+    if (!alvo) return 0;
+
+    const briefing = tem('landing')
+      ? `Produzir ou evoluir ${kit.nome} usando exclusivamente os artefatos e produtos já registrados no projeto. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`
+      : `Criar a primeira entrega pública completa do projeto usando exclusivamente missão, público e materiais registrados. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`;
+    const titulo = tem('landing') ? `Produzir ${kit.nome} a partir do portfólio existente` : `Construir a primeira entrega pública`;
+    const t = novaTarefa({titulo, kit:kit.id, briefing, para:alvo.id, projectId:projeto.id, origem:'fila produtiva'});
+    if (t) {
+      g.ref.foco = 'Garantindo uma entrega concreta em produção';
+      g.ref.pensamento = 'A fila estava vazia. A prioridade é produzir uma entrega concreta e útil, não gerar conversa ou cenário.';
+      logPessoa(g, `abriu a próxima etapa produtiva: "${titulo}".`, 'supervisao');
+      S.state.registrar(`${g.nome} iniciou a fila produtiva: ${titulo}.`, 'info', g.id);
+      S.state.gravar();
+      return 1;
+    }
+    return 0;
+  }
+
   function planejarLocal(g) {
     const e = S.state.atual(); if (!e || !g) return 0;
     const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
@@ -413,11 +447,11 @@
     const temSite = arquivos.some(a => a.classe === 'produto' && a.kit === 'landing');
     const temCatalogo = arquivos.some(a => /cat[aá]logo/i.test(a.nome) || a.kit === 'catalogo');
     let spec = null;
-    if (!temSite) spec = { kit:'landing', titulo:'Construir a presença inicial do projeto', briefing:'Criar a primeira página completa usando a missão, público e identidade já definidos.' };
-    else if (temCatalogo) spec = { kit:'landing', titulo:'Revisar e integrar o catálogo ao site existente', briefing:'Verificar se o site apresenta corretamente os produtos já produzidos e integrar o que estiver faltando.' };
-    else spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar os produtos existentes em um catálogo coerente para alimentar as próximas etapas do projeto.' };
+    if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e materiais já registrados.' };
+    else if (temCatalogo) spec = { kit:'landing', titulo:'Evoluir o site com o catálogo existente', briefing:'Atualizar o site existente para integrar corretamente os produtos já produzidos, sem apagar conteúdo útil.' };
+    else spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar somente os produtos existentes em um catálogo coerente para uso no site e nas próximas etapas.' };
     const kit = S.factory.porId(spec.kit);
-    if (!kit || kit.nivel > S.state.nivelDe(e.xp)) return 0;
+    if (!kit) return 0;
     const funcs = rt.filter(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
     const alvo = funcs.find(p => p.ref.especialidade === kit.especialidade) || funcs[0];
     const t = novaTarefa({ titulo: spec.titulo, kit: kit.id, briefing: spec.briefing, para: alvo ? alvo.id : null, projectId: projeto.id, origem:'supervisão local' });
@@ -443,18 +477,21 @@
 Projeto: ${projeto.nome}. Objetivo: ${projeto.objetivo}.
 Equipe: ${equipe}.
 Entregas existentes: ${recentes}.
-Crie no máximo 2 próximas tarefas que realmente dependam do que já foi feito. Prefira revisão, integração, dados, conteúdo e evolução sobre começar do zero.
-Tipos: ${kits.map(k => k.id).join(', ')}.
+Crie no máximo 1 próxima tarefa produtiva que dependa do estado REAL acima. A tarefa deve produzir ou melhorar um artefato concreto.
+NUNCA invente cliente, pedido, contrato, orçamento, prazo, data futura, métrica, resultado, número, aprovação externa ou acontecimento. Se a informação não existe, não a crie.
+Não crie uma tarefa apenas para conversar, pesquisar sem entregar, fazer reunião ou "definir estratégia".
+Prefira evoluir o artefato existente e usar o trabalho da equipe.
+Tipos permitidos: ${kits.filter(k => !['proposta','calendario'].includes(k.id)).map(k => k.id).join(', ')}.
 Responda SOMENTE:
 KIT1: <código ou vazio>
 PARA1: <id ou vazio>
-BRIEF1: <até 20 palavras>
+BRIEF1: <até 30 palavras>
 DEP1: <id de tarefa anterior ou vazio>
-KIT2: <código ou vazio>
-PARA2: <id ou vazio>
-BRIEF2: <até 20 palavras>
-DEP2: <id de tarefa anterior ou vazio>`,
-      pedido: `Missão: ${e.missao}. Não crie uma entrega duplicada. Faça a próxima etapa do projeto usando os artefatos persistidos.`,
+KIT2: vazio
+PARA2: vazio
+BRIEF2: vazio
+DEP2: vazio`,
+      pedido: `Missão: ${e.missao}. Produza a próxima etapa verificável. Só use fatos presentes no projeto. Se não houver base suficiente para uma nova etapa, retorne KIT1 vazio.`,
       tokens: 300, agente: g.nome, motivo: 'planejar projeto'
     });
     g.ocupado = false; g.balao = null; g.estado = 'sentado';
@@ -462,8 +499,9 @@ DEP2: <id de tarefa anterior ou vazio>`,
     let criadas = 0;
     ['1','2'].forEach(n => {
       const kitId = String(r.campos['kit'+n] || '').trim();
+      if (['proposta','calendario'].includes(kitId)) return;
       const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief'+n]));
-      if (!kit || kit.nivel > S.state.nivelDe(e.xp)) return;
+      if (!kit) return;
       const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para'+n] || '').trim());
       const brief = String(r.campos['brief'+n] || kit.desc).trim();
       const dep = e.tarefas.find(t => t.id === String(r.campos['dep'+n] || '').trim() && t.status === 'feita');
@@ -477,7 +515,7 @@ DEP2: <id de tarefa anterior ou vazio>`,
     const e = S.state.atual(); if (!e) return;
     const cand = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
     if (!cand) return;
-    cand.avaliado = true;
+    cand.avaliado = false;
     g.ocupado = true; g.balao = 'revisando';
     const r = await S.ai.perguntar({
       sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Decida se este material já pode ser publicado como produto final, aquele que o cliente recebe. Publicar congela a versão.
@@ -489,7 +527,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
     });
     g.ocupado = false; g.balao = null;
-    if (!r) return;
+    if (!r) { cand.avaliado = false; S.state.gravar(); return; }
+    cand.avaliado = true;
     if (r.campos.publicar === true && cand.qualidade >= 82) {
       publicar(cand.id, g.nome, String(r.campos.motivo || ''));
       e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
@@ -852,6 +891,14 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.market.normalizar(e);
     S.DB.estudios.unshift(e);
     S.DB.atual = e.id;
+    // O estúdio nasce com uma fila produtiva real; não começa por uma reunião de ideias.
+    const projetoInicial = e.projetos[0];
+    const criadorInicial = e.equipe.find(f => f.papel === 'func' && f.especialidade === 'criacao') || e.equipe.find(f => f.papel === 'func');
+    if (projetoInicial && criadorInicial) {
+      const kitInicial = S.factory.porId('landing');
+      const tInicial = novaTarefa({titulo:'Construir a primeira entrega pública', kit:kitInicial.id, briefing:'Criar uma página completa e publicável a partir exclusivamente dos dados registrados no projeto. Não inventar clientes, números, preços ou prazos.', para:criadorInicial.id, projectId:projetoInicial.id, origem:'fundação'});
+      if (tInicial) projetoInicial.atividade.unshift({t:Date.now(),tipo:'tarefa',texto:'Fila produtiva iniciada com a primeira entrega pública.'});
+    }
     S.state.gravarJa();
     S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
     S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
@@ -880,21 +927,31 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         if (!S.ai.pronta()) { await executar(livre, t); return; }
       }
     }
-    // Gargalo social/operacional: dependências persistentes que merecem alinhamento viram reunião real.
-    const bloqueadas=e.tarefas.filter(t=>t.status!=='feita' && (t.dependsOn||[]).some(id=>{const d=e.tarefas.find(x=>x.id===id);return d && d.status!=='feita';}));
-    if(bloqueadas.length && !e.reuniao.reuniaoAtiva && g && !g.ocupado && S.ai.disponivel() && S.ai.reservarAutonomia()){
-      await reuniaoInterna(`desbloquear ${bloqueadas[0].titulo}`);
-      return;
-    }
+    // Dependências normais não geram reunião. Elas são resolvidas pelo próprio
+    // fluxo de handoff: uma tarefa termina, então a próxima fica executável.
+    // Reuniões ficam reservadas para decisões reais iniciadas pelo dono ou pela gerente.
     // Gerência: quando há IA, usa análise; sem IA, mantém uma linha operacional local.
     if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
-      if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) await avaliar(g);
-      else if (tarefasAbertas().length === 0 && !candidato) {
-        // Não é um timer: o marco de produção concluído é o gatilho. A equipe inteira participa.
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) await idearComEquipe();
-        else idearLocal();
-      } else if (tarefasAbertas().length < 2) {
+      // Primeiro: nunca deixar a equipe sem trabalho concreto.
+      if (tarefasAbertas().length === 0 && !candidato) {
+        garantirTrabalhoInicial(g);
+        return;
+      }
+      // Segundo: transformar entregas reais em produto final sem gastar uma chamada
+      // de revisão quando a aferição estrutural já é suficiente.
+      if (candidato) {
+        if (candidato.qualidade >= 82) {
+          publicar(candidato.id, g.nome, 'Aferição estrutural atingiu o nível de publicação.');
+          e.decisoes.unshift({t:Date.now(), tipo:'publicação', quem:g.nome, texto:`${candidato.nome}: publicado automaticamente após aferição.`});
+          e.decisoes = e.decisoes.slice(0,20);
+          S.state.gravar(); S.bus.emit('negocio');
+          return;
+        }
+        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+      }
+      // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.
+      if (tarefasAbertas().length < 2) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) await planejar(g);
         else planejarLocal(g);
       } else monitorarEquipe(g);
@@ -906,7 +963,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const alvo = meu == null ? token : meu;
     motorTimer = setInterval(() => { ciclo(alvo).catch(err => console.error('ciclo', err)); }, 6000);
     vitaisTimer = setInterval(tickVitais, 7000);
-    socialTimer = setInterval(socializar, 4500);
+    socialTimer = null;
     if (!animacao) laco();
   }
   function parar() {
@@ -1079,7 +1136,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   }
 
   S.studio = {
-    reuniaoFalar, reuniaoInterna, relatorioReuniao, registrarReuniao, gerarRelatorioLocal, idearComEquipe,
+    reuniaoFalar, reuniaoInterna, relatorioReuniao, registrarReuniao, gerarRelatorioLocal,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,

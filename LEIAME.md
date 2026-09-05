@@ -68,3 +68,14 @@ A versão atual mantém uma sala persistente para conversa direta com a equipe. 
 - Produto final publicado é imutável no histórico do estúdio. Correções posteriores precisam gerar uma nova versão e passar novamente pela gerente.
 - A gerente acompanha continuamente carga, dependências, energia, execução e cobertura de especialidades; quando identifica gargalo sustentado, registra recomendação de contratação.
 - A aprovação de produto final exige produção com IA e qualidade aferida mínima de 82/100, além da decisão da gerente.
+
+
+## Foco produtivo
+- A equipe não inicia o ciclo automático com ideação ou conversa social.
+- Quando a fila fica vazia, o sistema cria uma próxima entrega concreta baseada no que já existe no projeto.
+- Conversas espontâneas não consomem mais chamadas automáticas; a sala de reuniões é usada para decisões reais.
+- Reuniões automáticas não são usadas apenas para dependências normais; handoffs resolvem a sequência de trabalho.
+- O XP é apenas experiência e não bloqueia kits de produção.
+- O planejador é instruído e validado para não inventar clientes, pedidos, contratos, prazos, datas, preços, métricas ou acontecimentos.
+- A aferição estrutural publica automaticamente uma entrega que já atingiu o nível de publicação, evitando uma chamada extra de revisão.
+- A produção deve sempre transformar o contexto real do projeto em um artefato verificável; conversa, promessa ou cenário hipotético não conta como trabalho concluído.

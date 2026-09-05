@@ -200,7 +200,7 @@ COR: <uma cor que combine com a marca, em hexadecimal>`;
     <h1>${esc(limpa(c.titulo))}</h1>
     <p class="lead">${esc(limpa(c.subtitulo))}</p>
     <a class="cta" href="#contato">${esc(limpa(c.cta) || 'Quero começar')}</a>
-    <p class="cta-nota">Resposta em até 1 dia útil.</p>
+    <p class="cta-nota">Entre em contato para saber os próximos passos.</p>
   </div>
   <section>
     <h2>Por que ${esc(ctx.estudio)}</h2>
@@ -214,7 +214,7 @@ COR: <uma cor que combine com a marca, em hexadecimal>`;
     <div class="oferta">
       <h2>${esc(limpa(c.chapeu) || 'Vamos conversar')}</h2>
       <p>${esc(limpa(c.oferta))}</p>
-      <a class="cta" href="mailto:contato@exemplo.com">${esc(limpa(c.cta) || 'Falar agora')}</a>
+      <a class="cta" href="#contato">${esc(limpa(c.cta) || 'Falar agora')}</a>
     </div>
   </section>
 </div>`;
@@ -548,8 +548,8 @@ COR: <cor da marca em hexadecimal>`;
   <section style="border-bottom:0">
     <div class="oferta">
       <h2>Condições</h2>
-      <p>${esc(limpa(c.condicoes) || 'Pagamento em duas parcelas. Proposta válida por 15 dias.')}</p>
-      <a class="cta" href="mailto:contato@exemplo.com">Aprovar proposta</a>
+      <p>${esc(limpa(c.condicoes) || 'Condições comerciais devem ser definidas com dados reais antes do envio.')}</p>
+      <a class="cta" href="#contato">Entrar em contato</a>
     </div>
   </section>
 </div>`;
@@ -752,7 +752,7 @@ Sem numeração, sem markdown.`;
       cta: 'Falar com a equipe',
       oferta: `${ctx.estudio} atende ${ctx.publico} com ${ctx.ramo}.`,
       b1t: 'Feito à mão', b1d: 'Cada entrega é montada para o seu caso, não em série.',
-      b2t: 'Prazo curto', b2d: 'Você recebe a primeira versão em poucos dias.',
+      b2t: 'Continuidade', b2d: 'A entrega aproveita o que já foi produzido no projeto e pode evoluir sem recomeçar do zero.',
       b3t: 'Sem enrolação', b3d: 'Escopo claro, preço claro, entrega no formato que você usa.',
       angulo: `${ctx.ramo} para ${ctx.publico}`,
       publico: ctx.publico,
@@ -764,8 +764,8 @@ Sem numeração, sem markdown.`;
       essencia: ctx.missao, tagline: ctx.ramo, adjetivos: 'direta, cuidadosa, prática',
       voz: `Tom ${ctx.tom}, frases curtas.`, evitar: 'Prometer o que não pode cumprir.',
       cliente: ctx.publico, problema: `Precisa de ${ctx.ramo} sem complicação.`,
-      solucao: ctx.missao, item1: 'Diagnóstico inicial | 3 dias | 480',
-      condicoes: 'Metade na aprovação, metade na entrega. Válida por 15 dias.',
+      solucao: ctx.missao, item1: 'Etapa inicial | a definir | a definir',
+      condicoes: 'Condições comerciais devem ser definidas com dados reais antes do envio.',
       tema_do_mes: ctx.ramo, canais: 'Instagram, Blog, E-mail'
     };
     void kit;
