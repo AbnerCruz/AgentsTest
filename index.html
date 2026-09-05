@@ -484,6 +484,26 @@ try{ const q=JSON.parse(localStorage.getItem(GROQ_QUOTA_KEY)||'null'); if(q && t
 function quotaHoje(){ const d=new Date().toISOString().slice(0,10); if(groqQuota.date!==d){ groqQuota={date:d,requests:0,inputTokens:0,outputTokens:0,totalTokens:0,last:null,model:{}}; persistirQuota(); } return groqQuota; }
 function persistirQuota(){ try{ localStorage.setItem(GROQ_QUOTA_KEY,JSON.stringify(groqQuota)); }catch(e){} }
 function numFmt(n){ return Number(n||0).toLocaleString('pt-BR'); }
+function salvarGroqConfig(){
+  const keyEl=document.getElementById('groqApiKeyInput');
+  const selEl=document.getElementById('groqModelSelect');
+  const novoKey=String(keyEl?.value||'').trim();
+  if(novoKey && !/^gsk_[A-Za-z0-9_-]{20,}$/.test(novoKey)){
+    throw new Error('A chave Groq parece inválida. Ela deve começar com gsk_.');
+  }
+  groqApiKey=novoKey;
+  if(selEl?.value && Object.values(MODELOS).some(m=>m.id===selEl.value)) modeloSelecionado=selEl.value;
+  MODEL_DECISAO=modeloSelecionado;
+  MODEL_PRODUCAO=modeloSelecionado===MODELOS.forte.id?MODELOS.forte.id:MODELOS.rapido.id;
+  persistirPapeis();
+  try{
+    if(groqApiKey) localStorage.setItem(GROQ_KEY_STORAGE,groqApiKey);
+    else localStorage.removeItem(GROQ_KEY_STORAGE);
+    localStorage.setItem(GROQ_MODEL_STORAGE,modeloSelecionado);
+  }catch(e){ throw new Error('Não foi possível salvar a configuração neste navegador.'); }
+  renderGroqQuota();
+  return true;
+}
 function lerHeadersQuota(resp){
   const h=n=>resp.headers.get(n), q=quotaHoje();
   q.last={limitRequests:Number(h('x-ratelimit-limit-requests')||0)||null,remainingRequests:Number(h('x-ratelimit-remaining-requests')||0)||null,resetRequests:h('x-ratelimit-reset-requests')||null,limitTokens:Number(h('x-ratelimit-limit-tokens')||0)||null,remainingTokens:Number(h('x-ratelimit-remaining-tokens')||0)||null,resetTokens:h('x-ratelimit-reset-tokens')||null,at:Date.now()};
@@ -536,7 +556,7 @@ function persistirPapeis(){
 }
 const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.nome]));
 function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
-function modeloInstalado(id){ return Object.values(MODELOS).some(m=>m.id===id); }
+function modeloInstalado(id){ return !!Object.values(MODELOS).find(m=>m.id===id); }
 async function validarModelosInstalados(){
   if(!('caches' in window)) return;
   const cache=await caches.open('ia-modelos-v1').catch(()=>null);
@@ -2496,9 +2516,23 @@ function renderModelManager(){
     finally{test.disabled=false;renderModelManager();}
   };
   const save=document.getElementById('saveGroqBtn');
-  if(save) save.onclick=()=>{ salvarGroqConfig(); setAIStatus(groqApiKey?'ready':'error',groqApiKey?'API configurada ✓':'API não configurada',groqApiKey?`${configModelo().nome} será usado pela empresa.`:'Informe a chave Groq.'); renderModelManager(); renderModelUI(); };
+  if(save) save.onclick=()=>{
+    try{
+      salvarGroqConfig();
+      setAIStatus(groqApiKey?'ready':'error',groqApiKey?'API configurada ✓':'API não configurada',groqApiKey?`${configModelo().nome} será usado pela empresa.`:'Informe a chave Groq.');
+    }catch(e){ setAIStatus('error','Configuração inválida',String(e?.message||e)); }
+    renderModelManager(); renderModelUI();
+  };
   const testConn=document.getElementById('testGroqBtn');
-  if(testConn) testConn.onclick=async()=>{ testConn.disabled=true; try{ salvarGroqConfig(); const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',8,modeloSelecionado,'diag'); setAIStatus('ready','Conexão confirmada ✓',String(r.text).slice(0,120)); }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); } finally{testConn.disabled=false;renderModelManager();} };
+  if(testConn) testConn.onclick=async()=>{
+    testConn.disabled=true;
+    try{
+      salvarGroqConfig();
+      const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',8,modeloSelecionado,'diag');
+      setAIStatus('ready','Conexão confirmada ✓',String(r.text).slice(0,120));
+    }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); }
+    finally{testConn.disabled=false;renderModelManager();}
+  };
   const resetQ=document.getElementById('groqResetUsageBtn');
   if(resetQ) resetQ.onclick=()=>{ groqQuota={date:new Date().toISOString().slice(0,10),requests:0,inputTokens:0,outputTokens:0,totalTokens:0,last:null,model:{}}; persistirQuota(); renderGroqQuota(); };
 }
