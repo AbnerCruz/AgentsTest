@@ -537,25 +537,66 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
   async function reuniaoFalar(texto) {
     const e = S.state.atual(); const msg = String(texto || '').trim();
-    if (!e || !msg) return { ok: false, erro: 'Digite uma mensagem.' };
+    if (!e || !msg) return { ok:false, erro:'Digite uma mensagem.' };
+    e.reuniao = e.reuniao || { mensagens:[], relatorios:[] };
     registrarReuniao('Você', msg, 'usuario');
-    const g = gerente();
-    if (!S.ai.pronta()) { registrarReuniao(g ? g.nome : 'Equipe', 'Recebi a orientação. A conversa ficou registrada; conecte a IA para transformar ordens em trabalho.', 'resposta'); return { ok: true, local: true }; }
-    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
-    const ids = e.equipe.map(x => `${x.id}=${x.nome}`).join('; ');
-    const r = await S.ai.perguntar({
-      sistema: `Você coordena uma reunião real de uma pequena equipe. O usuário é o dono e fala diretamente com os funcionários. Não é um jogo. Responda como conversa curta, concreta e profissional.\n\n${contextoReuniao()}\n\nFUNCIONÁRIOS: ${ids}\n\nREGRAS: não invente fatos; use o trabalho persistente como verdade; reconheça o que já existe; se o usuário der uma ordem, transforme-a em tarefas executáveis; não crie contratos, clientes ou encomendas; produtos finais devem ser consumíveis pelo público.\n\nRETORNE SOMENTE:\nFALA1_QUEM: <id>\nFALA1: <até 45 palavras>\nFALA2_QUEM: <id ou vazio>\nFALA2: <até 45 palavras>\nFALA3_QUEM: <id ou vazio>\nFALA3: <até 45 palavras>\nORDEM1_KIT: <kit ou vazio>\nORDEM1_PARA: <id ou vazio>\nORDEM1_BRIEF: <até 28 palavras>\nORDEM1_PROJETO: <id ou vazio>\nORDEM2_KIT: <kit ou vazio>\nORDEM2_PARA: <id ou vazio>\nORDEM2_BRIEF: <até 28 palavras>\nORDEM2_PROJETO: <id ou vazio>\nRELATORIO: <sim ou não>`,
-      pedido: `Mensagem do dono: ${msg}\nProjeto atual: ${projeto ? projeto.nome + ' (' + projeto.id + ')' : 'nenhum'}. Escolha quem realmente precisa responder. Se for conversa ou feedback, não crie tarefas. Se houver ordem clara, crie no máximo duas tarefas e aproveite artefatos existentes.`,
-      tokens: 520, agente: 'sala de reuniões', motivo: 'reunião'
+    const pessoas = e.equipe.filter(x => x.papel !== 'gerente');
+    const gerenteAtual = gerente();
+    const participantes = pessoas.slice();
+    if (!S.ai.pronta()) {
+      participantes.forEach(p => registrarReuniao(p.nome, 'Recebi a sua mensagem. Quando a IA estiver conectada, responderei com base no meu trabalho atual.', 'resposta'));
+      S.state.gravar(); S.bus.emit('reuniao');
+      return {ok:true, local:true, falas:participantes.length};
+    }
+
+    const contexto = contextoReuniao();
+    const historico = (e.reuniao.mensagens || []).slice(-10).map(m => `[${m.quem}] ${m.texto}`).join('\n');
+    let falas = 0;
+
+    // Cada pessoa recebe sua própria chamada e responde a partir de sua função,
+    // memória e trabalho. Assim não existe uma única "voz da equipe".
+    const respostas = await Promise.all(participantes.map(async p => {
+      const r = await S.ai.perguntar({
+        sistema: `Você é ${p.nome}, ${p.cargo}, integrante de um estúdio real. Você está em uma conversa direta com o dono. Responda SOMENTE pelo seu ponto de vista profissional. Não fale em nome dos colegas, não invente fatos e não revele raciocínio interno. Dê uma resposta natural, curta e concreta (até 70 palavras), baseada no seu trabalho atual, memória e especialidade. Se a mensagem não exigir sua participação, diga isso naturalmente em uma frase curta. Se houver algo que você precise de outro colega, mencione a dependência explicitamente.\n\nCONTEXTO DO ESTÚDIO:\n${contexto}`,
+        pedido: `Mensagem do dono: ${msg}\nHistórico recente:\n${historico || 'nenhum'}\nSeu foco atual: ${p.foco || 'nenhum'}\nSua memória recente: ${(p.memoria || []).slice(-5).map(x => typeof x==='string' ? x : x.texto).join(' | ') || 'nenhuma'}\nResponda como ${p.nome}, não como narrador.`,
+        tokens: 220, agente:p.nome, motivo:'resposta individual na reunião'
+      });
+      return {p, texto:r && r.campos ? String(r.campos.resposta || r.campos.fala || r.texto || '').trim() : ''};
+    }));
+
+    respostas.forEach(({p,texto}) => {
+      if (!texto) return;
+      registrarReuniao(p.nome, texto, 'resposta');
+      p.pensamento = texto.slice(0,220);
+      p.memoria = (p.memoria||[]).concat({texto:`Na reunião: ${msg.slice(0,100)} → ${texto.slice(0,130)}`,t:Date.now()}).slice(-12);
+      falas++;
     });
-    if (!r) { registrarReuniao(g ? g.nome : 'Equipe', 'Tive uma falha ao consultar a equipe. A orientação ficou registrada e pode ser retomada.', 'resposta'); return { ok: false, erro: 'A IA não respondeu.' }; }
-    const c=r.campos||{}, byId=id=>e.equipe.find(x=>x.id===String(id||'').trim())||null; let falas=0, ordens=0;
-    ['1','2','3'].forEach(n=>{ const pessoa=byId(c['fala'+n+'_quem']); const texto=String(c['fala'+n]||'').trim(); if(pessoa&&texto){ registrarReuniao(pessoa.nome,texto,'resposta'); pessoa.pensamento=texto.slice(0,220); pessoa.memoria=(pessoa.memoria||[]).concat({texto:`Na reunião: ${msg.slice(0,110)} → ${texto.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }});
-    ['1','2'].forEach(n=>{ const kit=S.factory.porId(String(c['ordem'+n+'_kit']||'').trim()); const para=byId(c['ordem'+n+'_para']); const brief=String(c['ordem'+n+'_brief']||'').trim(); const projetoId=String(c['ordem'+n+'_projeto']||'').trim()||(projeto&&projeto.id); if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t){ordens++; registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?` → ${para.nome}`:' → distribuição automática'}.`,'ordem');}}});
-    if(c.relatorio===true){ const rel=gerarRelatorioLocal(e); e.reuniao.relatorios.unshift({t:Date.now(),texto:rel}); e.reuniao.relatorios=e.reuniao.relatorios.slice(0,20); registrarReuniao('Relatório',rel,'relatorio'); }
-    if(!falas&&!ordens) registrarReuniao(g?g.nome:'Equipe','Entendi. Vamos manter o foco no trabalho que já está em andamento e retomar isso quando houver uma decisão concreta.','resposta');
-    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe'); S.bus.emit('trabalho');
-    return {ok:true,falas,ordens};
+
+    // A gerente também responde por conta própria. Quando houver uma ordem,
+    // a mesma conversa já serve para transformar a orientação em tarefas.
+    if (gerenteAtual) {
+      const ordem = /\b(faça|fazer|crie|criar|produza|produzir|prepare|preparar|revise|revisar|atualize|atualizar|construa|construir|publique|publicar|entregue|entregar|preciso que|quero que)\b/i.test(msg);
+      const r = await S.ai.perguntar({
+        sistema: `Você é ${gerenteAtual.nome}, sócia-gerente. Está numa conversa direta com o dono do estúdio. Dê sua própria resposta profissional, curta e natural (até 70 palavras). Não revele raciocínio interno. Use o contexto real do trabalho. ${ordem ? 'Se a mensagem for uma ordem, além da resposta, converta-a em no máximo duas tarefas usando somente kits, funcionários e projetos existentes.' : ''}\n\nCONTEXTO:\n${contexto}\n\nRETORNE SOMENTE:\nRESPOSTA: <até 70 palavras>\nORDEM1_KIT: <id ou vazio>\nORDEM1_PARA: <id ou vazio>\nORDEM1_BRIEF: <até 35 palavras>\nORDEM1_PROJETO: <id ou vazio>\nORDEM2_KIT: <id ou vazio>\nORDEM2_PARA: <id ou vazio>\nORDEM2_BRIEF: <até 35 palavras>\nORDEM2_PROJETO: <id ou vazio>`,
+        pedido:`Mensagem do dono: ${msg}\nSeu foco: ${gerenteAtual.foco || 'supervisão geral'}\nSua memória: ${(gerenteAtual.memoria||[]).slice(-5).map(x=>typeof x==='string'?x:x.texto).join(' | ') || 'nenhuma'}`,
+        tokens:360, agente:gerenteAtual.nome, motivo:'resposta da gerente na reunião'
+      });
+      if (r) {
+        const c=r.campos||{}; const resposta=String(c.resposta||'').trim();
+        if(resposta){ registrarReuniao(gerenteAtual.nome,resposta,'resposta'); gerenteAtual.pensamento=resposta.slice(0,220); gerenteAtual.memoria=(gerenteAtual.memoria||[]).concat({texto:`Reunião: ${msg.slice(0,110)} → ${resposta.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }
+        ['1','2'].forEach(n=>{
+          const kit=S.factory.porId(String(c[`ordem${n}_kit`]||'').trim());
+          const para=e.equipe.find(x=>x.id===String(c[`ordem${n}_para`]||'').trim());
+          const brief=String(c[`ordem${n}_brief`]||'').trim();
+          const projetoId=String(c[`ordem${n}_projeto`]||'').trim() || ((e.projetos.find(x=>x.status==='ativo')||e.projetos[0]||{}).id);
+          if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t) registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?' → '+para.nome:' → distribuição automática'}.`,'ordem'); }
+        });
+      }
+    }
+
+    if (!falas) registrarReuniao('Equipe','Todos receberam a mensagem, mas ninguém tinha uma resposta útil para acrescentar agora.','resposta');
+    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe'); S.bus.emit('gerencia'); S.bus.emit('trabalho');
+    return {ok:true,falas};
   }
 
   /* ---------- contratação ---------- */

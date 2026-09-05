@@ -474,26 +474,30 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .danger-zone{border-color:rgba(201,85,63,.28);}
 
 /* ─────────── sala de reuniões ─────────── */
-.meeting-room{overflow:hidden;position:relative}
-.meeting-room-head{display:flex;justify-content:space-between;gap:18px;align-items:center;min-height:150px}
-.meeting-room h1{font-size:24px;margin-top:5px;letter-spacing:-.025em}
-.meeting-table{width:120px;height:74px;border:1px solid var(--line);border-radius:50%;background:var(--bg-2);display:grid;grid-template-columns:1fr 1fr;place-items:center;flex:none;position:relative}
-.meeting-table:before{content:'';position:absolute;inset:14px 25px;border:1px solid var(--line-soft);border-radius:50%}
-.meeting-table span{width:10px;height:10px;border-radius:50%;background:var(--ember);position:relative;z-index:1;opacity:.8}
-.meeting-people{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft)}
-.meeting-person{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2)}
-.meeting-person .avatar{width:28px;height:28px;font-size:10px}
-.meeting-person b{font-size:12px}.meeting-person small{display:block;color:var(--ink-3);font-size:10px}
-.meeting-chat{display:flex;flex-direction:column;min-height:440px}
-.meeting-messages{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto;padding:12px 2px}
-.meeting-msg{max-width:88%;border:1px solid var(--line);background:var(--bg-2);border-radius:12px;padding:10px 12px}
-.meeting-msg.mine{align-self:flex-end;background:var(--ember-soft);border-color:rgba(228,112,62,.28)}
-.meeting-msg.system{align-self:center;background:var(--surf-2);border-style:dashed;max-width:94%}
-.meeting-msg .who{font-size:10px;color:var(--ink-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
+.meeting-room{overflow:hidden;position:relative;background:linear-gradient(180deg,var(--bg-2),var(--surf));}
+.meeting-room-head{display:flex;justify-content:space-between;gap:18px;align-items:center;min-height:128px;padding:4px 2px}
+.meeting-room h1{font-size:25px;margin:5px 0;letter-spacing:-.03em}
+.meeting-room-head p{max-width:720px}
+.meeting-table{width:112px;height:70px;border:1px solid var(--line);border-radius:50%;background:var(--bg);display:grid;grid-template-columns:1fr 1fr;place-items:center;flex:none;position:relative;box-shadow:inset 0 0 0 10px var(--bg-2)}
+.meeting-table:before{content:'';position:absolute;inset:13px 22px;border:1px solid var(--line-soft);border-radius:50%}
+.meeting-table span{width:9px;height:9px;border-radius:50%;background:var(--ember);position:relative;z-index:1;opacity:.8}
+.meeting-people{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.meeting-person{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:var(--bg);min-width:150px}
+.meeting-person .avatar{width:30px;height:30px;font-size:10px;flex:none}
+.meeting-person b{font-size:12px}.meeting-person small{display:block;color:var(--ink-3);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.meeting-chat{display:flex;flex-direction:column;min-height:560px;padding:0;overflow:hidden}
+.meeting-chat>.panel-head{padding:14px 16px;border-bottom:1px solid var(--line)}
+.meeting-messages{display:flex;flex-direction:column;gap:12px;max-height:590px;min-height:360px;overflow:auto;padding:18px 16px;background:radial-gradient(circle at 50% 0%,var(--surf-2),transparent 42%)}
+.meeting-msg{width:min(76%,680px);border:1px solid var(--line);background:var(--bg-2);border-radius:4px 16px 16px 16px;padding:10px 13px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+.meeting-msg.mine{align-self:flex-end;background:var(--ember-soft);border-color:rgba(228,112,62,.3);border-radius:16px 4px 16px 16px}
+.meeting-msg.system{align-self:center;width:auto;max-width:92%;background:var(--surf-2);border-style:dashed;text-align:center}
+.meeting-msg .who{font-size:10px;font-weight:700;color:var(--ink-3);margin-bottom:4px;letter-spacing:.04em}
+.meeting-msg.mine .who{color:var(--ember)}
 .meeting-msg .txt{font-size:13px;white-space:pre-wrap;line-height:1.55}
-.meeting-msg .time{font-size:9px;color:var(--ink-3);margin-top:5px}
-.meeting-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:10px 0}
-.meeting-composer{border-top:1px solid var(--line-soft);padding-top:10px}
-.meeting-composer textarea{min-height:82px}
+.meeting-msg .time{font-size:9px;color:var(--ink-3);margin-top:6px;text-align:right}
+.meeting-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:9px 16px}
+.meeting-composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg-2)}
+.meeting-composer textarea{min-height:70px;resize:vertical}
 .meeting-send{display:flex;align-items:center;gap:10px;margin-top:7px}.meeting-send .hint{flex:1}
-@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{width:82px;height:55px}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{max-width:94%}}
+.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px}.management-summary b{display:block;font-size:20px}.management-summary span{font-size:10px;color:var(--ink-3)}.manager-focus{margin:8px 0;line-height:1.5}.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0}.manager-recommendation span{font-size:12px}.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2)}
+@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.management-summary{grid-template-columns:1fr 1fr 1fr}.meeting-person{min-width:0;flex:1}}

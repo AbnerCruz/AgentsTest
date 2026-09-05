@@ -105,6 +105,26 @@
     pintarGerencia();
   }
 
+  function pintarGerencia() {
+    const e = S.state.atual(); if (!e) return;
+    const box = $('#gerenciaPanel'); if (!box) return;
+    const g = e.equipe.find(x => x.papel === 'gerente');
+    const gr = e.gerencia || {};
+    const alertas = gr.alertas || [];
+    const abertas = (e.tarefas || []).filter(t => t.status !== 'feita').length;
+    const feitas = (e.tarefas || []).filter(t => t.status === 'feita').length;
+    box.innerHTML = `
+      <div class="panel-head"><span class="panel-label">Supervisão da gerente</span><span class="chip">contínua</span></div>
+      <div class="management-summary">
+        <div><b>${abertas}</b><span>etapas abertas</span></div>
+        <div><b>${feitas}</b><span>concluídas</span></div>
+        <div><b>${(e.equipe||[]).filter(x=>x.papel!=='gerente').length}</b><span>funcionários</span></div>
+      </div>
+      <p class="manager-focus"><strong>${esc(g ? g.nome : 'Gerente')}:</strong> ${esc(g && g.pensamento || gr.recomendacao || 'Avaliando a operação.')}</p>
+      ${gr.recomendacao ? `<div class="manager-recommendation"><b>Recomendação</b><span>${esc(gr.recomendacao)}</span></div>` : ''}
+      ${alertas.length ? `<div class="manager-alerts">${alertas.slice(-5).map(a=>`<div>⚠ ${esc(a)}</div>`).join('')}</div>` : '<p class="panel-foot">Nenhum alerta operacional no momento.</p>'}`;
+  }
+
   function pintarXP() {
     const e = S.state.atual(); if (!e) return;
     const pr = S.state.progressoNivel(e.xp);

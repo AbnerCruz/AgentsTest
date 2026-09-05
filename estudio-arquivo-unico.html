@@ -485,29 +485,33 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .danger-zone{border-color:rgba(201,85,63,.28);}
 
 /* ─────────── sala de reuniões ─────────── */
-.meeting-room{overflow:hidden;position:relative}
-.meeting-room-head{display:flex;justify-content:space-between;gap:18px;align-items:center;min-height:150px}
-.meeting-room h1{font-size:24px;margin-top:5px;letter-spacing:-.025em}
-.meeting-table{width:120px;height:74px;border:1px solid var(--line);border-radius:50%;background:var(--bg-2);display:grid;grid-template-columns:1fr 1fr;place-items:center;flex:none;position:relative}
-.meeting-table:before{content:'';position:absolute;inset:14px 25px;border:1px solid var(--line-soft);border-radius:50%}
-.meeting-table span{width:10px;height:10px;border-radius:50%;background:var(--ember);position:relative;z-index:1;opacity:.8}
-.meeting-people{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--line-soft)}
-.meeting-person{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r);background:var(--bg-2)}
-.meeting-person .avatar{width:28px;height:28px;font-size:10px}
-.meeting-person b{font-size:12px}.meeting-person small{display:block;color:var(--ink-3);font-size:10px}
-.meeting-chat{display:flex;flex-direction:column;min-height:440px}
-.meeting-messages{display:flex;flex-direction:column;gap:10px;max-height:520px;overflow:auto;padding:12px 2px}
-.meeting-msg{max-width:88%;border:1px solid var(--line);background:var(--bg-2);border-radius:12px;padding:10px 12px}
-.meeting-msg.mine{align-self:flex-end;background:var(--ember-soft);border-color:rgba(228,112,62,.28)}
-.meeting-msg.system{align-self:center;background:var(--surf-2);border-style:dashed;max-width:94%}
-.meeting-msg .who{font-size:10px;color:var(--ink-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
+.meeting-room{overflow:hidden;position:relative;background:linear-gradient(180deg,var(--bg-2),var(--surf));}
+.meeting-room-head{display:flex;justify-content:space-between;gap:18px;align-items:center;min-height:128px;padding:4px 2px}
+.meeting-room h1{font-size:25px;margin:5px 0;letter-spacing:-.03em}
+.meeting-room-head p{max-width:720px}
+.meeting-table{width:112px;height:70px;border:1px solid var(--line);border-radius:50%;background:var(--bg);display:grid;grid-template-columns:1fr 1fr;place-items:center;flex:none;position:relative;box-shadow:inset 0 0 0 10px var(--bg-2)}
+.meeting-table:before{content:'';position:absolute;inset:13px 22px;border:1px solid var(--line-soft);border-radius:50%}
+.meeting-table span{width:9px;height:9px;border-radius:50%;background:var(--ember);position:relative;z-index:1;opacity:.8}
+.meeting-people{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;padding-top:12px;border-top:1px solid var(--line-soft)}
+.meeting-person{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:var(--bg);min-width:150px}
+.meeting-person .avatar{width:30px;height:30px;font-size:10px;flex:none}
+.meeting-person b{font-size:12px}.meeting-person small{display:block;color:var(--ink-3);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.meeting-chat{display:flex;flex-direction:column;min-height:560px;padding:0;overflow:hidden}
+.meeting-chat>.panel-head{padding:14px 16px;border-bottom:1px solid var(--line)}
+.meeting-messages{display:flex;flex-direction:column;gap:12px;max-height:590px;min-height:360px;overflow:auto;padding:18px 16px;background:radial-gradient(circle at 50% 0%,var(--surf-2),transparent 42%)}
+.meeting-msg{width:min(76%,680px);border:1px solid var(--line);background:var(--bg-2);border-radius:4px 16px 16px 16px;padding:10px 13px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+.meeting-msg.mine{align-self:flex-end;background:var(--ember-soft);border-color:rgba(228,112,62,.3);border-radius:16px 4px 16px 16px}
+.meeting-msg.system{align-self:center;width:auto;max-width:92%;background:var(--surf-2);border-style:dashed;text-align:center}
+.meeting-msg .who{font-size:10px;font-weight:700;color:var(--ink-3);margin-bottom:4px;letter-spacing:.04em}
+.meeting-msg.mine .who{color:var(--ember)}
 .meeting-msg .txt{font-size:13px;white-space:pre-wrap;line-height:1.55}
-.meeting-msg .time{font-size:9px;color:var(--ink-3);margin-top:5px}
-.meeting-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:10px 0}
-.meeting-composer{border-top:1px solid var(--line-soft);padding-top:10px}
-.meeting-composer textarea{min-height:82px}
+.meeting-msg .time{font-size:9px;color:var(--ink-3);margin-top:6px;text-align:right}
+.meeting-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:9px 16px}
+.meeting-composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg-2)}
+.meeting-composer textarea{min-height:70px;resize:vertical}
 .meeting-send{display:flex;align-items:center;gap:10px;margin-top:7px}.meeting-send .hint{flex:1}
-@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{width:82px;height:55px}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{max-width:94%}}
+.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px}.management-summary b{display:block;font-size:20px}.management-summary span{font-size:10px;color:var(--ink-3)}.manager-focus{margin:8px 0;line-height:1.5}.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0}.manager-recommendation span{font-size:12px}.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2)}
+@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.management-summary{grid-template-columns:1fr 1fr 1fr}.meeting-person{min-width:0;flex:1}}
 
 </style>
 <script>
@@ -759,6 +763,12 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
+<script src="./core.js"></script>
+<script src="./ai.js"></script>
+<script src="./market.js"></script>
+<script src="./factory.js"></script>
+<script src="./studio.js"></script>
+<script src="./ui.js"></script>
 <script>
 /* ============================================================
    CORE — utilidades, estado e persistência.
@@ -1092,8 +1102,6 @@ window.S = window.S || {};
 
 })(window.S);
 
-</script>
-<script>
 /* ============================================================
    IA — única porta de saída para a Groq.
    Princípio do projeto: economia de tokens. Toda chamada tem teto,
@@ -1422,8 +1430,6 @@ window.S = window.S || {};
   void sleep;
 })(window.S);
 
-</script>
-<script>
 /* ============================================================
    MERCADO — economia causal.
    Nenhuma venda, visita ou seguidor é sorteado nem inventado pela IA.
@@ -1653,8 +1659,6 @@ window.S = window.S || {};
   S.market = { ECON, EFEITO_KIT, perfil, normalizar, presenca, tick, relogio, creditar, debitar, indicadores, folhaPorHora };
 })(window.S);
 
-</script>
-<script>
 /* ============================================================
    FÁBRICA — onde nasce o produto de verdade.
 
@@ -2434,8 +2438,6 @@ Sem numeração, sem markdown.`;
   };
 })(window.S);
 
-</script>
-<script>
 /* ============================================================
    ESTÚDIO — o simulador propriamente dito.
    Um único motor assíncrono decide, no máximo, UMA ação de IA por
@@ -2975,25 +2977,66 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
   async function reuniaoFalar(texto) {
     const e = S.state.atual(); const msg = String(texto || '').trim();
-    if (!e || !msg) return { ok: false, erro: 'Digite uma mensagem.' };
+    if (!e || !msg) return { ok:false, erro:'Digite uma mensagem.' };
+    e.reuniao = e.reuniao || { mensagens:[], relatorios:[] };
     registrarReuniao('Você', msg, 'usuario');
-    const g = gerente();
-    if (!S.ai.pronta()) { registrarReuniao(g ? g.nome : 'Equipe', 'Recebi a orientação. A conversa ficou registrada; conecte a IA para transformar ordens em trabalho.', 'resposta'); return { ok: true, local: true }; }
-    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
-    const ids = e.equipe.map(x => `${x.id}=${x.nome}`).join('; ');
-    const r = await S.ai.perguntar({
-      sistema: `Você coordena uma reunião real de uma pequena equipe. O usuário é o dono e fala diretamente com os funcionários. Não é um jogo. Responda como conversa curta, concreta e profissional.\n\n${contextoReuniao()}\n\nFUNCIONÁRIOS: ${ids}\n\nREGRAS: não invente fatos; use o trabalho persistente como verdade; reconheça o que já existe; se o usuário der uma ordem, transforme-a em tarefas executáveis; não crie contratos, clientes ou encomendas; produtos finais devem ser consumíveis pelo público.\n\nRETORNE SOMENTE:\nFALA1_QUEM: <id>\nFALA1: <até 45 palavras>\nFALA2_QUEM: <id ou vazio>\nFALA2: <até 45 palavras>\nFALA3_QUEM: <id ou vazio>\nFALA3: <até 45 palavras>\nORDEM1_KIT: <kit ou vazio>\nORDEM1_PARA: <id ou vazio>\nORDEM1_BRIEF: <até 28 palavras>\nORDEM1_PROJETO: <id ou vazio>\nORDEM2_KIT: <kit ou vazio>\nORDEM2_PARA: <id ou vazio>\nORDEM2_BRIEF: <até 28 palavras>\nORDEM2_PROJETO: <id ou vazio>\nRELATORIO: <sim ou não>`,
-      pedido: `Mensagem do dono: ${msg}\nProjeto atual: ${projeto ? projeto.nome + ' (' + projeto.id + ')' : 'nenhum'}. Escolha quem realmente precisa responder. Se for conversa ou feedback, não crie tarefas. Se houver ordem clara, crie no máximo duas tarefas e aproveite artefatos existentes.`,
-      tokens: 520, agente: 'sala de reuniões', motivo: 'reunião'
+    const pessoas = e.equipe.filter(x => x.papel !== 'gerente');
+    const gerenteAtual = gerente();
+    const participantes = pessoas.slice();
+    if (!S.ai.pronta()) {
+      participantes.forEach(p => registrarReuniao(p.nome, 'Recebi a sua mensagem. Quando a IA estiver conectada, responderei com base no meu trabalho atual.', 'resposta'));
+      S.state.gravar(); S.bus.emit('reuniao');
+      return {ok:true, local:true, falas:participantes.length};
+    }
+
+    const contexto = contextoReuniao();
+    const historico = (e.reuniao.mensagens || []).slice(-10).map(m => `[${m.quem}] ${m.texto}`).join('\n');
+    let falas = 0;
+
+    // Cada pessoa recebe sua própria chamada e responde a partir de sua função,
+    // memória e trabalho. Assim não existe uma única "voz da equipe".
+    const respostas = await Promise.all(participantes.map(async p => {
+      const r = await S.ai.perguntar({
+        sistema: `Você é ${p.nome}, ${p.cargo}, integrante de um estúdio real. Você está em uma conversa direta com o dono. Responda SOMENTE pelo seu ponto de vista profissional. Não fale em nome dos colegas, não invente fatos e não revele raciocínio interno. Dê uma resposta natural, curta e concreta (até 70 palavras), baseada no seu trabalho atual, memória e especialidade. Se a mensagem não exigir sua participação, diga isso naturalmente em uma frase curta. Se houver algo que você precise de outro colega, mencione a dependência explicitamente.\n\nCONTEXTO DO ESTÚDIO:\n${contexto}`,
+        pedido: `Mensagem do dono: ${msg}\nHistórico recente:\n${historico || 'nenhum'}\nSeu foco atual: ${p.foco || 'nenhum'}\nSua memória recente: ${(p.memoria || []).slice(-5).map(x => typeof x==='string' ? x : x.texto).join(' | ') || 'nenhuma'}\nResponda como ${p.nome}, não como narrador.`,
+        tokens: 220, agente:p.nome, motivo:'resposta individual na reunião'
+      });
+      return {p, texto:r && r.campos ? String(r.campos.resposta || r.campos.fala || r.texto || '').trim() : ''};
+    }));
+
+    respostas.forEach(({p,texto}) => {
+      if (!texto) return;
+      registrarReuniao(p.nome, texto, 'resposta');
+      p.pensamento = texto.slice(0,220);
+      p.memoria = (p.memoria||[]).concat({texto:`Na reunião: ${msg.slice(0,100)} → ${texto.slice(0,130)}`,t:Date.now()}).slice(-12);
+      falas++;
     });
-    if (!r) { registrarReuniao(g ? g.nome : 'Equipe', 'Tive uma falha ao consultar a equipe. A orientação ficou registrada e pode ser retomada.', 'resposta'); return { ok: false, erro: 'A IA não respondeu.' }; }
-    const c=r.campos||{}, byId=id=>e.equipe.find(x=>x.id===String(id||'').trim())||null; let falas=0, ordens=0;
-    ['1','2','3'].forEach(n=>{ const pessoa=byId(c['fala'+n+'_quem']); const texto=String(c['fala'+n]||'').trim(); if(pessoa&&texto){ registrarReuniao(pessoa.nome,texto,'resposta'); pessoa.pensamento=texto.slice(0,220); pessoa.memoria=(pessoa.memoria||[]).concat({texto:`Na reunião: ${msg.slice(0,110)} → ${texto.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }});
-    ['1','2'].forEach(n=>{ const kit=S.factory.porId(String(c['ordem'+n+'_kit']||'').trim()); const para=byId(c['ordem'+n+'_para']); const brief=String(c['ordem'+n+'_brief']||'').trim(); const projetoId=String(c['ordem'+n+'_projeto']||'').trim()||(projeto&&projeto.id); if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t){ordens++; registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?` → ${para.nome}`:' → distribuição automática'}.`,'ordem');}}});
-    if(c.relatorio===true){ const rel=gerarRelatorioLocal(e); e.reuniao.relatorios.unshift({t:Date.now(),texto:rel}); e.reuniao.relatorios=e.reuniao.relatorios.slice(0,20); registrarReuniao('Relatório',rel,'relatorio'); }
-    if(!falas&&!ordens) registrarReuniao(g?g.nome:'Equipe','Entendi. Vamos manter o foco no trabalho que já está em andamento e retomar isso quando houver uma decisão concreta.','resposta');
-    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe'); S.bus.emit('trabalho');
-    return {ok:true,falas,ordens};
+
+    // A gerente também responde por conta própria. Quando houver uma ordem,
+    // a mesma conversa já serve para transformar a orientação em tarefas.
+    if (gerenteAtual) {
+      const ordem = /\b(faça|fazer|crie|criar|produza|produzir|prepare|preparar|revise|revisar|atualize|atualizar|construa|construir|publique|publicar|entregue|entregar|preciso que|quero que)\b/i.test(msg);
+      const r = await S.ai.perguntar({
+        sistema: `Você é ${gerenteAtual.nome}, sócia-gerente. Está numa conversa direta com o dono do estúdio. Dê sua própria resposta profissional, curta e natural (até 70 palavras). Não revele raciocínio interno. Use o contexto real do trabalho. ${ordem ? 'Se a mensagem for uma ordem, além da resposta, converta-a em no máximo duas tarefas usando somente kits, funcionários e projetos existentes.' : ''}\n\nCONTEXTO:\n${contexto}\n\nRETORNE SOMENTE:\nRESPOSTA: <até 70 palavras>\nORDEM1_KIT: <id ou vazio>\nORDEM1_PARA: <id ou vazio>\nORDEM1_BRIEF: <até 35 palavras>\nORDEM1_PROJETO: <id ou vazio>\nORDEM2_KIT: <id ou vazio>\nORDEM2_PARA: <id ou vazio>\nORDEM2_BRIEF: <até 35 palavras>\nORDEM2_PROJETO: <id ou vazio>`,
+        pedido:`Mensagem do dono: ${msg}\nSeu foco: ${gerenteAtual.foco || 'supervisão geral'}\nSua memória: ${(gerenteAtual.memoria||[]).slice(-5).map(x=>typeof x==='string'?x:x.texto).join(' | ') || 'nenhuma'}`,
+        tokens:360, agente:gerenteAtual.nome, motivo:'resposta da gerente na reunião'
+      });
+      if (r) {
+        const c=r.campos||{}; const resposta=String(c.resposta||'').trim();
+        if(resposta){ registrarReuniao(gerenteAtual.nome,resposta,'resposta'); gerenteAtual.pensamento=resposta.slice(0,220); gerenteAtual.memoria=(gerenteAtual.memoria||[]).concat({texto:`Reunião: ${msg.slice(0,110)} → ${resposta.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }
+        ['1','2'].forEach(n=>{
+          const kit=S.factory.porId(String(c[`ordem${n}_kit`]||'').trim());
+          const para=e.equipe.find(x=>x.id===String(c[`ordem${n}_para`]||'').trim());
+          const brief=String(c[`ordem${n}_brief`]||'').trim();
+          const projetoId=String(c[`ordem${n}_projeto`]||'').trim() || ((e.projetos.find(x=>x.status==='ativo')||e.projetos[0]||{}).id);
+          if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t) registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?' → '+para.nome:' → distribuição automática'}.`,'ordem'); }
+        });
+      }
+    }
+
+    if (!falas) registrarReuniao('Equipe','Todos receberam a mensagem, mas ninguém tinha uma resposta útil para acrescentar agora.','resposta');
+    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe'); S.bus.emit('gerencia'); S.bus.emit('trabalho');
+    return {ok:true,falas};
   }
 
   /* ---------- contratação ---------- */
@@ -3264,8 +3307,6 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   };
 })(window.S);
 
-</script>
-<script>
 /* ============================================================
    UI — desenho dos painéis e ligações de evento.
    Cada painel se redesenha sozinho quando o escopo dele muda.
@@ -3371,6 +3412,26 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     }).join('') || '<div class="empty">Sem equipe.</div>';
     $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
     pintarGerencia();
+  }
+
+  function pintarGerencia() {
+    const e = S.state.atual(); if (!e) return;
+    const box = $('#gerenciaPanel'); if (!box) return;
+    const g = e.equipe.find(x => x.papel === 'gerente');
+    const gr = e.gerencia || {};
+    const alertas = gr.alertas || [];
+    const abertas = (e.tarefas || []).filter(t => t.status !== 'feita').length;
+    const feitas = (e.tarefas || []).filter(t => t.status === 'feita').length;
+    box.innerHTML = `
+      <div class="panel-head"><span class="panel-label">Supervisão da gerente</span><span class="chip">contínua</span></div>
+      <div class="management-summary">
+        <div><b>${abertas}</b><span>etapas abertas</span></div>
+        <div><b>${feitas}</b><span>concluídas</span></div>
+        <div><b>${(e.equipe||[]).filter(x=>x.papel!=='gerente').length}</b><span>funcionários</span></div>
+      </div>
+      <p class="manager-focus"><strong>${esc(g ? g.nome : 'Gerente')}:</strong> ${esc(g && g.pensamento || gr.recomendacao || 'Avaliando a operação.')}</p>
+      ${gr.recomendacao ? `<div class="manager-recommendation"><b>Recomendação</b><span>${esc(gr.recomendacao)}</span></div>` : ''}
+      ${alertas.length ? `<div class="manager-alerts">${alertas.slice(-5).map(a=>`<div>⚠ ${esc(a)}</div>`).join('')}</div>` : '<p class="panel-foot">Nenhum alerta operacional no momento.</p>'}`;
   }
 
   function pintarXP() {
