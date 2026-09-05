@@ -449,10 +449,14 @@
    do Web Worker; a página principal não duplica o consumo de RAM.
    ============================================================ */
 const MODELOS = {
-  minimo: { id:'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA', dtype:'q4f16', nome:'SmolLM2 135M · diagnóstico', nivel:'Diagnóstico', tamanho:'~118 MB', detalhe:'Modelo pequeno para provar que o motor local consegue carregar e gerar no aparelho.', memoria:'Baixa', licenca:'Apache-2.0' },
-  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q4f16', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~380 MB', detalhe:'Mais capaz que o 135M, ainda voltado a aparelhos com pouca memória.', memoria:'Baixa–média', licenca:'Apache-2.0' },
-  recomendado: { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q4f16', nome:'Qwen2.5 0.5B · recomendado', nivel:'Recomendado', tamanho:'~483 MB', detalhe:'Modelo indicado para a produção: melhor instrução e português, usando o arquivo ONNX q4f16.', memoria:'Média', licenca:'Apache-2.0' },
-  forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4f16', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,1 GB', detalhe:'Maior qualidade de decisão e escrita, mas exige mais memória e tempo.', memoria:'Alta', licenca:'Apache-2.0' },
+  // dtype 'q4' (não 'q4f16'): o q4f16 usa ativações fp16, que disparam um bug
+  // conhecido de fusão de grafo no ONNX Runtime WASM (SimplifiedLayerNormFusion/
+  // InsertedPrecisionFreeCast) — o processo do Worker morre sem ErrorEvent útil.
+  // 'q4' usa ativações fp32, sem esse bug, e é a combinação estável em WASM.
+  minimo: { id:'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA', dtype:'q4', nome:'SmolLM2 135M · diagnóstico', nivel:'Diagnóstico', tamanho:'~182 MB', detalhe:'Modelo pequeno para provar que o motor local consegue carregar e gerar no aparelho.', memoria:'Baixa', licenca:'Apache-2.0' },
+  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q4', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~480 MB', detalhe:'Mais capaz que o 135M, ainda voltado a aparelhos com pouca memória.', memoria:'Baixa–média', licenca:'Apache-2.0' },
+  recomendado: { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q4', nome:'Qwen2.5 0.5B · recomendado', nivel:'Recomendado', tamanho:'~790 MB', detalhe:'Modelo indicado para a produção: melhor instrução e português, usando o arquivo ONNX q4 (ativações fp32, estável em WASM).', memoria:'Média', licenca:'Apache-2.0' },
+  forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,9 GB', detalhe:'Maior qualidade de decisão e escrita, mas exige mais memória e tempo.', memoria:'Alta', licenca:'Apache-2.0' },
 };const MODEL_PADRAO = MODELOS.recomendado.id;
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   // O Service Worker so serve para cachear os arquivos do runtime/modelo para
@@ -504,9 +508,10 @@ async function validarModelosInstalados(){
   const bons=[];
   for(const id of modelosInstalados){
     const m=configModelo(id);
-    // O instalador atual usa sempre q4f16 para os modelos principais.
-    // Se a versão antiga marcou q8 mas esse arquivo não existe no cache,
-    // removemos apenas a marca local e obrigamos um download correto.
+    // O instalador atual usa sempre q4 para os modelos principais (fp32,
+    // estável em WASM — ver comentário em MODELOS). Se uma versão antiga
+    // marcou q4f16/q8 mas esse arquivo não existe no cache, removemos
+    // apenas a marca local e obrigamos um download correto.
     const u='https://huggingface.co/'+id+'/resolve/main/onnx/model_'+m.dtype+'.onnx';
     const ok=await cache.match(u,{ignoreVary:true}).catch(()=>null);
     if(ok) bons.push(id);
@@ -703,7 +708,7 @@ self.onmessage = async (ev)=>{
       const pequenos=['config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','generation_config.json','chat_template.jinja','merges.txt','vocab.json'];
       const escolhidos=files.filter(f=>pequenos.includes(f));
       const onnx=files.filter(f=>/\.onnx$/i.test(f));
-      const d=String(msg.dtype||'q4f16').toLowerCase();
+      const d=String(msg.dtype||'q4').toLowerCase();
       function score(f){
         const x=f.toLowerCase(); let s=0;
         if(d==='q4f16' && /q4f16/.test(x)) s+=100;
@@ -2549,7 +2554,7 @@ function renderModelManager(){
   const note=document.getElementById('modelDownloadNote');
   if(note) note.textContent='Importante: Baixar modelo apenas salva os arquivos. A IA só ocupa RAM e começa a executar quando você tocar em “Ativar e executar”.';
   const gpu=(navigator.gpu && typeof navigator.gpu.requestAdapter==='function');
-  const od=document.getElementById('offlineDiag'); if(od) od.textContent=`Offline: ${runtimeOfflineSource ? 'runtime preparado ✓' : 'runtime ainda não preparado'} · Worker: ${typeof Worker!=='undefined'?'disponível ✓':'indisponível'} · WebAssembly: ${typeof WebAssembly!=='undefined'?'disponível ✓':'indisponível'} · WebGPU: ${gpu?'detectado ✓':'não detectado'} · Diagnóstico: 135M q4f16/WASM · Internet atual: ${navigator.onLine?'sim':'não'}`;
+  const od=document.getElementById('offlineDiag'); if(od) od.textContent=`Offline: ${runtimeOfflineSource ? 'runtime preparado ✓' : 'runtime ainda não preparado'} · Worker: ${typeof Worker!=='undefined'?'disponível ✓':'indisponível'} · WebAssembly: ${typeof WebAssembly!=='undefined'?'disponível ✓':'indisponível'} · WebGPU: ${gpu?'detectado ✓':'não detectado'} · Diagnóstico: 135M q4/WASM · Internet atual: ${navigator.onLine?'sim':'não'}`;
   list.innerHTML=Object.entries(MODELOS).map(([key,m])=>{
     const installed=modeloInstalado(m.id), active=m.id===modeloSelecionado && installed, downloading=modelosBaixando.has(m.id);
     const safeId='model_'+key;
@@ -2581,7 +2586,7 @@ function renderModelManager(){
       if(!modeloInstalado(diagModel)) throw new Error('Primeiro baixe o modelo de diagnóstico de 135M.');
       modeloSelecionado=diagModel; MODEL_DECISAO=diagModel; MODEL_GERENTE=diagModel; MODEL_PRODUCAO=diagModel; persistirPapeis();
       encerrarWorkerIA();
-      setAIStatus('loading','Teste real de geração','Carregando o 135M q4f16 e pedindo uma única palavra: OK.',null);
+      setAIStatus('loading','Teste real de geração','Carregando o 135M q4 e pedindo uma única palavra: OK.',null);
       await carregarIA();
       const bruto=await new Promise((resolve,reject)=>{
         const id=++workerSeq; let ultimo=Date.now();
@@ -2650,7 +2655,7 @@ async function baixarModeloDiretoSemIA(id){
   const pequenos=['config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','generation_config.json','chat_template.jinja','merges.txt','vocab.json'];
   const escolhidos=files.filter(f=>pequenos.includes(f));
   const onnx=files.filter(f=>/\.onnx$/i.test(f));
-  const d=String(m.dtype||'q4f16').toLowerCase();
+  const d=String(m.dtype||'q4').toLowerCase();
   function score(f){ const x=f.toLowerCase(); let z=0; if(d==='q4f16'&&/q4f16/.test(x))z+=100; if(d==='q4'&&/q4(\.|_|$)/.test(x))z+=100; if(d==='q8'&&/q8(\.|_|$)/.test(x))z+=100; if(d==='q8'&&/quantized/.test(x))z+=70; if(d==='q8'&&/int8|uint8/.test(x))z+=50; if(/(^|\/)model\.onnx$/.test(x))z+=10; if(/^onnx\//.test(x))z+=5; return z; }
   onnx.sort((a,b)=>score(b)-score(a));
   if(!onnx.length) throw new Error('Este modelo não possui arquivo ONNX no repositório.');
