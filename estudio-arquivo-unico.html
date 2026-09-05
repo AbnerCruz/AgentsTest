@@ -484,6 +484,16 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .callout.bad{border-left-color:var(--rust);}
 .danger-zone{border-color:rgba(201,85,63,.28);}
 
+/* Memória e foco do agente */
+.thought-card,.memory-box{border:1px solid var(--line);background:var(--surf-2);border-radius:var(--r);padding:12px;margin-top:10px}
+.thought-card p{margin-top:6px;line-height:1.45}
+.thought-card small{display:block;color:var(--ink-3);margin-top:7px;font-size:11px}
+.memory-box{padding:0;overflow:hidden}
+.memory-box .panel-head{padding:10px 12px;border-bottom:1px solid var(--line)}
+.memory-row{display:flex;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.memory-row:last-child{border-bottom:0}
+.memory-type{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);min-width:68px;padding-top:2px}
+
 </style>
 <script>
 /* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
@@ -813,7 +823,17 @@ window.S = window.S || {};
       f.energia = Number.isFinite(f.energia) ? f.energia : 80;
       f.humor = Number.isFinite(f.humor) ? f.humor : 68;
       f.entregas = Number(f.entregas) || 0;
-      f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-5) : [];
+      f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-12) : [];
+      f.memoria.forEach(m => {
+        if (typeof m === 'string') return;
+        m.texto = String(m.texto || '').slice(0, 180);
+        m.tipo = m.tipo || 'episodio';
+        m.quando = Number(m.quando) || Date.now();
+        m.importancia = Number(m.importancia) || 1;
+      });
+      f.memoriaPerfil = Array.isArray(f.memoriaPerfil) ? f.memoriaPerfil.slice(0, 5) : [];
+      f.focoAtual = String(f.focoAtual || 'Aguardando a próxima etapa do projeto.').slice(0, 220);
+      f.projetoAtual = f.projetoAtual || null;
       f.uso = f.uso || { chamadas: 0, tokens: 0 };
     });
     e.projetos = Array.isArray(e.projetos) ? e.projetos : [];
@@ -830,7 +850,8 @@ window.S = window.S || {};
       pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
       pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
     });
-    e.contratos = []; // contratos/encomendas pertencem ao modo antigo e não participam mais da simulação.
+    e.contratos = []; // legado: contratos/encomendas não participam da simulação.
+    e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
 
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
     e.tarefas.forEach(t => {
@@ -2242,15 +2263,23 @@ Sem numeração, sem markdown.`;
       cargo: agente ? agente.cargo : 'produção',
       briefing: String(op.briefing || kit.desc).slice(0, 420),
       projectId: op.projectId || null,
-      projeto: contextoProjeto(e, op.projectId)
+      projeto: contextoProjeto(e, op.projectId),
+      memoria: agente && agente.ref ? (agente.ref.memoria || []).slice(-5) : [],
+      focoAtual: agente && agente.ref ? agente.ref.focoAtual : ''
     };
 
     let campos = null, bruto = '', viaIA = false;
     if (S.ai.pronta()) {
       try {
         const r = await S.ai.chamar({
-          sistema: kit.instrucao(ctx),
-          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto),
+          sistema: kit.instrucao(ctx) + `
+
+PRINCÍPIOS DE TRABALHO: Você está em um projeto contínuo. Verifique se esta etapa contribui para o produto final e para a equipe. Use os artefatos existentes como base. Não invente dados que não estejam no contexto.
+FOCO ATUAL: ${String(ctx.focoAtual || '').slice(0, 220)}
+MEMÓRIA RELEVANTE: ${ctx.memoria.map(m => typeof m === 'string' ? m : m.texto).join(' | ').slice(0, 700)}`,
+          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto) + `
+
+REQUISITO DE ENTREGA: o arquivo produzido deve ser completo, utilizável diretamente pelo público e pronto para consumo/publicação. Não entregue placeholders, rascunhos ou instruções para terminar depois. Se houver produto/catálogo anterior, preserve e integre seus dados reais.`, 
           tipo: 'conteudo', tokens: kit.tokens,
           agente: ctx.autor, motivo: 'produzir ' + kit.nome
         });
@@ -2270,7 +2299,9 @@ Sem numeração, sem markdown.`;
        de qualidade para deixar claro que não passou pela produção da IA. */
     const bruta = aferir(kit, campos, arquivos, agente);
     const qualidade = viaIA ? bruta : Math.min(36, bruta);
-    const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
+    // Produção validada pela IA é uma entrega pública utilizável; a pontuação
+    // permanece como diagnóstico, não como mecânica de jogo.
+    const classe = viaIA && qualidade >= 60 ? 'produto' : (!viaIA ? 'esboco' : 'prototipo');
     return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
   }
 
@@ -2424,17 +2455,14 @@ Sem numeração, sem markdown.`;
     p.balao = null;
   }
   const PAPOS = [
-    ['Como tá indo aí?', 'Quase lá.'],
-    ['Bora um café daqui a pouco?', 'Só termino essa parte.'],
-    ['Viu o prazo de hoje?', 'Vi, ainda dá tempo.'],
-    ['Curti sua última entrega.', 'Valeu, capricho nisso!'],
-    ['O cliente já respondeu?', 'Silêncio total ainda.'],
-    ['Travei numa ideia agora.', 'Dá uma volta, ajuda a pensar.'],
-    ['Semana corrida, hein.', 'Nem me fala.'],
-    ['Você viu o que saiu no projeto?', 'Vi, vou aproveitar na próxima etapa.'],
-    ['Gostei da mesa nova.', 'Fica melhor assim mesmo.']
+    ['Você viu a última versão do projeto?', 'Vi. Vou partir dela, não duplicar o trabalho.'],
+    ['Essa etapa depende da sua entrega?', 'Sim. Vou deixar o handoff claro para você.'],
+    ['O que falta para isso virar produto?', 'Ainda preciso fechar os detalhes de uso público.'],
+    ['Posso aproveitar sua base na próxima etapa?', 'Pode. A versão persistida está no projeto.'],
+    ['Tem algum dado que eu não devo perder?', 'Sim. Está registrado na entrega anterior.'],
+    ['Acho que encontrei um caminho melhor.', 'Mostra depois; se melhorar o produto, incorporamos.']
   ];
-  const SOZINHO = ['Só esticando as pernas.', 'Pensando na próxima ideia.', 'Um respiro rápido.', 'Café resolve tudo.'];
+  const SOZINHO = ['Vou revisar o que já foi feito.', 'Vou conferir a próxima etapa.', 'Vou organizar o contexto do projeto.'];
 
   const livres = () => rt.filter(p => !p.ocupado && p.estado === 'sentado');
 
@@ -2445,7 +2473,8 @@ Sem numeração, sem markdown.`;
     await Promise.all([irPara(a, meio), irPara(b, { x: meio.x + 24, y: meio.y })]);
     if (a.ocupado || b.ocupado) return;
     a.estado = 'falando'; b.estado = 'falando';
-    const [fa, fb] = pick(PAPOS);
+    const chavePapo = (a.id + b.id).split('').reduce((n,ch) => n + ch.charCodeAt(0), 0);
+    const [fa, fb] = PAPOS[chavePapo % PAPOS.length];
     await dizer(a, fa, 1500);
     if (!b.ocupado) await dizer(b, fb, 1500);
     await sleep(200);
@@ -2466,16 +2495,19 @@ Sem numeração, sem markdown.`;
     await irPara(p, assento(p));
   }
 
+  let ultimoEncontro = 0;
   function socializar() {
-    if (Math.random() > 0.6) return; // não em toda batida do relógio — mais orgânico
+    if (Date.now() - ultimoEncontro < 26000) return;
     const disponiveis = livres();
-    if (!disponiveis.length) return;
-    if (disponiveis.length >= 2 && Math.random() < 0.55) {
-      const shuf = disponiveis.slice().sort(() => Math.random() - 0.5);
-      bateBoca(shuf[0], shuf[1]).catch(() => {});
-    } else {
-      darUmaVolta(pick(disponiveis)).catch(() => {});
-    }
+    if (disponiveis.length < 2) return;
+    const e = S.state.atual();
+    const projeto = (e && e.projetos || []).find(x => x.status === 'ativo');
+    if (!projeto) return;
+    const grupo = disponiveis.filter(p => p.ref.projetoAtual === projeto.id);
+    const lista = grupo.length >= 2 ? grupo : disponiveis;
+    if (lista.length < 2) return;
+    ultimoEncontro = Date.now();
+    bateBoca(lista[0], lista[1]).catch(() => {});
   }
 
   /* ---------- vitais ---------- */
@@ -2510,9 +2542,36 @@ Sem numeração, sem markdown.`;
     p.ref.humor = clamp(p.ref.humor + delta, 0, 100);
     if (motivo && Math.abs(delta) >= 6) lembrar(p, motivo);
   }
-  function lembrar(p, texto) {
-    if (!p.ref) return;
-    p.ref.memoria = (p.ref.memoria || []).concat(String(texto).slice(0, 90)).slice(-5);
+  /* Memória em camadas, barata e persistente:
+     - perfil: fatos estáveis que o agente aprende sobre seu jeito de trabalhar;
+     - episódios: últimos acontecimentos relevantes;
+     - projeto atual: o que está sendo construído e por quê.
+     Nunca enviamos toda a memória para a IA: só os itens relevantes e recentes. */
+  function lembrar(p, texto, tipo='episodio', importancia=1, projectId=null) {
+    if (!p || !p.ref) return;
+    const f = p.ref;
+    const item = { texto: String(texto || '').replace(/\s+/g, ' ').slice(0, 180), tipo, importancia, projectId: projectId || f.projetoAtual || null, quando: Date.now() };
+    if (!item.texto) return;
+    f.memoria = (Array.isArray(f.memoria) ? f.memoria : []).filter(m => {
+      const t = typeof m === 'string' ? m : m.texto;
+      return String(t || '').toLowerCase() !== item.texto.toLowerCase();
+    }).concat(item).slice(-12);
+  }
+  function foco(p, texto) {
+    if (!p || !p.ref) return;
+    p.ref.focoAtual = String(texto || '').replace(/\s+/g, ' ').slice(0, 220);
+    S.bus.emit('equipe');
+  }
+  function memoriaRelevante(p, projectId) {
+    const f = p && p.ref; if (!f) return [];
+    return (f.memoria || []).map(m => typeof m === 'string' ? { texto:m, importancia:1, projectId:null } : m)
+      .filter(m => !projectId || !m.projectId || m.projectId === projectId)
+      .sort((a,b) => (Number(b.importancia)||1) - (Number(a.importancia)||1) || (Number(b.quando)||0)-(Number(a.quando)||0))
+      .slice(0, 5);
+  }
+  function memoriaPrompt(p, projectId) {
+    const itens = memoriaRelevante(p, projectId);
+    return itens.length ? '\nMEMÓRIA RELEVANTE DO AGENTE:\n' + itens.map(m => '- ' + m.texto).join('\n') : '';
   }
 
   /* ---------- arquivos ---------- */
@@ -2528,6 +2587,21 @@ Sem numeração, sem markdown.`;
       };
       e.arquivos.unshift(arq);
       return arq;
+    });
+    /* O site é um artefato vivo: qualquer produto novo do projeto precisa
+       aparecer nele. A atualização vira trabalho da equipe, nunca uma cópia
+       isolada esquecida. */
+    salvos.filter(a => a.classe === 'produto' && a.kit !== 'landing').forEach(produto => {
+      const projeto = e.projetos.find(pr => pr.id === produto.projectId);
+      if (!projeto) return;
+      const site = e.arquivos.find(a => a.projectId === projeto.id && a.classe === 'produto' && a.kit === 'landing');
+      const jaExiste = e.tarefas.some(t => t.projectId === projeto.id && t.status !== 'feita' && t.kit === 'landing' && /atualizar site|integrar .* site/i.test(t.titulo));
+      if (site && !jaExiste) novaTarefa({
+        titulo: `Atualizar site com ${produto.nome}`,
+        kit: 'landing',
+        briefing: `Atualizar o site existente com o produto ${produto.nome}, preservando produtos, textos e estrutura já publicados.`,
+        projectId: projeto.id, baseArquivoId: site.id, origem: 'continuidade-do-projeto'
+      });
     });
     if (e.arquivos.length > 90) e.arquivos.length = 90;
     if (p && p.ref) p.ref.entregas = (p.ref.entregas || 0) + 1;
@@ -2619,10 +2693,30 @@ Sem numeração, sem markdown.`;
       || abertas.find(t => !t.para) || null;
   }
 
+  async function colaborar(p, projectId) {
+    const e = S.state.atual(); if (!e || !p || p.ocupado) return;
+    const prox = e.tarefas.find(t => t.projectId === projectId && t.status === 'aberta' && t.para && t.para !== p.id);
+    if (!prox) return;
+    const colega = rt.find(x => x.id === prox.para && !x.ocupado);
+    if (!colega) return;
+    p.estado = colega.estado = 'falando';
+    p.balao = `Handoff: ${prox.titulo.slice(0, 28)}`;
+    colega.balao = 'Recebi o contexto.';
+    lembrar(p, `Passei contexto para ${colega.nome} sobre a continuidade do projeto.`, 'colaboracao', 3, projectId);
+    lembrar(colega, `Recebi contexto de ${p.nome} para continuar ${prox.titulo}.`, 'colaboracao', 3, projectId);
+    await sleep(1700);
+    if (!p.ocupado) { p.balao = null; p.estado = 'sentado'; }
+    if (!colega.ocupado) { colega.balao = null; colega.estado = 'sentado'; }
+    S.state.gravar(); S.bus.emit('equipe');
+  }
+
   /* Executa uma tarefa do começo ao fim: uma chamada de IA, um arquivo. */
   async function executar(p, tarefa) {
     const e = S.state.atual(); if (!e) return false;
     p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
+    p.ref.projetoAtual = tarefa.projectId || p.ref.projetoAtual;
+    foco(p, `Estou trabalhando em "${tarefa.titulo}". Minha prioridade é: 1) contribuir para o produto final; 2) deixar algo reutilizável para a equipe.`);
+    lembrar(p, `Assumi a etapa "${tarefa.titulo}".`, 'episodio', 2, tarefa.projectId);
     tarefa.status = 'fazendo'; tarefa.para = p.id;
     S.bus.emit('trabalho'); S.bus.emit('equipe');
     S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
@@ -2634,9 +2728,12 @@ Sem numeração, sem markdown.`;
     let ok = false;
     try {
       const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref, projectId: tarefa.projectId, baseArquivoId: tarefa.baseArquivoId });
-      if (saida && saida.arquivos.length) {
+      if (saida && saida.arquivos.length && saida.classe === 'produto') {
         const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, { projectId: tarefa.projectId }), p);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
+        colaborar(p, tarefa.projectId).catch(() => {});
+        foco(p, `Concluí a etapa e deixei ${salvos[0].nome} integrado ao projeto. A próxima pessoa deve partir desta versão, não começar do zero.`);
+        lembrar(p, `Entreguei ${salvos.map(a => a.nome).join(', ')} para a continuidade do projeto.`, 'episodio', 3, tarefa.projectId);
         tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
         tarefa.handoff = `${p.nome}: ${salvos.map(a => a.nome).join(', ')} prontos para a próxima etapa.`;
         const proj = e.projetos.find(x => x.id === tarefa.projectId);
@@ -2650,6 +2747,8 @@ Sem numeração, sem markdown.`;
         if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
       } else {
         tarefa.status = 'aberta';
+        foco(p, `A entrega ainda não atingiu o padrão de produto pronto. Vou preservar o contexto e tentar novamente, sem publicar um rascunho.`);
+        lembrar(p, `A primeira tentativa de "${tarefa.titulo}" não passou pelo padrão de produto pronto.`, 'qualidade', 3, tarefa.projectId);
         humor(p, -7, `empaquei em ${tarefa.titulo}`);
         S.state.registrar(`${p.nome} não conseguiu concluir "${tarefa.titulo}".`, 'erro', p.id);
       }
@@ -2661,6 +2760,7 @@ Sem numeração, sem markdown.`;
       p.progresso = 1;
       p.ocupado = false; p.tarefa = null;
       await falar(p, ok ? 'Pronto ✓' : 'Travei aqui', 1400);
+      if (ok) lembrar(p, 'Minha produção precisa continuar útil para a equipe, não apenas parecer concluída.', 'principio', 3, tarefa.projectId);
       p.progresso = 0;
       S.state.gravar(); S.bus.emit('trabalho'); S.bus.emit('equipe');
     }
@@ -3156,6 +3256,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     folha(`
       <h2>${esc(p.nome)}</h2>
       <p class="sub">${esc(p.cargo)} · ${esc(esp ? esp.desc : '')}</p>
+      <div class="thought-card">
+        <span class="panel-label">Foco atual</span>
+        <p>${esc(f.focoAtual || 'Aguardando a próxima etapa do projeto.')}</p>
+        <small>Resumo operacional — não expõe raciocínio interno privado.</small>
+      </div>
       <div class="stats">
         <div class="stat"><span>Energia</span><b>${Math.round(f.energia)}/100</b></div>
         <div class="stat"><span>Humor</span><b>${Math.round(f.humor)}/100</b></div>
@@ -3163,7 +3268,14 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
       </div>
-      ${(f.memoria || []).length ? `<p class="panel-foot">Últimas anotações: ${esc(f.memoria.slice(-3).join(' · '))}</p>` : ''}
+      <div class="memory-box">
+        <div class="panel-head"><span class="panel-label">Memória de trabalho</span><span class="chip">${(f.memoria || []).length} registros</span></div>
+        ${(f.memoria || []).slice().reverse().slice(0, 8).map(m => {
+          const texto = typeof m === 'string' ? m : m.texto;
+          const tipo = typeof m === 'string' ? 'episódio' : (m.tipo || 'episódio');
+          return `<div class="memory-row"><span class="memory-type">${esc(tipo)}</span><span>${esc(texto)}</span></div>`;
+        }).join('') || '<p class="panel-foot">Ainda não há lembranças relevantes.</p>'}
+      </div>
       <div class="sheet-actions">
         ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
         <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>

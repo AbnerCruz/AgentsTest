@@ -660,15 +660,23 @@ Sem numeração, sem markdown.`;
       cargo: agente ? agente.cargo : 'produção',
       briefing: String(op.briefing || kit.desc).slice(0, 420),
       projectId: op.projectId || null,
-      projeto: contextoProjeto(e, op.projectId)
+      projeto: contextoProjeto(e, op.projectId),
+      memoria: agente && agente.ref ? (agente.ref.memoria || []).slice(-5) : [],
+      focoAtual: agente && agente.ref ? agente.ref.focoAtual : ''
     };
 
     let campos = null, bruto = '', viaIA = false;
     if (S.ai.pronta()) {
       try {
         const r = await S.ai.chamar({
-          sistema: kit.instrucao(ctx),
-          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto),
+          sistema: kit.instrucao(ctx) + `
+
+PRINCÍPIOS DE TRABALHO: Você está em um projeto contínuo. Verifique se esta etapa contribui para o produto final e para a equipe. Use os artefatos existentes como base. Não invente dados que não estejam no contexto.
+FOCO ATUAL: ${String(ctx.focoAtual || '').slice(0, 220)}
+MEMÓRIA RELEVANTE: ${ctx.memoria.map(m => typeof m === 'string' ? m : m.texto).join(' | ').slice(0, 700)}`,
+          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto) + `
+
+REQUISITO DE ENTREGA: o arquivo produzido deve ser completo, utilizável diretamente pelo público e pronto para consumo/publicação. Não entregue placeholders, rascunhos ou instruções para terminar depois. Se houver produto/catálogo anterior, preserve e integre seus dados reais.`, 
           tipo: 'conteudo', tokens: kit.tokens,
           agente: ctx.autor, motivo: 'produzir ' + kit.nome
         });
@@ -688,7 +696,9 @@ Sem numeração, sem markdown.`;
        de qualidade para deixar claro que não passou pela produção da IA. */
     const bruta = aferir(kit, campos, arquivos, agente);
     const qualidade = viaIA ? bruta : Math.min(36, bruta);
-    const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
+    // Produção validada pela IA é uma entrega pública utilizável; a pontuação
+    // permanece como diagnóstico, não como mecânica de jogo.
+    const classe = viaIA && qualidade >= 60 ? 'produto' : (!viaIA ? 'esboco' : 'prototipo');
     return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
   }
 

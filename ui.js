@@ -126,6 +126,11 @@
     folha(`
       <h2>${esc(p.nome)}</h2>
       <p class="sub">${esc(p.cargo)} · ${esc(esp ? esp.desc : '')}</p>
+      <div class="thought-card">
+        <span class="panel-label">Foco atual</span>
+        <p>${esc(f.focoAtual || 'Aguardando a próxima etapa do projeto.')}</p>
+        <small>Resumo operacional — não expõe raciocínio interno privado.</small>
+      </div>
       <div class="stats">
         <div class="stat"><span>Energia</span><b>${Math.round(f.energia)}/100</b></div>
         <div class="stat"><span>Humor</span><b>${Math.round(f.humor)}/100</b></div>
@@ -133,7 +138,14 @@
         <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
       </div>
-      ${(f.memoria || []).length ? `<p class="panel-foot">Últimas anotações: ${esc(f.memoria.slice(-3).join(' · '))}</p>` : ''}
+      <div class="memory-box">
+        <div class="panel-head"><span class="panel-label">Memória de trabalho</span><span class="chip">${(f.memoria || []).length} registros</span></div>
+        ${(f.memoria || []).slice().reverse().slice(0, 8).map(m => {
+          const texto = typeof m === 'string' ? m : m.texto;
+          const tipo = typeof m === 'string' ? 'episódio' : (m.tipo || 'episódio');
+          return `<div class="memory-row"><span class="memory-type">${esc(tipo)}</span><span>${esc(texto)}</span></div>`;
+        }).join('') || '<p class="panel-foot">Ainda não há lembranças relevantes.</p>'}
+      </div>
       <div class="sheet-actions">
         ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
         <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>
