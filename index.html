@@ -449,7 +449,7 @@
    do Web Worker; a página principal não duplica o consumo de RAM.
    ============================================================ */
 const MODELOS = {
-  minimo: { id:'onnx-community/SmolLM-135M-Instruct-ONNX', dtype:'q8', nome:'SmolLM 135M · mínimo', nivel:'Mínimo', tamanho:'~136 MB', detalhe:'Serve para testar se o motor roda no aparelho. Responde mal em português e não sustenta a gestão.', memoria:'Baixa', licenca:'Apache-2.0' },
+  minimo: { id:'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA', dtype:'q8', nome:'SmolLM 135M · mínimo', nivel:'Mínimo', tamanho:'~118 MB', detalhe:'Serve para testar se o motor roda no aparelho. Responde mal em português e não sustenta a gestão.', memoria:'Baixa', licenca:'Apache-2.0' },
   leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q8', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~380 MB', detalhe:'Segue instrução melhor que o 135M, mas ainda tropeça em português.', memoria:'Baixa–média', licenca:'Apache-2.0' },
   recomendado: { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q8', nome:'Qwen2.5 0.5B · recomendado', nivel:'Recomendado', tamanho:'~530 MB', detalhe:'Primeiro modelo que responde de forma coerente em português e obedece ao formato de resposta do app.', memoria:'Média', licenca:'Apache-2.0' },
   forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,1 GB', detalhe:'Melhor qualidade de decisão e escrita. Cada resposta demora bem mais e exige aparelho folgado de memória.', memoria:'Alta', licenca:'Apache-2.0' },
@@ -463,6 +463,7 @@ if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
 let modeloSelecionado = localStorage.getItem('modelo-ia-ativo') || MODEL_PADRAO;
+if(modeloSelecionado==='onnx-community/SmolLM-135M-Instruct-ONNX'){ modeloSelecionado=MODEL_PADRAO; try{localStorage.setItem('modelo-ia-ativo',MODEL_PADRAO);}catch(e){} }
 if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
 let modelosInstalados = [];
 const modelosBaixando = new Set();
@@ -586,7 +587,7 @@ async function initRuntime(source, allowRemote=false){
     // binarios .wasm do ONNX. Offline quem entrega estes arquivos e o Service Worker.
     const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
     pipeline=mod.pipeline; env=mod.env; TextStreamerCls=mod.TextStreamer||null;
-    env.allowRemoteModels=true; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
+    env.allowRemoteModels=!!allowRemote; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
     try{ if(env.backends?.onnx?.wasm){
       env.backends.onnx.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
       // Sempre 1 thread. Multi-thread (SharedArrayBuffer) foi testado e derruba
@@ -846,13 +847,14 @@ async function limparCacheModelos(){
 function extrairTextoGerado(result){
   const primeiro = Array.isArray(result) ? result[0] : result;
   if(!primeiro) return '';
-  const g = primeiro.generated_text ?? primeiro;
+  let g = primeiro.generated_text ?? primeiro.text ?? primeiro;
   if(typeof g === 'string') return g;
   if(Array.isArray(g)){
-    const ultima = [...g].reverse().find(m => m && m.role === 'assistant') || g[g.length-1];
-    return String(ultima?.content || '');
+    const ultima = [...g].reverse().find(m => m && (m.role === 'assistant' || m.role === 'model')) || g[g.length-1];
+    return String(ultima?.content ?? ultima?.text ?? '');
   }
-  return String(g?.content || '');
+  if(g && typeof g === 'object') return String(g.content ?? g.text ?? '');
+  return String(g ?? '');
 }
 
 /* Modelos pequenos raramente fecham um JSON valido. Aceitamos tambem
@@ -903,12 +905,12 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   // metade. Decisao curta e apertada; conteudo entregavel tem folga.
   const conteudo = tipo === 'conteudo';
   const fraco = memoria && memoria <= 4;
-  const tetoCelular = conteudo ? (fraco ? 320 : 480) : (fraco ? 64 : 110);
+  const tetoCelular = conteudo ? (fraco ? 220 : 360) : (fraco ? 48 : 80);
   const limite=Math.min(Number(maxTokens)||80,tetoCelular);
   const corte = conteudo ? 1100 : 650;
   const sysText=String(system||'').slice(0,corte);
   const userTextSafe=String(userText||'').slice(0,corte);
-  const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
+  const messages=[{role:'user',content:sysText+'\n\n'+userTextSafe}];
   const modeloDaChamada = modeloDoTipo(tipo);
   chamadasNaFila++;
   const inicioGeracao = Date.now();
