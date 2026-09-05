@@ -55,6 +55,14 @@
   .token-card .row:first-of-type{ border-top:none; }
   .token-card .row .val{ font-family:'JetBrains Mono',monospace; }
 
+  .ai-status{background:var(--white);border:1.5px solid var(--line);border-radius:6px;padding:9px 12px;font-size:11.5px;line-height:1.45;margin-bottom:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .ai-dot{width:9px;height:9px;border-radius:50%;background:var(--sage);flex-shrink:0;}
+  .ai-dot.loading{background:var(--amber);animation:pulse 1.1s ease-in-out infinite;}
+  .ai-dot.error{background:var(--brick);}
+  .ai-detail{color:var(--ink-soft);}
+  .ai-progress{width:100%;height:5px;background:var(--grid);border-radius:999px;overflow:hidden;}
+  .ai-progress span{display:block;height:100%;width:0;background:var(--amber);transition:width .2s ease;}
+
   .storage-warn{
     background:#FFF4F2; border:1.5px solid var(--brick); border-radius:6px;
     padding:9px 12px; font-size:11.5px; line-height:1.45; margin-bottom:10px; color:#7A2A22;
@@ -156,7 +164,9 @@
   .approval-box .ab-title{ font-weight:600; margin-bottom:6px; }
   .approval-item{ display:flex; gap:8px; align-items:flex-start; padding:6px 0; border-top:1px dashed #E3B8B2; line-height:1.45; }
   .approval-item:first-of-type{ border-top:none; }
-  .approval-item .ai-actions{ margin-left:auto; display:flex; gap:5px; flex-shrink:0; }
+  .approval-item .ai-actions{ margin-left:auto; display:flex; gap:5px; flex-shrink:0; flex-wrap:wrap; }
+  .approval-meta{font-size:10.5px;color:var(--ink-soft);margin-top:3px;}
+  .approval-rationale{font-size:11px;margin-top:4px;padding:5px 7px;background:#fff;border:1px solid #ead0cc;border-radius:4px;}
 
   /* ---------- log ---------- */
   .log-scope{ display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
@@ -218,7 +228,6 @@
     .top-actions{ width:100%; margin-left:0; }
     select.company-select{ flex:1; min-width:0; }
   }
-.ai-status{margin:8px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--white);display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}.ai-detail{color:var(--ink-soft)}.ai-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);display:inline-block}.ai-dot[data-state="ready"]{background:var(--sage)}.ai-dot[data-state="error"]{background:var(--brick)}.ai-progress{flex-basis:100%;height:5px;background:var(--grid);border-radius:99px;overflow:hidden}.ai-progress span{display:block;height:100%;width:0;background:var(--sage);transition:width .2s}
 </style>
 </head>
 <body>
@@ -232,10 +241,19 @@
     <div class="top-actions">
       <div class="token-pill" id="tokenPill" hidden>0 tok · US$ 0,000</div>
       <select class="company-select" id="companySelect" hidden></select>
+      <button class="btn small" id="aiModelsTopBtn">IA / Modelos</button>
       <button class="btn small" id="newCompanyBtn">+ Nova empresa</button>
+      <button class="btn small danger" id="resetAllTopBtn" title="Destruir todas as empresas e apagar o modelo">Zerar tudo</button>
     </div>
   </div>
 
+  <div class="ai-status" id="aiStatus">
+    <span class="ai-dot" id="aiDot"></span>
+    <strong id="aiStatusTitle">IA local pronta para carregar</strong>
+    <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
+    <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
+    <button class="btn small" id="aiRetryBtn" type="button" hidden>Tentar novamente</button>
+  </div>
   <div class="storage-warn" id="storageWarn" hidden>
     Salvamento indisponível nesta sessão — a empresa funciona normalmente, mas não fica guardada ao fechar.
   </div>
@@ -243,9 +261,26 @@
   <!-- estado vazio -->
   <div id="emptyState" class="empty-state">
     <h2>Nenhuma empresa ainda</h2>
-    <p>Funde uma empresa e a IA cria sua sócia-gerente. Vocês configuram o negócio juntos, contratam gente, e a equipe passa a viver e trabalhar no escritório.</p>
+    <p>Funde a empresa sem depender da IA. Depois escolha, baixe e ative um modelo gratuito na área <b>IA / Modelos</b>. A gerente assume a operação quando houver um modelo ativo.</p>
     <button class="btn primary" id="foundBtn">Fundar nova empresa</button>
   </div>
+
+  <!-- CENTRAL DE MODELOS IA -->
+  <section id="aiModelsPanel" class="card" hidden style="margin-top:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+      <div>
+        <h2 style="margin:0 0 4px;font-size:19px;">Central de IA local</h2>
+        <div class="msub">Todos os modelos são gratuitos para uso local. Baixe uma vez; depois o navegador usa o cache. Nada é enviado para uma API paga.</div>
+      </div>
+      <button class="btn small" id="closeAIModelsBtn">Fechar</button>
+    </div>
+    <div class="card" style="margin-top:10px;padding:12px;">
+      <div style="font-weight:700;">Modelo ativo</div>
+      <div id="activeModelSummary" class="stage-note" style="margin-top:5px;"></div><div id="offlineDiag" class="stage-note" style="margin-top:6px;"></div><div class="modal-actions" style="margin-top:9px;"><button class="btn small" id="offlineTestBtn">Testar operação 100% offline</button></div>
+    </div>
+    <div id="modelManagerList" style="display:grid;gap:9px;margin-top:10px;"></div>
+    <div class="stage-note" style="margin-top:10px;">Regra recomendada: mantenha só 1 modelo ativo para reduzir RAM. Modelos instalados podem ficar inativos; desinstale os que não quiser manter no cache.</div>
+  </section>
 
   <!-- app principal -->
   <div id="mainApp" hidden>
@@ -260,11 +295,11 @@
     <!-- ESCRITÓRIO -->
     <section class="view active" id="view-escritorio">
       <canvas id="stage" width="620" height="400"></canvas>
-      <label class="toggle-row">
-        <input type="checkbox" id="autoToggle">
-        vida autônoma (a equipe tem ideias, pede permissão à gerente e produz sozinha — consome chamadas de IA)
-      </label>
-      <div class="stage-note">Toque num agente no escritório ou num card abaixo para inspecionar. Quem está com 🤔 e brilho no chão está aguardando uma decisão real do modelo.</div>
+      <div class="toggle-row" style="display:flex;align-items:center;gap:10px;">
+        <span class="ai-dot" style="display:inline-block;flex:0 0 auto;"></span>
+        <strong>vida autônoma ativa</strong> · a equipe trabalha por padrão, pensa, conversa, faz pausas e toma iniciativas.
+      </div>
+      <div class="stage-note">A simulação acontece continuamente. 🤔 indica pensamento real da IA; balões e movimentos também acontecem entre as decisões para o escritório não ficar parado.</div>
       <div class="agents-row" id="agentsRow"></div>
       <div class="inspector" id="inspector" hidden></div>
     </section>
@@ -303,13 +338,14 @@
     <!-- MÉTRICAS -->
     <section class="view" id="view-metricas">
       <div class="metrics-grid" id="metricsGrid"></div>
+      <div class="card" id="managerDecisionsCard"></div>
       <button class="btn" id="analyzeBtn">Pedir análise à gerente</button>
       <div class="card" id="analysisCard" hidden></div>
       <div class="card token-card">
         <h3>Consumo de IA</h3>
         <div id="tokenBreakdown"></div>
         <div class="stage-note" style="margin-top:9px;">
-          Toda a equipe e a gerente rodam a IA localmente neste navegador. Custo de API: US$ 0.
+          A empresa usa o modelo que você selecionar entre os modelos instalados. Todos rodam localmente e têm custo de API zero; o tamanho e o consumo de memória variam.
         </div>
       </div>
     </section>
@@ -325,6 +361,17 @@
         <button class="btn primary small" id="saveCfgBtn">Salvar alterações</button>
       </div>
       <div class="card">
+        <h3>Modelo desta empresa</h3>
+        <div class="form-row"><label for="modelSelect">Modelo instalado e ativo</label><select class="field-input" id="modelSelect"></select></div>
+        <div class="stage-note" id="modelDetail">Baixe os modelos na área IA / Modelos. Aqui você apenas escolhe um que já esteja instalado.</div>
+        <button class="btn small" id="applyModelBtn">Usar neste momento</button>
+      </div>
+      <div class="card">
+        <h3>Recomeçar do zero</h3>
+        <div class="msub">Apaga todas as empresas, o histórico e o cache dos modelos locais deste app. Depois você começa novamente.</div>
+        <button class="btn small danger" id="resetAllBtn">Destruir tudo e apagar modelo</button>
+      </div>
+      <div class="card">
         <h3>Equipe</h3>
         <div id="staffList"></div>
         <div style="margin-top:10px;">
@@ -333,18 +380,10 @@
       </div>
       <div class="card">
         <h3>Encerrar</h3>
-        <button class="btn small danger" id="deleteCompanyBtn">Fechar esta empresa</button>
+        <button class="btn small danger" id="deleteCompanyBtn">Destruir esta empresa</button>
       </div>
     </section>
   </div>
-</div>
-
-<div class="ai-status" id="aiStatus">
-  <span class="ai-dot" id="aiDot"></span>
-  <strong id="aiStatusTitle">IA local pronta para carregar</strong>
-  <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
-  <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
-  <button class="btn small" id="aiRetryBtn" type="button" hidden>Tentar novamente</button>
 </div>
 
 <!-- modal genérico -->
@@ -353,97 +392,350 @@
 </div>
 
 <script type="module">
-import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
-
-env.allowLocalModels = false;
-env.useBrowserCache = true;
-
 /* ============================================================
-   IA — todas as decisões passam por aqui. Prompts curtos e
-   respostas em JSON compacto: economia de tokens é a base.
+   IA LOCAL — roda no próprio navegador, sem API key.
+   O pacote pesado do Transformers.js é carregado SOMENTE dentro
+   do Web Worker; a página principal não duplica o consumo de RAM.
    ============================================================ */
-// IA local: nenhum servidor de inferência e nenhuma chave de API.
-// Este repositório ONNX é a versão Instruct, própria para seguir comandos.
-const MODEL_LOCAL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
-const MODEL_BARATO = MODEL_LOCAL;
-const MODEL_GERENTE = MODEL_LOCAL;
-const NOME_CURTO = { [MODEL_LOCAL]: 'SmolLM2 360M Instruct · local' };
-const PRECO = { [MODEL_LOCAL]: { in:0, out:0 } };
-let pipe = null;
-let aiLoading = null;
-
-function setAIStatus(title, detail, state='loading', progress=null){
-  const t=document.getElementById('aiStatusTitle'), d=document.getElementById('aiStatusDetail');
-  const dot=document.getElementById('aiDot'), bar=document.getElementById('aiProgressBar'), box=document.getElementById('aiProgress');
-  const retry=document.getElementById('aiRetryBtn');
-  if(t) t.textContent=title;
-  if(d) d.textContent=detail;
-  if(dot) dot.dataset.state=state;
-  if(box){ box.hidden = progress===null; if(progress!==null && bar) bar.style.width=Math.max(0,Math.min(100,progress))+'%'; }
-  if(retry) retry.hidden = state !== 'error';
+const MODELOS = {
+  muitoLeve: { id:'onnx-community/SmolLM-135M-Instruct-ONNX', dtype:'q8', nome:'SmolLM 135M · muito leve', nivel:'Muito leve', tamanho:'~136 MB', detalhe:'Quantização q8 em WASM/CPU: a combinação testada e estável no Android.', memoria:'Baixa', licenca:'Apache-2.0' },
+  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q8', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~272 MB', detalhe:'Mais capaz que o 135M, ainda adequado para aparelhos modestos.', memoria:'Baixa–média', licenca:'Apache-2.0' },
+  medio: { id:'onnx-community/TinyLlama-1.1B-Chat-v1.0-ONNX', dtype:'q4f16', nome:'TinyLlama 1.1B · médio', nivel:'Médio', tamanho:'~714 MB', detalhe:'Modelo intermediário com boa relação entre capacidade e consumo.', memoria:'Média–alta', licenca:'Apache-2.0' },
+  pesado: { id:'HuggingFaceTB/SmolLM2-1.7B-Instruct', dtype:'q4f16', nome:'SmolLM2 1.7B · pesado', nivel:'Pesado', tamanho:'~1,11 GB', detalhe:'Mais capacidade para gestão, escrita e decisões; indicado para aparelhos fortes.', memoria:'Alta', licenca:'Apache-2.0' },
+  muitoPesado: { id:'onnx-community/Phi-3.5-mini-instruct-onnx-web', dtype:'q4f16', nome:'Phi-3.5 Mini · muito pesado', nivel:'Muito pesado', tamanho:'~2,32 GB', detalhe:'Modelo grande e multilíngue, voltado a raciocínio e tarefas mais exigentes. Pode não ser adequado para celulares.', memoria:'Muito alta', licenca:'MIT' },
+};
+const MODEL_PADRAO = MODELOS.muitoLeve.id;
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+let modeloSelecionado = localStorage.getItem('modelo-ia-ativo') || MODEL_PADRAO;
+if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
+let modelosInstalados = [];
+const modelosBaixando = new Set();
+try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados') || '[]'); } catch(e) { modelosInstalados=[]; }
+if(!Array.isArray(modelosInstalados)) modelosInstalados=[];
+function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.muitoLeve; }
+const MODEL_LOCAL = MODEL_PADRAO;
+let MODEL_BARATO = modeloSelecionado;
+let MODEL_GERENTE = modeloSelecionado;
+const PRECO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, {in:0,out:0}]));
+const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.nome]));
+function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
+function modeloInstalado(id){ return modelosInstalados.includes(id); }
+function marcarModeloInstalado(id){ if(!modelosInstalados.includes(id)){ modelosInstalados.push(id); persistirModelos(); } }
+function setAIStatus(kind, title, detail, progress=null){
+  const dot=document.getElementById('aiDot'), t=document.getElementById('aiStatusTitle'), d=document.getElementById('aiStatusDetail');
+  const bar=document.getElementById('aiProgressBar'), box=document.getElementById('aiProgress'), retry=document.getElementById('aiRetryBtn');
+  if(t) t.textContent=title||''; if(d) d.textContent=detail||'';
+  if(dot) dot.className='ai-dot '+(kind||'');
+  if(box) box.hidden = !(kind==='loading' && typeof progress==='number');
+  if(bar && typeof progress==='number') bar.style.width=Math.max(0,Math.min(100,progress))+'%';
+  if(retry) retry.hidden = kind!=='error';
 }
 
-function extrairTextoGerado(result){
-  const item = Array.isArray(result) ? result[0] : result;
-  if(!item) return '';
-  if(typeof item.generated_text === 'string') return item.generated_text;
-  if(Array.isArray(item.generated_text)){
-    const last=item.generated_text[item.generated_text.length-1];
-    return typeof last==='string' ? last : (last?.content || '');
+let pipelineIA = null;
+let pipelineIAMain = null;
+let modoIAMain = false;
+let carregandoIA = null;
+let filaIA = Promise.resolve();
+let workerIA = null;
+let workerUrl = null;
+let workerSeq = 0;
+let workerFalhas = 0;
+let workerReadyResolve = null;
+let workerReadyReject = null;
+let aiGeneration = 0;
+let iaPronta = false;
+let iaTentativaEmAndamento = false; let iaBloqueadaAte = 0;
+const workerPendentes = new Map();
+
+const OFFLINE_RUNTIME_KEY = 'transformersjs-runtime-3.8.1';
+const OFFLINE_READY_KEY = 'ia-offline-pronta';
+const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm';
+let runtimeOfflineSource = null;
+function abrirDBOffline(){
+  return new Promise((resolve,reject)=>{
+    if(!('indexedDB' in window)) return reject(new Error('IndexedDB indisponível neste navegador.'));
+    const req=indexedDB.open('simulador-ia-offline',1);
+    req.onupgradeneeded=()=>{ try{ req.result.createObjectStore('assets'); }catch(e){} };
+    req.onsuccess=()=>resolve(req.result); req.onerror=()=>reject(req.error||new Error('Falha no IndexedDB.'));
+  });
+}
+async function salvarAssetOffline(key,value){
+  const db=await abrirDBOffline();
+  return new Promise((resolve,reject)=>{ const tx=db.transaction('assets','readwrite'); tx.objectStore('assets').put(value,key); tx.oncomplete=()=>{db.close();resolve(true)}; tx.onerror=()=>{db.close();reject(tx.error)}; });
+}
+async function lerAssetOffline(key){
+  try{
+    const db=await abrirDBOffline();
+    return await new Promise((resolve,reject)=>{ const tx=db.transaction('assets','readonly'); const r=tx.objectStore('assets').get(key); r.onsuccess=()=>{db.close();resolve(r.result||null)}; r.onerror=()=>{db.close();reject(r.error)}; });
+  }catch(e){ return null; }
+}
+const ASSETS_RUNTIME=[
+  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js',
+  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.mjs',
+  'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/ort-wasm-simd-threaded.jsep.wasm'
+];
+async function prepararRuntimeOffline(){
+  if(runtimeOfflineSource) return runtimeOfflineSource;
+  if(!('caches' in window)) throw new Error('Este navegador nao guarda arquivos para uso offline aqui. Abra o app pelo endereco https do GitHub Pages.');
+  const cache=await caches.open('ia-runtime-v1');
+  let faltando=[];
+  for(const url of ASSETS_RUNTIME){ if(!await cache.match(url)) faltando.push(url); }
+  if(faltando.length){
+    if(!navigator.onLine) throw new Error('O motor da IA ainda nao foi preparado. Conecte-se uma vez para baixa-lo.');
+    for(const url of faltando){
+      const r=await fetch(url,{mode:'cors'});
+      if(!r.ok) throw new Error('Falha ao baixar o motor da IA ('+r.status+').');
+      await cache.put(url,r.clone());
+    }
   }
-  return '';
+  runtimeOfflineSource='cache';
+  return runtimeOfflineSource;
+}
+async function runtimeOfflinePronto(){
+  if(runtimeOfflineSource) return true;
+  try{ const c=await caches.open('ia-runtime-v1'); for(const u of ASSETS_RUNTIME){ if(!await c.match(u)) return false; } return true; }catch(e){ return false; }
+}
+
+/* A inferência neural roda em Web Worker. Antes ela acontecia na thread
+   principal e o WASM podia congelar toda a interface durante a geração.
+   Agora o escritório continua animado enquanto a fila neural trabalha. */
+const WORKER_CODE = `
+let pipeline = null, env = null, pipe = null, loading = null, activeModel = null, runtimeReady = null;
+async function initRuntime(source, allowRemote=false){
+  if(runtimeReady) return runtimeReady;
+  runtimeReady=(async()=>{
+    // Importamos sempre a URL real da biblioteca. Fora do navegador servido por
+    // uma origem http(s) isto falha; e importar um Blob quebra a resolucao dos
+    // binarios .wasm do ONNX. Offline quem entrega estes arquivos e o Service Worker.
+    const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
+    pipeline=mod.pipeline; env=mod.env;
+    env.allowRemoteModels=true; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
+    try{ if(env.backends?.onnx?.wasm){
+      env.backends.onnx.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
+      env.backends.onnx.wasm.numThreads=1;
+    } }catch(e){}
+    return mod;
+  })();
+  return runtimeReady;
+}
+async function escolherDevice(modelId){
+  // No Android, priorizamos WASM no modelo de 135M: WebGPU pode ser
+  // detectado pelo Chrome e ainda assim derrubar o processo ao compilar
+  // o grafo. Para os modelos maiores, WebGPU continua disponível.
+  if(modelId==='onnx-community/SmolLM-135M-Instruct-ONNX') return 'wasm';
+  try{
+    if(navigator.gpu && typeof navigator.gpu.requestAdapter==='function'){
+      const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});
+      if(adapter) return 'webgpu';
+    }
+  }catch(e){}
+  return 'wasm';
+}
+async function load(modelId, dtype, runtimeSource, allowRemote=false){
+  if(pipe && activeModel===modelId) return pipe;
+  if(loading) return loading;
+  loading=(async()=>{
+    await initRuntime(runtimeSource, allowRemote);
+    const device=await escolherDevice(modelId);
+    postMessage({type:'device',device});
+    const x=await pipeline('text-generation', modelId, {device, dtype, session_options: device==='wasm' ? {executionMode:'sequential', enableCpuMemArena:false, enableMemPattern:false, graphOptimizationLevel:'all'} : undefined, progress_callback:(p)=>postMessage({type:'progress',data:p})});
+    pipe=x; activeModel=modelId; postMessage({type:'ready',modelId,device}); return x;
+  })().catch(e=>{ pipe=null; activeModel=null; postMessage({type:'load-error',error:String(e?.message||e)}); throw e; }).finally(()=>{loading=null;});
+  return loading;
+}
+self.onmessage = async (ev)=>{
+  const msg=ev.data||{};
+  if(msg.type==='load') { try { await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); } catch(e){} return; }
+  if(msg.type==='generate'){
+    try{ const p=await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); const result=await p(msg.messages,{max_new_tokens:msg.maxTokens||128,do_sample:false,return_full_text:false}); postMessage({type:'result',id:msg.id,result}); }
+    catch(e){ postMessage({type:'error',id:msg.id,error:String(e?.message||e)}); }
+  }
+};
+`;
+
+function encerrarWorkerIA(){
+  aiGeneration++;
+  if(workerIA){ try{ workerIA.terminate(); }catch(e){} }
+  workerIA = null;
+  if(workerUrl){ try{ URL.revokeObjectURL(workerUrl); }catch(e){} }
+  workerUrl = null;
+  for(const [id,p] of workerPendentes){ p.reject(new Error('Motor de IA reiniciado.')); workerPendentes.delete(id); }
+  if(workerReadyReject){ workerReadyReject(new Error('Motor de IA reiniciado.')); }
+  workerReadyResolve = null; workerReadyReject = null;
+  pipelineIA = null;
+  pipelineIAMain = null;
+  iaPronta = false;
+  iaBloqueadaAte = 0;
+  modoIAMain = false;
+  carregandoIA = null;
+}
+
+function criarWorkerIA(){
+  encerrarWorkerIA();
+  const epoch = aiGeneration;
+  // Use um Worker Blob como caminho principal. No Chrome Android, um HTML
+  // aberto a partir de content://downloads/... não consegue resolver com
+  // segurança um worker relativo (./ai-worker.js). O Blob evita essa origem problemática. O código do Transformers.js é preparado uma vez
+  // e depois entregue ao worker a partir do armazenamento local, sem CDN durante a execução offline.
+  const blob = new Blob([WORKER_CODE], {type:'text/javascript'});
+  workerUrl = URL.createObjectURL(blob);
+  const w = new Worker(workerUrl, {type:'module'});
+  workerIA = w;
+  w.onmessage = ev => {
+    if(epoch !== aiGeneration || w !== workerIA) return;
+    const m=ev.data||{};
+    if(m.type==='progress'){
+      const p=m.data||{};
+      const frac = typeof p.progress==='number' ? p.progress : null;
+      setAIStatus('loading', 'Baixando/preparando a IA', frac==null ? 'O modelo está sendo preparado neste navegador.' : `${Math.round(frac)}%`, frac);
+      return;
+    }
+    if(m.type==='device'){
+      setAIStatus('loading','Preparando o motor de IA',`${configModelo().nome} · usando ${m.device==='webgpu'?'WebGPU (GPU do aparelho)':'WASM (CPU)'}.`,null);
+      return;
+    }
+    if(m.type==='ready'){
+      pipelineIA = true;
+      iaPronta = true;
+      setAIStatus('ready','IA local pronta ✓',`Modelo: ${configModelo().nome} · ${m.device==='webgpu'?'WebGPU':'WASM/CPU'}. Motor em segundo plano; o escritório continua responsivo durante a geração.`);
+      if(workerReadyResolve) workerReadyResolve(true);
+      workerReadyResolve=null; workerReadyReject=null;
+      return;
+    }
+    if(m.type==='load-error'){
+      iaPronta = false;
+      const err = new Error(m.error||'Não foi possível carregar o modelo.');
+      pipelineIA = null;
+      if(workerReadyReject) workerReadyReject(err);
+      workerReadyResolve=null; workerReadyReject=null;
+      setAIStatus('error','Não foi possível carregar a IA',err.message);
+      return;
+    }
+    if(m.type==='result' || m.type==='error'){
+      const p=workerPendentes.get(m.id); if(!p) return;
+      workerPendentes.delete(m.id);
+      if(m.type==='result') p.resolve(m); else p.reject(new Error(m.error||'Erro na IA local.'));
+    }
+  };
+  w.onerror = e => {
+    if(epoch !== aiGeneration || w !== workerIA) return;
+    const detalhe = [e?.message, e?.filename ? `arquivo: ${e.filename}` : '', e?.lineno ? `linha: ${e.lineno}` : ''].filter(Boolean).join(' · ') || 'O navegador encerrou o processo da IA. Em celulares isso pode acontecer por falta de memória durante o carregamento ou geração.';
+    const err = new Error(detalhe);
+    for(const [id,p] of workerPendentes){ p.reject(err); workerPendentes.delete(id); }
+    if(workerReadyReject) workerReadyReject(err);
+    workerReadyResolve=null; workerReadyReject=null;
+    pipelineIA=null;
+    iaPronta=false;
+    workerFalhas++;
+    setAIStatus('error','Motor de IA interrompido', `${detalhe} ${workerFalhas<=2?'Toque em “Tentar novamente”; farei uma reinicialização limpa.':''}`);
+  };
+  w.onmessageerror = e => {
+    if(epoch !== aiGeneration || w !== workerIA) return;
+    const err = new Error('Falha na comunicação com o motor local. Tente novamente.');
+    for(const [id,p] of workerPendentes){ p.reject(err); workerPendentes.delete(id); }
+    setAIStatus('error','Falha na comunicação da IA',err.message);
+  };
+  return w;
 }
 
 async function carregarIA(){
-  if(pipe) return pipe;
-  if(aiLoading) return aiLoading;
-  aiLoading=(async()=>{
-    setAIStatus('Baixando a IA local…','Primeiro uso: cerca de 272 MB. O arquivo fica em cache no navegador.', 'loading', 0);
-    const progresso = p => {
-      if(p?.progress!=null) setAIStatus('Baixando a IA local…', `${p.fileName||'modelo'} · ${Math.round(p.progress)}%`, 'loading', p.progress);
-    };
-    // Primeiro tenta WebGPU; se o aparelho/driver não suportar, tenta CPU/WASM.
-    const tentativas = [];
-    if(navigator.gpu) tentativas.push({device:'webgpu', dtype:'q4f16', nome:'WebGPU'});
-    tentativas.push({device:'wasm', dtype:'q4', nome:'CPU/WASM'});
-    let ultimo=null;
-    for(const op of tentativas){
-      try{
-        setAIStatus('Preparando a IA local…', `Modo ${op.nome}.`, 'loading', null);
-        pipe = await pipeline('text-generation', MODEL_LOCAL, {
-          device: op.device,
-          dtype: op.dtype,
-          progress_callback: progresso
-        });
-        setAIStatus('IA local pronta ✓', `Rodando neste celular em ${op.nome}. Sem chave de API e sem custo de tokens.`, 'ready', null);
-        return pipe;
-      }catch(err){
-        ultimo=err;
-        console.warn('Falha no modo', op.nome, err);
-        pipe=null;
+  if(pipelineIA && workerIA && iaPronta) return true;
+  if(Date.now() < iaBloqueadaAte) throw new Error('A IA local está temporariamente pausada após uma falha no navegador. Toque em “Tentar novamente” para uma nova tentativa.');
+  if(carregandoIA) return carregandoIA;
+  carregandoIA=(async()=>{
+    await prepararRuntimeOffline();
+    setAIStatus('loading','Preparando o motor de IA',`${configModelo().nome} · carregando em segundo plano.`,null);
+    try{
+      const w=criarWorkerIA();
+      await new Promise((resolve,reject)=>{
+        workerReadyResolve=resolve; workerReadyReject=reject;
+        w.postMessage({type:'load', modelId:modeloSelecionado, dtype:configModelo().dtype, runtimeSource: runtimeOfflineSource, allowRemote: !modeloInstalado(modeloSelecionado)});
+        setTimeout(()=>{
+          if(!pipelineIA && workerReadyReject){
+            workerReadyReject(new Error('O motor local não iniciou dentro de 120 segundos. Em celulares, o primeiro carregamento pode ser demorado; tente novamente em IA / Modelos.'));
+            workerReadyResolve=null; workerReadyReject=null;
+          }
+        },120000);
+      });
+      iaPronta=true;
+      iaBloqueadaAte=0;
+      return true;
+    }catch(err){
+      iaBloqueadaAte=Date.now()+120000;
+      encerrarWorkerIA();
+      setAIStatus('error','A IA não conseguiu iniciar',String(err?.message||err),null);
+      throw err;
+    }
+  })();
+  try{return await carregandoIA;}finally{carregandoIA=null;}
+}
+async function trocarModeloIA(id){ return ativarModeloIA(id); }
+
+async function limparCacheModelos(){
+  aiGeneration++;
+  encerrarWorkerIA();
+  try{
+    const names = await caches.keys();
+    for(const name of names){
+      const cache = await caches.open(name);
+      const reqs = await cache.keys();
+      for(const req of reqs){
+        const u=req.url||'';
+        if(/huggingface\.co|cdn-lfs|hf\.co|transformers/i.test(u)) await cache.delete(req);
       }
     }
-    throw ultimo || new Error('Nenhum modo de execução disponível.');
-  })().catch(err=>{
-    const msg=err?.message || String(err);
-    setAIStatus('Não foi possível carregar a IA local', `Detalhe: ${msg}`, 'error', null);
-    throw err;
-  }).finally(()=>{ aiLoading=null; });
-  return aiLoading;
+  }catch(e){ console.warn('Não foi possível limpar todo o cache de modelos:',e); }
+  localStorage.removeItem('modelo-ia');
+  localStorage.removeItem('modelo-ia-ativo');
+  localStorage.removeItem('modelos-ia-instalados');
+  try{ const dbReq=indexedDB.deleteDatabase('simulador-ia-offline'); dbReq.onerror=()=>{}; }catch(e){}
+  runtimeOfflineSource=null;
+  modelosInstalados=[];
+  modeloSelecionado=MODEL_PADRAO;
+  MODEL_BARATO=MODEL_PADRAO; MODEL_GERENTE=MODEL_PADRAO;
+  DB={empresas:[],atual:null,logGlobal:[]};
+  try{ localStorage.removeItem(STORE_KEY); }catch(e){}
+  selectedAgentId=null;
+  closeModal();
+  renderAll();
+  setAIStatus('idle','Tudo zerado ✓','Empresas, histórico e seleção de modelo foram apagados. O modelo local será baixado novamente quando necessário.');
 }
 
 async function chamarAPI(system, userText, maxTokens, model, agentId){
-  const usado = model || MODEL_LOCAL;
-  const p = await carregarIA();
-  const limite = Math.min(Number(maxTokens)||300, 700);
-  const messages=[
-    {role:'system', content:String(system||'')},
-    {role:'user', content:String(userText||'')}
-  ];
-  const result=await p(messages,{max_new_tokens:limite, do_sample:false, temperature:0.15, return_full_text:false});
-  const text=extrairTextoGerado(result);
-  contabilizar(usado,{input_tokens:Math.ceil((String(system||'').length+String(userText||'').length)/4), output_tokens:Math.ceil(text.length/4)},agentId);
-  return {text, cortado:false};
+  if(!modeloInstalado(modeloSelecionado)) throw new Error('Nenhum modelo de IA instalado. Abra IA / Modelos e baixe um modelo gratuito.');
+  await carregarIA();
+  setAIStatus('loading','IA processando…','O modelo está trabalhando em segundo plano; o escritório continua livre.',null);
+  const memoria = Number(navigator.deviceMemory || 0);
+  const tetoCelular = memoria && memoria <= 4 ? 128 : 256;
+  const limite=Math.min(Number(maxTokens)||80,tetoCelular);
+  const sysText=String(system||'').slice(0,1100);
+  const userTextSafe=String(userText||'').slice(0,1100);
+  const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
+  try{
+    const trabalho = filaIA.catch(()=>{}).then(async () => {
+      return await new Promise((resolve,reject)=>{
+        const id=++workerSeq;
+        workerPendentes.set(id,{resolve,reject});
+        if(!workerIA || !iaPronta){ workerPendentes.delete(id); reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
+        workerIA.postMessage({type:'generate',id,modelId:modeloSelecionado,dtype:configModelo().dtype,messages,maxTokens:limite,runtimeSource:runtimeOfflineSource,allowRemote:false});
+      });
+    });
+    filaIA = trabalho.catch(()=>{});
+    const result = await Promise.race([
+      trabalho,
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error('A geração local demorou demais e foi interrompida para não travar o celular.')),45000))
+    ]);
+    const text=extrairTextoGerado(result);
+    if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
+    setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
+    contabilizar(modeloSelecionado,null,agentId);
+    return {text,cortado:false};
+  }catch(err){
+    setAIStatus('error','Erro ao gerar resposta',String(err?.message || err || 'erro desconhecido'),null);
+    throw err;
+  }
 }
 
 // Conserta JSON truncado ou com quebras de linha cruas dentro das aspas.
@@ -540,6 +832,10 @@ function modeloDe(rt){ return rt.papel === 'gerente' ? MODEL_GERENTE : MODEL_BAR
    Estado / persistência
    ============================================================ */
 const STORE_KEY = 'empresas-all';
+const METRICAS_CORE = [
+  'Como o que estou fazendo agora contribui para o produto final da empresa?',
+  'Como posso contribuir com os meus colegas de equipe?'
+];
 let DB = { empresas: [], atual: null };
 let saveTimer = null;
 let storageOK = true;      // vira false no primeiro erro real
@@ -554,8 +850,8 @@ function warnNoStorage(){
 
 async function loadDB(){
   try{
-    const value = localStorage.getItem(STORE_KEY);
-    if(value) DB = JSON.parse(value);
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw) DB = JSON.parse(raw);
   }catch(e){
     // pode ser só "chave ainda não existe" — não desliga o salvamento por isso
   }
@@ -616,10 +912,11 @@ function buildRuntime(){
       id: f.id, name: f.nome, papel: f.papel, cargo: f.cargo, color: f.cor,
       desk, pos:{ x: desk.x, y: desk.y + 56 }, target:null, state:'sitting',
       icon:null, bubbleText:null, forced:false, currentTask:null, thinking:false,
+      norte:{produto:f.norte?.produto||'', equipe:f.norte?.equipe||''},
     };
     return rt;
   });
-  runtime.forEach(rt => autonomyLoop(rt, token));
+  iniciarVidaAutonoma(token);
   renderAgentCards();
 }
 function rtById(id){ return runtime.find(r => r.id === id); }
@@ -644,162 +941,360 @@ function physics(now){
   }
 }
 
-/* ---------- vida autônoma ----------
-   Todo ciclo o agente se faz a mesma pergunta: "de que forma eu posso,
-   no presente momento, contribuir com a empresa?". Se tiver uma ideia,
-   leva até a gerente e pede permissão. Só produz se ela aprovar.        */
+/* ---------- vida autônoma: produção + qualidade + gestão ----------
+   A vida visual é contínua, mas o trabalho real tem três camadas:
+   1) funcionário escolhe uma contribuição concreta;
+   2) funcionário revisa a própria entrega;
+   3) gerente audita, corrige e coordena o próximo passo.
+*/
+function garantirNorte(rt){
+  if(!rt) return;
+  if(!rt.norte) rt.norte = { produto:'', equipe:'' };
+  const emp = empresaAtual();
+  const f = emp?.equipe?.find(x => x.id === rt.id);
+  if(f){ f.norte = { produto:rt.norte.produto||'', equipe:rt.norte.equipe||'' }; }
+}
 
 function contextoDaEmpresa(){
   const emp = empresaAtual(); if(!emp) return '';
-  const arqs = (emp.arquivos||[]).slice(0,6).map(f => f.nome).join(', ') || 'nenhum';
-  const ultimos = (emp.log||[]).slice(-4).map(l => l.text).join(' | ') || 'nada ainda';
-  const m = emp.metricas;
-  return `Empresa: ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Arquivos existentes: ${arqs}. Últimos acontecimentos: ${ultimos}. Números: ${m.vendas} vendas, ${m.visitas} visitas, ${m.seguidores} seguidores.`;
+  const arqs = (emp.arquivos||[]).slice(-8).map(f => `${f.nome}(${f.tipo||'arquivo'})`).join(', ') || 'nenhum';
+  const ultimos = (emp.log||[]).slice(-8).map(l => l.text).join(' | ') || 'nada ainda';
+  const m = emp.metricas || {};
+  return `Empresa: ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Arquivos: ${arqs}. Últimos eventos: ${ultimos}. Métricas: vendas ${m.vendas||0}, visitas ${m.visitas||0}, seguidores ${m.seguidores||0}, tarefas ${m.tarefas||0}.`;
 }
 
 async function pensarContribuicao(rt){
   const emp = empresaAtual(); if(!emp) return null;
-  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Responda SOMENTE JSON: {"ideia":"o que você quer fazer agora, até 12 palavras","tipo":"criar|editar|tarefa|pausa","alvo":"nome exato do arquivo, só se tipo=editar","pausa":"comer|beber|pensar"}. Use tipo=pausa se no momento a melhor coisa for descansar; nesse caso preencha "pausa".`;
-  const usr = `${contextoDaEmpresa()}\nDe que forma você pode, no presente momento, contribuir com a empresa? Escolha algo dentro do seu cargo e que ainda não foi feito.`;
-  return await askAI(sys, usr, 130, modeloDe(rt), rt.id);
+  garantirNorte(rt);
+  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você existe para fazer o negócio avançar, não para parecer ocupado. Escolha UMA ação concreta e executável agora, coerente com seu cargo e com o estado real da empresa. Priorize produzir ou melhorar algo que possa ser usado pelo produto final ou por um colega.
+Responda SOMENTE JSON: {"ideia":"ação concreta até 18 palavras","tipo":"criar|editar|tarefa|revisar|pausa","alvo":"arquivo exato se editar/revisar, senão vazio","produto":"resposta à pergunta de contribuição ao produto, até 22 palavras","equipe":"resposta à pergunta de contribuição aos colegas, até 22 palavras","pausa":"comer|beber|pensar"}.
+PERGUNTAS-CORE OBRIGATÓRIAS:
+1. Como o que estou fazendo agora contribui para o produto final da empresa?
+2. Como posso contribuir com os meus colegas de equipe?
+Não escolha uma ação vaga. Se houver um produto/arquivo existente, prefira melhorá-lo a criar algo redundante. Só use pausa se realmente precisar descansar.`;
+  const usr = `${contextoDaEmpresa()}
+NORTE:
+1. ${METRICAS_CORE[0]}
+2. ${METRICAS_CORE[1]}
+Seu cargo: ${rt.cargo}. Histórico recente: ${(emp.equipe.find(f=>f.id===rt.id)?.historico||[]).slice(0,4).map(x=>x.text).join(' | ') || 'nenhum'}
+Escolha a próxima contribuição. É obrigatório produzir, melhorar ou ajudar alguém, salvo pausa.`;
+  addLog(`${rt.name} está pensando no próximo trabalho: produto + equipe.`, 'info', rt.id);
+  const out = await askAI(sys, usr, 220, modeloDe(rt), rt.id);
+  if(out){
+    garantirNorte(rt);
+    rt.norte.produto = String(out.produto||'').trim();
+    rt.norte.equipe = String(out.equipe||'').trim();
+  }
+  return out;
 }
 
-async function pedirPermissao(rt, ideia, manager){
-  const emp = empresaAtual();
-  const sys = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Um membro da equipe pede permissão para agir. Responda SOMENTE JSON: {"aprovado":true|false,"motivo":"até 8 palavras","ajuste":"correção de rumo, ou vazio","precisa_usuario":true|false}. precisa_usuario=true só se envolver gasto real de dinheiro ou publicação pública irreversível. Recuse ideias repetidas, fora do cargo da pessoa ou que não ajudem agora.`;
-  const usr = `${contextoDaEmpresa()}\n${rt.name} (${rt.cargo}) propõe: ${ideia}`;
-  return await askAI(sys, usr, 120, MODEL_GERENTE, manager.id);
+async function revisarEntrega(rt, entrega){
+  const emp = empresaAtual(); if(!emp || !entrega) return null;
+  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Faça controle de qualidade do que acabou de produzir. Responda SOMENTE JSON: {"qualidade":"boa|precisa_melhora|inadequada","nota":0-10,"problema":"principal problema, até 20 palavras","melhoria":"uma melhoria concreta que deve ser feita agora, até 24 palavras","pronto":"true|false"}. Seja exigente: algo só é bom se for útil para o produto final, coerente com a empresa e reutilizável pelos colegas.`;
+  const usr = `${contextoDaEmpresa()}
+Entrega de ${rt.name}: ${entrega}
+Contribuição ao produto: ${rt.norte?.produto||''}
+Contribuição à equipe: ${rt.norte?.equipe||''}`;
+  addLog(`${rt.name} está verificando a qualidade da própria entrega.`, 'info', rt.id);
+  const out = await askAI(sys, usr, 170, modeloDe(rt), rt.id);
+  if(out){
+    rt.qualidade = { nota:Number(out.nota)||0, status:String(out.qualidade||''), problema:String(out.problema||''), melhoria:String(out.melhoria||''), ts:Date.now() };
+    if(out.qualidade === 'boa' || String(out.pronto).toLowerCase()==='true') addLog(`${rt.name} aprovou a qualidade (${rt.qualidade.nota}/10): ${rt.qualidade.status}.`, 'ok', rt.id);
+    else addLog(`${rt.name} encontrou problema de qualidade (${rt.qualidade.nota}/10): ${rt.qualidade.problema||out.melhoria||'precisa melhorar'}.`, 'pend', rt.id);
+  }
+  return out;
 }
+
+async function auditoriaGerente(manager, motivo='auditoria periódica'){
+  const emp = empresaAtual(); if(!emp || !manager) return null;
+  const equipe = runtime.filter(r=>r.papel==='func').map(r=>`${r.id}=${r.name} (${r.cargo}); tarefa=${r.currentTask||'nenhuma'}; produto=${r.norte?.produto||'—'}; equipe=${r.norte?.equipe||'—'}; qualidade=${r.qualidade?.nota??'—'}`).join('\n');
+  const m=emp.metricas||{};
+  const sys = `Você é ${manager.name}, sócia-gerente e núcleo operacional da ${emp.nome} (${emp.ramo}). Você tem autonomia executiva: deve manter a empresa funcionando mesmo quando o usuário não responde. Você APROVA OU REJEITA todo produto/entrega dos funcionários, cobra correções, delega, contrata e demite quando os dados justificarem. Nunca fique parada esperando o usuário.
+Responda SOMENTE JSON: {"decisao":"aprovar_produto|rejeitar_produto|delegar|revisar|contratar|demitir|nenhuma|pedir_usuario","diagnostico":"leitura objetiva dos dados, até 24 palavras","justificativa":"por que esta decisão é boa para o negócio, com base em métricas ou evidências, até 30 palavras","funcionario":"id do funcionário, ou vazio","tarefa":"ação objetiva, até 18 palavras","produto":"como move o produto final, até 20 palavras","equipe":"como ajuda a equipe, até 20 palavras","arquivo":"nome exato do arquivo, ou vazio","necessidade":"perfil/cargo a contratar, ou vazio","motivo_demitir":"motivo objetivo para desligamento, ou vazio","precisa_usuario":true|false,"pergunta_usuario":"pergunta curta sobre uma decisão estratégica ou sobre o rumo, ou vazio"}.
+REGRAS: decisões rotineiras e de gestão são suas; não peça autorização para aprovar/rejeitar produtos, contratar, demitir ou reorganizar trabalho. Só use pedir_usuario para uma escolha estratégica em que a preferência do dono realmente importe. Mesmo quando pedir_usuario=true, registre a pendência e continue administrando o restante da empresa.`;
+  const usr = `${contextoDaEmpresa()}
+Métricas atuais: vendas=${m.vendas||0}, visitas=${m.visitas||0}, seguidores=${m.seguidores||0}, tarefas=${m.tarefas||0}.
+Motivo da auditoria: ${motivo}
+Equipe atual:
+${equipe||'sem funcionários'}
+Você precisa escolher o próximo movimento e justificar ao dono.`;
+  manager.thinking=true; manager.icon='📋';
+  addLog(`${manager.name} iniciou auditoria executiva: ${motivo}.`, 'info', manager.id);
+  try{
+    const out=await askAI(sys,usr,280,MODEL_GERENTE,manager.id);
+    if(out){
+      manager.norte = { produto:String(out.produto||'').trim(), equipe:String(out.equipe||'').trim() };
+      addLog(`${manager.name} decidiu: ${out.decisao||'nenhuma'} — ${out.justificativa||out.diagnostico||'sem justificativa'}`, out.decisao==='pedir_usuario'?'pend':'info', manager.id);
+    }
+    return out;
+  }finally{ manager.thinking=false; manager.icon=null; }
+}
+
+async function aprovarEntregaGerente(rt, plano, entrega){
+  const emp=empresaAtual(); const manager=runtime.find(r=>r.papel==='gerente');
+  if(!emp||!manager||!entrega) return {aprovado:true};
+  const arquivo = plano.tipo==='criar' ? (emp.arquivos||[]).find(f=>f.nome===entrega.nome) : null;
+  const conteudo = arquivo?.conteudo ? arquivo.conteudo.slice(0,2200) : '';
+  const sys=`Você é ${manager.name}, sócia-gerente da ${emp.nome}. Toda entrega de funcionário passa por sua aprovação. Seja exigente e prática. APROVE ou REJEITE com base em utilidade para o produto final, coerência com a missão, qualidade e evidências. Se rejeitar, indique uma correção concreta. Responda SOMENTE JSON: {"aprovado":true|false,"nota":0-10,"motivo":"até 28 palavras","correcao":"correção concreta, até 30 palavras"}.`;
+  const usr=`${contextoDaEmpresa()}
+Funcionário: ${rt.name} (${rt.cargo})
+Tarefa: ${plano.ideia}
+Produto: ${rt.norte?.produto||plano.produto||''}
+Equipe: ${rt.norte?.equipe||plano.equipe||''}
+Entrega: ${entrega.resultado||''}${conteudo?'\nConteúdo do arquivo (trecho): '+conteudo:''}`;
+  manager.thinking=true; manager.icon='✅';
+  addLog(`${manager.name} está avaliando e precisa aprovar/rejeitar a entrega de ${rt.name}.`, 'info', manager.id);
+  try{
+    const out=await askAI(sys,usr,190,MODEL_GERENTE,manager.id);
+    const aprovado=!!out?.aprovado;
+    addLog(`${manager.name} ${aprovado?'APROVOU':'REJEITOU'} a entrega de ${rt.name} (${Number(out?.nota)||0}/10): ${out?.motivo||'avaliação concluída'}.`, aprovado?'ok':'pend', manager.id);
+    if(!aprovado && out?.correcao){
+      addLog(`${manager.name} determinou correção para ${rt.name}: ${out.correcao}`, 'info', manager.id);
+      await executarCorrecao(rt,{ideia:String(out.correcao),produto:rt.norte?.produto,equipe:rt.norte?.equipe});
+      addLog(`${manager.name} recebeu a correção de ${rt.name} e fará nova avaliação no próximo ciclo.`, 'info', manager.id);
+    }
+    return {aprovado, ...out};
+  }finally{manager.thinking=false;manager.icon=null;}
+}
+
+function registrarPendenciaUsuario({tipo='estrategica',quem='Gerente',texto,justificativa='',plano=null}){
+  const emp=empresaAtual(); if(!emp||!texto) return;
+  if(!Array.isArray(emp.aprovacoes)) emp.aprovacoes=[];
+  const item={id:'u'+Date.now()+Math.random().toString(36).slice(2,6),tipo,quem,texto,justificativa,plano,criadaEm:Date.now()};
+  emp.aprovacoes.push(item);
+  addLog(`${quem} encaminhou ao usuário: ${texto}${justificativa?' — '+justificativa:''}`, 'pend');
+  renderApprovals(); saveDB();
+}
+
+async function contratarPorDecisaoGerente(manager, necessidade, justificativa){
+  const emp=empresaAtual(); if(!emp) return null;
+  const sys=`Você é a gerente de RH da ${emp.nome}. Escolha uma contratação coerente com a necessidade. Responda SOMENTE JSON: {"nome":"primeiro nome","cargo":"cargo curto"}.`;
+  const out=await askAI(sys,`Necessidade: ${necessidade}. Justificativa gerencial: ${justificativa}`,90,MODEL_GERENTE,manager.id);
+  const nome=String(out?.nome||'Nova pessoa').trim(); const cargo=String(out?.cargo||necessidade||'especialista').trim();
+  const novo={id:'a'+Date.now(),nome,papel:'func',cargo,cor:PALETA[emp.equipe.length%PALETA.length],historico:[],norte:{produto:'',equipe:''}};
+  emp.equipe.push(novo); emp.historicoDecisoes=(emp.historicoDecisoes||[]).concat([{ts:Date.now(),tipo:'contratação',quem:nome,justificativa}]).slice(-40);
+  addLog(`${manager.name} CONTRATOU ${nome} (${cargo}). Motivo: ${justificativa}`, 'ok', manager.id);
+  saveDB(); buildRuntime(); renderStaff(); resizeStage();
+  return novo;
+}
+
+async function demitirPorDecisaoGerente(manager, funcionarioId, justificativa){
+  const emp=empresaAtual(); if(!emp) return false;
+  const f=emp.equipe.find(x=>x.id===funcionarioId && x.papel==='func'); if(!f) return false;
+  emp.equipe=emp.equipe.filter(x=>x.id!==funcionarioId);
+  emp.historicoDecisoes=(emp.historicoDecisoes||[]).concat([{ts:Date.now(),tipo:'demissão',quem:f.nome,justificativa}]).slice(-40);
+  if(selectedAgentId===funcionarioId) selectedAgentId=null;
+  addLog(`${manager.name} DEMITIU ${f.nome}. Motivo: ${justificativa}`, 'ok', manager.id);
+  saveDB(); buildRuntime(); renderStaff(); resizeStage(); renderInspector();
+  return true;
+}
+
+function managerNameForLog(){ return runtime.find(r=>r.papel==='gerente')?.name || 'Gerente'; }
 
 async function executarIdeia(rt, plano){
-  const emp = empresaAtual();
-
-  if(plano.tipo === 'editar'){
+  const emp = empresaAtual(); if(!emp) return null;
+  if(plano.tipo === 'editar' || plano.tipo === 'revisar'){
     const alvo = (emp.arquivos||[]).find(f => f.nome === plano.alvo)
               || (emp.arquivos||[]).find(f => plano.alvo && f.nome.includes(plano.alvo));
-    if(alvo){ await aplicarEdicaoArquivo(alvo.id, plano.ideia, rt.id); return; }
-    plano.tipo = 'criar'; // arquivo citado não existe: cria em vez de editar
+    if(alvo){ await aplicarEdicaoArquivo(alvo.id, plano.ideia, rt.id); return {resultado:`${rt.name} melhorou ${alvo.nome}.`}; }
+    plano.tipo = 'criar';
   }
 
-  rt.state = 'acting'; rt.icon = plano.tipo === 'criar' ? '📄' : '📝'; rt.thinking = true;
-  rt.currentTask = plano.ideia;
+  rt.state='acting'; rt.icon=plano.tipo==='criar'?'📄':'📝'; rt.thinking=true;
+  garantirNorte(rt); rt.currentTask=plano.ideia;
+  rt.norte.produto=String(plano.produto||rt.norte.produto||'').trim();
+  rt.norte.equipe=String(plano.equipe||rt.norte.equipe||'').trim();
+  addLog(`${rt.name} começou: ${plano.ideia} | produto: ${rt.norte.produto} | equipe: ${rt.norte.equipe}`, 'info', rt.id);
 
-  const pedeArquivo = plano.tipo === 'criar';
-  const sys = pedeArquivo
-    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Produza o material de verdade, pronto para uso. ${FORMATO_ARQUIVO}`
-    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Responda EXATAMENTE neste formato, sem markdown:
-RESULTADO: <o que voce fez, ate 14 palavras>
+  const pedeArquivo=plano.tipo==='criar';
+  const sys=pedeArquivo
+    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Produza o material de verdade, pronto para uso. Deve ser diretamente útil ao produto final e deixar algo que outro colega possa aproveitar. ${FORMATO_ARQUIVO}`
+    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Execute a tarefa de forma concreta. Responda EXATAMENTE, sem markdown:
+RESULTADO: <o que você fez, até 16 palavras>
 VENDAS: <numero>
 VISITAS: <numero>
 SEGUIDORES: <numero>`;
-  const out = await askAIBlock(sys, plano.ideia, pedeArquivo ? 2200 : 150, MODEL_BARATO, rt.id);
-
-  rt.thinking = false; rt.icon = null; rt.currentTask = null;
-  if(!out || (!out.resultado && !out.conteudo.trim())){
-    addLog(`${rt.name} tentou "${plano.ideia}" mas não concluiu.`, 'pend', rt.id); return;
+  const out=await askAIBlock(sys,plano.ideia,pedeArquivo?384:150,MODEL_BARATO,rt.id);
+  rt.thinking=false; rt.icon=null;
+  if(!out || (!out.resultado && !out.conteudo?.trim())){
+    rt.currentTask=null; addLog(`${rt.name} tentou executar, mas não entregou resultado.`, 'pend', rt.id); return null;
   }
-
-  const m = emp.metricas;
-  m.vendas += out.vendas; m.visitas += out.visitas;
-  m.seguidores += out.seguidores; m.tarefas += 1;
-
-  if(pedeArquivo && out.conteudo.trim()) salvarArquivo({ nome: out.nome, tipo: out.tipo, conteudo: out.conteudo }, rt);
-  addLog(`${rt.name} → ${out.resultado || plano.ideia}`, 'ok', rt.id);
+  const m=emp.metricas;
+  m.vendas+=(out.vendas||0); m.visitas+=(out.visitas||0); m.seguidores+=(out.seguidores||0); m.tarefas+=1;
+  if(pedeArquivo && out.conteudo?.trim()) salvarArquivo({nome:out.nome,tipo:out.tipo,conteudo:out.conteudo},rt);
+  const resumo=out.resultado||plano.ideia;
+  addLog(`${rt.name} PRODUZIU → ${resumo}`, 'ok', rt.id);
   renderMetrics();
-}
-
-async function fazerPausa(rt, tipo){
-  const key = ACAO_KEY[tipo] || 'think';
-  const spot = FURNITURE[key];
-  await moveTo(rt, spot.pos);
-  rt.state = 'acting'; rt.icon = spot.icon;
-  await sleep(key==='eat' ? 3000 : key==='drink' ? 1800 : 3200);
-  rt.icon = null;
-  await moveTo(rt, seatOf(rt));
-  rt.state = 'sitting';
-}
-
-async function autonomyLoop(rt, token){
-  while(token === autonomyToken){
-    if(rt.forced){ await sleep(400); continue; }
-    rt.state = 'sitting'; rt.icon = null;
-    await sleep(22000 + Math.floor(Math.random()*14000)); // só o intervalo é temporizado
-    if(token !== autonomyToken) return;
-    if(rt.forced || !document.getElementById('autoToggle').checked) continue;
-
-    const emp = empresaAtual(); if(!emp) continue;
-    const manager = runtime.find(r => r.papel === 'gerente');
-    rt.forced = true;
-
-    try{
-      // 1. pensa em como contribuir
-      rt.thinking = true; rt.icon = '🤔';
-      const plano = await pensarContribuicao(rt);
-      rt.thinking = false; rt.icon = null;
-      if(token !== autonomyToken) return;
-      if(!plano || !plano.ideia){ rt.forced = false; continue; }
-
-      if(plano.tipo === 'pausa'){
-        addLog(`${rt.name} fez uma pausa: ${plano.pausa || 'pensar'}`, 'info', rt.id);
-        await fazerPausa(rt, plano.pausa);
-        rt.forced = false; continue;
-      }
-
-      // 2. a própria gerente não pede permissão a ninguém
-      if(rt.papel === 'gerente'){
-        addLog(`${rt.name} decidiu por conta própria: ${plano.ideia}`, 'info', rt.id);
-        await executarIdeia(rt, plano);
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      // 3. leva a ideia até a mesa da gerente
-      if(!manager){ rt.forced = false; continue; }
-      await moveTo(rt, { x: seatOf(manager).x - 40, y: seatOf(manager).y });
-      if(token !== autonomyToken) return;
-      rt.state = 'talking';
-      rt.bubbleText = plano.ideia.length > 36 ? plano.ideia.slice(0,36)+'…' : plano.ideia;
-      addLog(`${rt.name} pediu permissão: "${plano.ideia}"`, 'info', rt.id);
-
-      manager.thinking = true; manager.icon = '🤔';
-      const resposta = await pedirPermissao(rt, plano.ideia, manager);
-      manager.thinking = false; manager.icon = null;
-      rt.bubbleText = null;
-      if(token !== autonomyToken) return;
-
-      const aprovado = resposta ? resposta.aprovado : false;
-      manager.state = 'talking';
-      manager.bubbleText = aprovado ? 'Pode ir ✓' : 'Agora não';
-      await sleep(1400);
-      manager.bubbleText = null; manager.state = 'sitting';
-
-      if(!aprovado){
-        addLog(`${manager.name} negou a ${rt.name}: ${resposta && resposta.motivo ? resposta.motivo : 'sem justificativa'}`, 'pend', rt.id);
-        await moveTo(rt, seatOf(rt));
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      if(resposta.ajuste) plano.ideia = `${plano.ideia} (ajuste da gerente: ${resposta.ajuste})`;
-      addLog(`${manager.name} autorizou ${rt.name}: ${resposta.motivo || 'aprovado'}`, 'ok', manager.id);
-
-      // 4. se envolve custo real, o usuário decide antes
-      if(resposta.precisa_usuario){
-        emp.aprovacoes.push({ id:'p'+Date.now(), quem: rt.name, texto: plano.ideia });
-        addLog(`${rt.name} → "${plano.ideia}" aguarda a SUA aprovação`, 'pend', rt.id);
-        renderApprovals();
-        await moveTo(rt, seatOf(rt));
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      // 5. volta pra mesa e produz
-      await moveTo(rt, seatOf(rt));
-      if(token !== autonomyToken) return;
-      await executarIdeia(rt, plano);
-      rt.state = 'sitting';
-    } finally {
-      rt.forced = false;
-      saveDB();
-    }
+  rt.currentTask=null;
+  const q=await revisarEntrega(rt, resumo + (pedeArquivo ? ` | arquivo ${out.nome}` : ''));
+  if(q && q.qualidade!=='boa' && String(q.pronto).toLowerCase()!=='true' && q.melhoria){
+    addLog(`${rt.name} vai corrigir a própria entrega: ${q.melhoria}`, 'info', rt.id);
+    const plano2={...plano, tipo:'tarefa', ideia:q.melhoria, produto:rt.norte.produto, equipe:rt.norte.equipe};
+    await executarCorrecao(rt, plano2);
   }
+  const avaliacaoGerente=await aprovarEntregaGerente(rt,plano,out);
+  if(!avaliacaoGerente.aprovado){
+    addLog(`${managerNameForLog()} mantém a entrega de ${rt.name} fora do produto até nova correção.`, 'pend', rt.id);
+  }
+  saveDB();
+  return out;
+}
+
+async function executarCorrecao(rt, plano){
+  const emp=empresaAtual(); if(!emp) return;
+  rt.state='acting'; rt.icon='🔧'; rt.thinking=true; rt.currentTask=plano.ideia;
+  const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Corrija concretamente a entrega anterior. Responda EXATAMENTE, sem markdown:\nRESULTADO: <o que foi corrigido, até 18 palavras>\nVENDAS: 0\nVISITAS: 0\nSEGUIDORES: 0`;
+  const out=await askAIBlock(sys,plano.ideia,130,MODEL_BARATO,rt.id);
+  rt.thinking=false; rt.icon=null; rt.currentTask=null;
+  if(out?.resultado) addLog(`${rt.name} MELHOROU → ${out.resultado}`, 'ok', rt.id);
+  else addLog(`${rt.name} não conseguiu aplicar a melhoria agora.`, 'pend', rt.id);
+}
+
+async function fazerPausa(rt,tipo){
+  const key=ACAO_KEY[tipo]||'think', spot=FURNITURE[key];
+  await moveTo(rt,spot.pos); rt.state='acting'; rt.icon=spot.icon;
+  await sleep(key==='eat'?3000:key==='drink'?1800:3200); rt.icon=null;
+  await moveTo(rt,seatOf(rt)); rt.state='sitting';
+}
+
+async function autonomiaAmbiente(rt,token){
+  const atividades=[{state:'thinking',icon:'💭',ms:2200},{state:'working',icon:'📝',ms:3200},{state:'working',icon:'💻',ms:2800},{state:'sitting',icon:null,ms:4200}];
+  let i=Math.floor(Math.random()*atividades.length);
+  while(token===autonomyToken){
+    if(rt.forced){await sleep(700);continue;}
+    const a=atividades[i++%atividades.length]; rt.state=a.state==='working'?'acting':a.state; rt.icon=a.icon;
+    if(a.state==='thinking') rt.thinking=true; await sleep(a.ms); rt.thinking=false; rt.icon=null;
+    if(token!==autonomyToken)return;
+    if(!rt.forced&&Math.random()<.45){const spots=[FURNITURE.think.pos,FURNITURE.drink.pos];if(Math.random()<.22)await moveTo(rt,spots[Math.floor(Math.random()*spots.length)]);if(!rt.forced)await moveTo(rt,seatOf(rt));}
+    rt.state='sitting'; await sleep(900+Math.floor(Math.random()*1800));
+  }
+}
+
+async function autonomiaDecisao(rt,token){
+  while(token===autonomyToken){
+    await sleep(30000+Math.floor(Math.random()*26000));
+    if(token!==autonomyToken||rt.forced)continue;
+    const emp=empresaAtual(); if(!emp)continue;
+    const manager=runtime.find(r=>r.papel==='gerente'); rt.forced=true;
+    try{
+      if(!modeloInstalado(modeloSelecionado)){
+        addLog(`${rt.name} aguardou: nenhum modelo de IA está instalado.`, 'pend', rt.id);
+        continue;
+      }
+      rt.thinking=true;rt.icon='🤔';rt.state='sitting';
+      const plano=await pensarContribuicao(rt); rt.thinking=false;rt.icon=null;
+      if(!plano||!plano.ideia){rt.forced=false;continue;}
+      if(plano.tipo==='pausa'){addLog(`${rt.name} fez uma pausa: ${plano.pausa||'pensar'}`,'info',rt.id);await fazerPausa(rt,plano.pausa);rt.forced=false;saveDB();continue;}
+      if(rt.papel==='gerente'){await executarIdeia(rt,plano);rt.state='sitting';rt.forced=false;saveDB();continue;}
+      if(!manager){rt.forced=false;continue;}
+      await moveTo(rt,{x:seatOf(manager).x-40,y:seatOf(manager).y}); if(token!==autonomyToken)return;
+      rt.state='talking';rt.bubbleText=plano.ideia.length>36?plano.ideia.slice(0,36)+'…':plano.ideia;
+      addLog(`${rt.name} propôs: ${plano.ideia} | produto: ${rt.norte.produto} | equipe: ${rt.norte.equipe}`,'info',rt.id);
+      const resposta=await pedirPermissao(rt,plano.ideia,manager); rt.bubbleText=null;
+      if(token!==autonomyToken)return;
+      const aprovado=resposta?resposta.aprovado:false;
+      manager.state='talking';manager.bubbleText=aprovado?'Pode ir ✓':'Reoriente';await sleep(900);manager.bubbleText=null;manager.state='sitting';
+      if(!aprovado){addLog(`${manager.name} reorientou ${rt.name}: ${resposta?.motivo||'a proposta não é prioridade'}`,'pend',rt.id);if(resposta?.ajuste) addLog(`Ajuste pedido: ${resposta.ajuste}`,'info',manager.id);await moveTo(rt,seatOf(rt));rt.state='sitting';rt.forced=false;saveDB();continue;}
+      if(resposta.ajuste)plano.ideia=`${plano.ideia} (ajuste da gerente: ${resposta.ajuste})`;
+      addLog(`${manager.name} aprovou o trabalho de ${rt.name}: ${resposta.motivo||'coerente com a empresa'}`,'ok',manager.id);
+      if(resposta.precisa_usuario){emp.aprovacoes.push({id:'p'+Date.now(),tipo:'estrategica',quem:rt.name,texto:plano.ideia,justificativa:`${manager.name} considerou necessária sua decisão antes desta ação.`,plano:{...plano,agentId:rt.id}});addLog(`${rt.name} aguarda sua aprovação para: ${plano.ideia}`,'pend',rt.id);renderApprovals();await moveTo(rt,seatOf(rt));rt.state='sitting';rt.forced=false;saveDB();continue;}
+      await moveTo(rt,seatOf(rt)); if(token!==autonomyToken)return;
+      await executarIdeia(rt,plano);rt.state='sitting';
+    }catch(err){console.warn('Ciclo autônomo falhou:',err);rt.thinking=false;rt.icon=null;rt.state='sitting';addLog(`${rt.name} teve uma falha no ciclo: ${err?.message||'erro desconhecido'}`,'pend',rt.id);
+    }finally{rt.thinking=false;rt.icon=null;rt.forced=false;saveDB();}
+  }
+}
+
+async function revisarProdutoContinuamente(rt,token){
+  while(token===autonomyToken){
+    await sleep(65000+Math.floor(Math.random()*35000));
+    if(token!==autonomyToken||rt.forced) continue;
+    const emp=empresaAtual(); if(!emp) continue;
+    const arquivos=(emp.arquivos||[]).filter(f=>f.conteudo?.trim());
+    if(!arquivos.length){
+      addLog(`${rt.name} verificou o produto: ainda não há material para revisar; procurando algo útil para produzir.`,'info',rt.id);
+      continue;
+    }
+    rt.forced=true; rt.thinking=true; rt.icon='🔎';
+    try{
+      const lista=arquivos.slice(-8).map(f=>`${f.nome} (${f.tipo||'arquivo'})`).join('; ');
+      const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você participa do controle contínuo de qualidade do produto. Escolha o arquivo mais importante para o produto final e decida se precisa de melhoria. Responda SOMENTE JSON: {"arquivo":"nome exato","precisa_melhora":true|false,"problema":"até 20 palavras","melhoria":"instrução concreta de melhoria até 28 palavras"}. Só diga que está bom se realmente estiver coerente com a missão, útil ao cliente e aproveitável pela equipe.`;
+      const out=await askAI(sys,`${contextoDaEmpresa()}\nArquivos para auditoria: ${lista}\nPerguntas-core: ${METRICAS_CORE[0]} / ${METRICAS_CORE[1]}`,180,modeloDe(rt),rt.id);
+      if(!out) continue;
+      const f=arquivos.find(x=>x.nome===out.arquivo)||arquivos.find(x=>out.arquivo&&x.nome.includes(out.arquivo));
+      if(!f){addLog(`${rt.name} não encontrou o arquivo indicado para revisão.`,'pend',rt.id);continue;}
+      if(!out.precisa_melhora){addLog(`${rt.name} revisou ${f.nome}: qualidade considerada suficiente por enquanto.`,'ok',rt.id);continue;}
+      const melhoria=out.melhoria||`Melhore ${f.nome} para ficar mais coerente com a missão da empresa e mais útil aos colegas.`;
+      addLog(`${rt.name} encontrou uma melhoria em ${f.nome}: ${out.problema||melhoria}`,'info',rt.id);
+      const manager=runtime.find(r=>r.papel==='gerente');
+      if(!manager){addLog(`${rt.name} não pode aplicar a melhoria porque a gerente não está disponível.`,'pend',rt.id);continue;}
+      const plano={ideia:melhoria,tipo:'editar',alvo:f.nome,produto:'melhorar o produto final existente',equipe:'entregar material mais útil aos colegas'};
+      const decisao=await pedirPermissao(rt,melhoria,manager);
+      if(!decisao?.aprovado){addLog(`${manager.name} recusou a melhoria proposta por ${rt.name} em ${f.nome}.`,'pend',manager.id);continue;}
+      if(decisao.precisa_usuario){
+        registrarPendenciaUsuario({tipo:'estrategica',quem:rt.name,texto:`Autorizar melhoria em ${f.nome}: ${melhoria}`,justificativa:`${manager.name} considera esta mudança estratégica e a equipe continuará operando em paralelo.`,plano:{...plano,agentId:rt.id}});
+        continue;
+      }
+      await aplicarEdicaoArquivo(f.id,melhoria,rt.id);
+      addLog(`${manager.name} aprovou e ${rt.name} concluiu a melhoria contínua em ${f.nome}.`,'ok',manager.id);
+    }catch(err){
+      addLog(`${rt.name} falhou na revisão contínua: ${err?.message||'erro desconhecido'}`,'pend',rt.id);
+    }finally{rt.thinking=false;rt.icon=null;rt.forced=false;saveDB();}
+  }
+}
+
+async function autonomiaGerente(manager,token){
+  while(token===autonomyToken){
+    await sleep(20000+Math.floor(Math.random()*14000));
+    if(token!==autonomyToken||manager.forced)continue;
+    manager.forced=true;
+    try{
+      const emp=empresaAtual(); if(!emp) continue;
+      if(!modeloInstalado(modeloSelecionado)){ addLog(`${manager.name} aguarda um modelo de IA instalado para assumir a gestão autônoma.`, 'pend', manager.id); continue; }
+      const plano=await auditoriaGerente(manager,'gestão contínua: pessoas, produtos, métricas, gargalos e direção');
+      if(token!==autonomyToken||!plano)continue;
+
+      if(plano.precisa_usuario || plano.decisao==='pedir_usuario'){
+        const pergunta=String(plano.pergunta_usuario||`O rumo atual da ${emp.nome} está agradando você?`).trim();
+        registrarPendenciaUsuario({tipo:'estrategica',quem:manager.name,texto:pergunta,justificativa:String(plano.justificativa||plano.diagnostico||''),plano:null});
+      }
+
+      if(plano.decisao==='contratar' && plano.necessidade){
+        await contratarPorDecisaoGerente(manager,plano.necessidade,plano.justificativa||plano.diagnostico||'necessidade identificada nas métricas');
+      } else if(plano.decisao==='demitir' && plano.funcionario){
+        await demitirPorDecisaoGerente(manager,plano.funcionario,plano.motivo_demitir||plano.justificativa||plano.diagnostico||'desempenho ou necessidade organizacional');
+      } else if(plano.decisao==='revisar' && plano.arquivo){
+        const f=(emp.arquivos||[]).find(x=>x.nome===plano.arquivo)||null;
+        if(f){addLog(`${manager.name} decidiu revisar ${f.nome}: ${plano.justificativa||plano.diagnostico||''}`,'info',manager.id);await aplicarEdicaoArquivo(f.id,`Revise criticamente este material e melhore-o. Motivo da gerente: ${plano.justificativa||plano.acao||''}`,manager.id);}
+      } else if((plano.decisao==='delegar'||plano.decisao==='rejeitar_produto') && plano.funcionario && plano.tarefa){
+        const alvo=runtime.find(r=>r.id===plano.funcionario&&r.papel==='func');
+        if(alvo){
+          garantirNorte(alvo);alvo.norte.produto=String(plano.produto||'').trim();alvo.norte.equipe=String(plano.equipe||'').trim();alvo.currentTask=plano.tarefa;
+          addLog(`${manager.name} → coordenou ${alvo.name}: ${plano.tarefa}`,'info',manager.id);
+          await moveTo(manager,{x:seatOf(alvo).x-40,y:seatOf(alvo).y});manager.state='talking';manager.bubbleText=plano.tarefa.length>38?plano.tarefa.slice(0,38)+'…':plano.tarefa;await sleep(900);manager.bubbleText=null;manager.state='sitting';
+          alvo.forced=true; await moveTo(alvo,seatOf(alvo));
+          await executarIdeia(alvo,{ideia:plano.tarefa,tipo:'criar',produto:plano.produto,equipe:plano.equipe});
+          alvo.forced=false;alvo.state='sitting';
+        }
+      } else if(plano.decisao==='aprovar_produto' && plano.arquivo){
+        addLog(`${manager.name} marcou ${plano.arquivo} como aprovado na auditoria executiva.`,'ok',manager.id);
+      }
+
+      // Pergunta de rumo não bloqueia a operação: o gerente continua trabalhando.
+      if((Date.now()-(emp.ultimaConsultaRumo||0)) > 180000){
+        emp.ultimaConsultaRumo=Date.now();
+        registrarPendenciaUsuario({tipo:'feedback_rumo',quem:manager.name,texto:`Você está satisfeito com o rumo que estou tomando na ${emp.nome}?`,justificativa:`Métricas: ${emp.metricas.vendas} vendas, ${emp.metricas.visitas} visitas, ${emp.metricas.seguidores} seguidores, ${emp.metricas.tarefas} tarefas. Minha direção atual: ${plano.diagnostico||'continuar melhorando produto e equipe.'}`});
+      }
+    }catch(err){addLog(`${manager.name} não conseguiu concluir uma ação gerencial: ${err?.message||'erro'}`,'pend',manager.id);
+    }finally{manager.forced=false;manager.thinking=false;manager.icon=null;saveDB();}
+  }
+}
+
+function iniciarVidaAutonoma(token){
+  runtime.forEach(rt=>autonomiaAmbiente(rt,token));
+  runtime.filter(rt=>rt.papel==='func').forEach(rt=>{ autonomiaDecisao(rt,token); revisarProdutoContinuamente(rt,token); });
+  const manager=runtime.find(r=>r.papel==='gerente');
+  if(manager){ autonomiaDecisao(manager,token); autonomiaGerente(manager,token); }
 }
 
 /* ============================================================
@@ -860,10 +1355,65 @@ function openModal(html){
 }
 function closeModal(){ document.getElementById('modalBackdrop').hidden = true; }
 
+function parseFundacaoTexto(bruto, ideia){
+  const t = String(bruto || '')
+    .replace(/```[a-z]*|```/gi, '')
+    .replace(/\r/g, '')
+    .trim();
+  /* Aceita também JSON caso o modelo ignore o formato de linhas. */
+  try {
+    const obj = JSON.parse(t);
+    if(obj && typeof obj === 'object') {
+      return {
+        nome: obj.nome || ('Estúdio ' + String(ideia).split(/\s+/).slice(0,3).join(' ')),
+        ramo: obj.ramo || String(ideia).slice(0,60),
+        missao: obj.missao || ('Criar soluções de qualidade em ' + String(ideia).toLowerCase() + '.'),
+        tom: obj.tom || 'criativo e próximo',
+        gerente: {nome: obj.gerente?.nome || 'Ana'},
+        equipe: (Array.isArray(obj.equipe) ? obj.equipe : []).slice(0,3).map((f,i) => ({nome:f?.nome || ['Lia','Rui','Bia'][i], cargo:f?.cargo || ['Operações','Criação','Atendimento'][i]}))
+      };
+    }
+  } catch(e) {}
+  const linhas = t.split('\n').map(x => x.trim()).filter(Boolean);
+  const pegar = (chave) => {
+    const re = new RegExp('^' + chave + '\\s*:\\s*(.*)$', 'i');
+    const l = linhas.find(x => re.test(x));
+    return l ? l.match(re)[1].trim() : '';
+  };
+  const parFunc = (chave, fallbackNome, fallbackCargo) => {
+    const v = pegar(chave);
+    if(!v) return {nome:fallbackNome, cargo:fallbackCargo};
+    const partes = v.split('|').map(x => x.trim()).filter(Boolean);
+    return { nome: partes[0] || fallbackNome, cargo: partes[1] || fallbackCargo };
+  };
+  const nome = pegar('NOME');
+  const ramo = pegar('RAMO');
+  const missao = pegar('MISSAO');
+  const tom = pegar('TOM');
+  const gerente = pegar('GERENTE');
+  const equipe = [
+    parFunc('FUNC1','Lia','Operações'),
+    parFunc('FUNC2','Rui','Criação'),
+    parFunc('FUNC3','Bia','Atendimento')
+  ];
+  /* Se o modelo devolveu o formato pedido, usamos tudo. Se devolveu apenas
+     parte da resposta, aproveitamos o que existe e completamos o restante
+     com valores seguros para a empresa não ficar inutilizável. */
+  if(!nome && !ramo && !missao && !gerente && !t) return null;
+  return {
+    nome: nome || ('Estúdio ' + String(ideia).split(/\s+/).slice(0,3).join(' ')),
+    ramo: ramo || String(ideia).slice(0,60),
+    missao: missao || ('Criar soluções de qualidade em ' + String(ideia).toLowerCase() + '.'),
+    tom: tom || 'criativo e próximo',
+    gerente: {nome: gerente || 'Ana'},
+    equipe
+  };
+}
+
 function foundCompanyFlow(){
   openModal(`
     <h2>Fundar nova empresa</h2>
-    <div class="msub">Diga em uma frase que negócio você quer abrir. Sua sócia-gerente monta o resto e sugere a primeira equipe.</div>
+    <div class="msub">A fundação é imediata e não consulta nenhum modelo. A gerente será ativada depois, quando você tiver um modelo instalado e ativo.</div>
     <div class="form-row">
       <label for="ideaInput">Ideia do negócio</label>
       <input class="field-input" id="ideaInput" placeholder="ex: uma loja de roupas vintage online">
@@ -874,46 +1424,61 @@ function foundCompanyFlow(){
     </div>
   `);
   document.getElementById('cancelFound').onclick = closeModal;
-  document.getElementById('confirmFound').onclick = async () => {
+  document.getElementById('confirmFound').onclick = () => {
     const idea = document.getElementById('ideaInput').value.trim();
     if(!idea) return;
-    document.getElementById('modalBox').innerHTML = `
-      <h2>Fundando...</h2>
-      <div class="msub">Sua sócia-gerente está definindo nome, missão e montando a equipe inicial.</div>`;
-
-    const sys = `Você monta empresas. Responda SOMENTE JSON:
-{"nome":"nome curto da empresa","ramo":"ramo em até 4 palavras","missao":"uma frase","tom":"tom de voz em até 5 palavras","gerente":{"nome":"primeiro nome"},"equipe":[{"nome":"primeiro nome","cargo":"cargo em até 5 palavras"}]}
-A equipe deve ter 3 funcionários adequados ao negócio (não inclua a gerente nela).`;
-    const out = await askAI(sys, `Negócio: ${idea}`, 400, MODEL_GERENTE);
-    if(!out){
-      document.getElementById('modalBox').innerHTML = `
-        <h2>Não deu certo</h2>
-        <div class="msub">A fundação falhou ao consultar o modelo. Tente de novo.</div>
-        <div class="modal-actions"><button class="btn primary" id="retryFound">Voltar</button></div>`;
-      document.getElementById('retryFound').onclick = foundCompanyFlow;
-      return;
-    }
-
+    const palavras = idea.replace(/[^\p{L}\p{N} ]/gu,' ').trim().split(/\s+/).filter(Boolean);
+    const nome = palavras.length ? ('Estúdio ' + palavras.slice(0,3).map(w=>w.charAt(0).toUpperCase()+w.slice(1)).join(' ')) : 'Nova Empresa';
+    const ramo = palavras.slice(0,4).join(' ') || 'novo negócio';
+    const missao = `Transformar a ideia em um produto útil e de qualidade: ${idea}.`;
     const id = 'e' + Date.now();
-    const equipe = [{
-      id:'a0', nome: out.gerente?.nome || 'Ana', papel:'gerente',
-      cargo:'sócia-gerente', cor: PALETA[0], historico:[]
-    }];
-    (out.equipe||[]).slice(0,5).forEach((f,i) => equipe.push({
-      id:'a'+(i+1), nome:f.nome, papel:'func', cargo:f.cargo,
-      cor: PALETA[(i+1) % PALETA.length], historico:[]
-    }));
-
+    const equipe = [
+      {id:'a0', nome:'Ana', papel:'gerente', cargo:'sócia-gerente', cor:PALETA[0], historico:[], norte:{produto:'', equipe:''}},
+      {id:'a1', nome:'Lia', papel:'func', cargo:'Operações', cor:PALETA[1], historico:[], norte:{produto:'', equipe:''}},
+      {id:'a2', nome:'Rui', papel:'func', cargo:'Criação', cor:PALETA[2], historico:[], norte:{produto:'', equipe:''}},
+      {id:'a3', nome:'Bia', papel:'func', cargo:'Atendimento', cor:PALETA[3], historico:[], norte:{produto:'', equipe:''}}
+    ];
     DB.empresas.push({
-      id, nome: out.nome || 'Nova Empresa', ramo: out.ramo || idea,
-      missao: out.missao || '', tom: out.tom || 'direto e amigável',
-      equipe, log: [], metricas:{ vendas:0, visitas:0, seguidores:0, tarefas:0 },
-      aprovacoes: [], analise: null, arquivos: [], tokens:{ entrada:0, saida:0, chamadas:0, custo:0 },
+      id, nome, ramo, missao, tom:'direto e criativo', equipe, log:[],
+      metricas:{vendas:0,visitas:0,seguidores:0,tarefas:0}, aprovacoes:[], pendenciasUsuario:[],
+      analise:null, rumoFeedback:null, historicoDecisoes:[], modeloIA:(modeloInstalado(modeloSelecionado)?modeloSelecionado:null), arquivos:[],
+      tokens:{entrada:0,saida:0,chamadas:0,custo:0}
     });
-    DB.atual = id;
-    saveDB(); closeModal(); renderAll();
-    addLog(`Empresa ${out.nome} fundada. ${equipe.length} pessoas na equipe.`, 'ok');
+    DB.atual=id; saveDB(); closeModal(); renderAll();
+    addLog(`Empresa ${nome} fundada sem consultar a IA.`, 'ok');
+    if(!modeloInstalado(modeloSelecionado)){
+      setAIStatus('idle','Empresa fundada ✓','Escolha um modelo em IA / Modelos e baixe-o para ativar a gerente.');
+    } else {
+      setAIStatus('idle','Modelo disponível','A empresa foi fundada. A IA só será carregada quando for necessária.');
+    }
   };
+}
+
+/* ============================================================
+   Gerador seguro de página de apresentação
+   Em celulares, não pedimos ao modelo para escrever centenas de linhas de
+   HTML. A IA cria apenas o texto curto; o navegador monta o arquivo.
+   ============================================================ */
+async function criarPaginaApresentacao(emp, rt, tarefa){
+  const prompt = `Escreva uma única frase curta e convincente para apresentar a empresa ${emp.nome}, do ramo ${emp.ramo}. Missão: ${emp.missao}. Não use aspas, markdown ou explicações.`;
+  let frase = '';
+  try {
+    const resp = await chamarAPI(prompt, `Pedido da equipe: ${String(tarefa||'criar página de apresentação').slice(0,500)}`, 64, MODEL_BARATO, rt.id);
+    frase = String(resp?.text || '').replace(/\s+/g,' ').trim().slice(0,240);
+  } catch(err) {
+    console.warn('Texto da apresentação falhou; usando texto local.', err);
+  }
+  if(!frase) frase = emp.missao || `Conheça a ${emp.nome} e o que ela oferece.`;
+
+  const esc = v => String(v||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  const html = `<!doctype html>
+<html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(emp.nome)}</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;background:#f5f7fa;color:#182532}main{max-width:760px;margin:auto;padding:72px 24px}section{background:white;border-radius:24px;padding:42px;box-shadow:0 8px 30px #0001}h1{font-size:42px;margin:0 0 10px}h2{font-size:18px;font-weight:500;color:#617080}p{font-size:20px;line-height:1.6}.tag{display:inline-block;padding:7px 12px;border-radius:999px;background:#e8eef3}</style></head>
+<body><main><section><span class="tag">${esc(emp.ramo)}</span><h1>${esc(emp.nome)}</h1><h2>${esc(frase)}</h2><p>${esc(emp.missao)}</p><h2>O que fazemos</h2><p>Construímos soluções com atenção aos detalhes e foco em quem confia na nossa empresa.</p></section></main></body></html>`;
+  salvarArquivo({nome:'pagina-apresentacao.html', tipo:'html', conteudo:html}, rt);
+  emp.metricas.tarefas += 1;
+  addLog(`${rt.name} → página de apresentação criada.`, 'ok', rt.id);
+  renderMetrics(); saveDB();
 }
 
 /* ============================================================
@@ -930,8 +1495,18 @@ async function runCycle(order){
 
   manager.forced = true; manager.thinking = true; manager.icon = '🤔';
   const lista = funcs.map(f => `${f.id}=${f.name} (${f.cargo})`).join('; ');
-  const sysD = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Equipe: ${lista}. Responda SOMENTE JSON: {"funcionario":"<id>","tarefa":"instrução objetiva até 12 palavras","precisa_aprovacao":true|false}. precisa_aprovacao=true só se houver gasto real de dinheiro ou publicação pública irreversível.`;
-  const del = await askAI(sysD, order, 120, MODEL_GERENTE, manager.id) || {funcionario: funcs[0].id, tarefa: order, precisa_aprovacao:false};
+  const sysD = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Equipe: ${lista}. Você decide quem faz o quê e APROVA OU REJEITA a entrega final. Responda SOMENTE JSON: {"funcionario":"<id>","tarefa":"instrução objetiva até 12 palavras","produto":"contribuição ao produto, até 16 palavras","equipe":"contribuição aos colegas, até 16 palavras","precisa_aprovacao":true|false}. precisa_aprovacao=true somente se o usuário precisar decidir algo estratégico/irreversível; a gerente continua operando enquanto aguarda.`;
+  const delRaw = await askAI(sysD, order, 120, MODEL_GERENTE, manager.id);
+  if(!delRaw){
+    addLog(`${manager.name} está operando em modo de contingência local: a IA não respondeu; a ordem continua sem paralisar a empresa.`, 'pend', manager.id);
+  }
+  const del = {
+    funcionario: delRaw?.funcionario || funcs[0].id,
+    tarefa: String(delRaw?.tarefa || order).trim() || order,
+    precisa_aprovacao: !!delRaw?.precisa_aprovacao,
+    produto: String(delRaw?.produto || 'contribuição direta ao produto final').trim(),
+    equipe: String(delRaw?.equipe || 'facilita o trabalho dos colegas').trim()
+  };
   manager.thinking = false; manager.icon = null;
 
   const emp2 = rtById(del.funcionario) || funcs[0];
@@ -944,8 +1519,14 @@ async function runCycle(order){
   addLog(`${manager.name} → delegou a ${emp2.name}: "${del.tarefa}"`, 'info', manager.id);
 
   await moveTo(emp2, seatOf(emp2));
-  emp2.currentTask = del.tarefa; emp2.state = 'acting'; emp2.icon = '📝'; emp2.thinking = true;
-  const sysE = `Você é ${emp2.name}, ${emp2.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Responda EXATAMENTE neste formato, sem markdown, sem JSON:
+  garantirNorte(emp2); emp2.norte.produto = del.produto; emp2.norte.equipe = del.equipe; emp2.currentTask = del.tarefa; emp2.state = 'acting'; emp2.icon = '📝'; emp2.thinking = true;
+  const pedidoApresentacao = /p[aá]gina\s+(de\s+)?apresenta[cç][aã]o|site\s+de\s+apresenta[cç][aã]o/i.test(`${order} ${del.tarefa}`);
+  let exec = { resultado:'Tarefa concluída.', vendas:0, visitas:0, seguidores:0, nome:'nenhum', tipo:'', conteudo:'' };
+  if(pedidoApresentacao){
+    await criarPaginaApresentacao(emp, emp2, del.tarefa);
+    exec.resultado = 'Página de apresentação criada.';
+  } else {
+    const sysE = `Você é ${emp2.name}, ${emp2.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Responda EXATAMENTE neste formato, sem markdown, sem JSON:
 RESULTADO: <o que voce fez, ate 14 palavras>
 VENDAS: <numero>
 VISITAS: <numero>
@@ -954,10 +1535,10 @@ NOME: <nome-do-arquivo, ou "nenhum" se a tarefa nao produz arquivo>
 TIPO: <md|txt|html|css|js|csv|json, ou vazio>
 ---
 <conteudo completo do arquivo, se houver; deixe vazio se nao houver>`;
-  const exec = await askAIBlock(sysE, del.tarefa, 1600, MODEL_BARATO, emp2.id) ||
-    { resultado:'Tarefa concluída.', vendas:0, visitas:0, seguidores:0, nome:'nenhum', tipo:'', conteudo:'' };
-  const temArquivo = exec.conteudo && exec.conteudo.trim() && exec.nome && !/^nenhum$/i.test(exec.nome);
-  if(temArquivo) salvarArquivo({ nome: exec.nome, tipo: exec.tipo, conteudo: exec.conteudo }, emp2);
+    exec = await askAIBlock(sysE, del.tarefa, 384, MODEL_BARATO, emp2.id) || exec;
+    const temArquivo = exec.conteudo && exec.conteudo.trim() && exec.nome && !/^nenhum$/i.test(exec.nome);
+    if(temArquivo) salvarArquivo({ nome: exec.nome, tipo: exec.tipo, conteudo: exec.conteudo }, emp2);
+  }
   emp2.thinking = false; emp2.icon = null; emp2.currentTask = null;
 
   emp2.state = 'talking';
@@ -968,11 +1549,13 @@ TIPO: <md|txt|html|css|js|csv|json, ou vazio>
   m.vendas += exec.vendas||0; m.visitas += exec.visitas||0;
   m.seguidores += exec.seguidores||0; m.tarefas += 1;
 
+  const avaliacao=await aprovarEntregaGerente(emp2,{ideia:del.tarefa,tipo:del.precisa_aprovacao?'criar':'tarefa',produto:del.produto,equipe:del.equipe},exec);
   if(del.precisa_aprovacao){
-    emp.aprovacoes.push({ id:'p'+Date.now(), quem: emp2.name, texto: exec.resultado || del.tarefa });
-    addLog(`${emp2.name} → ${exec.resultado} (aguardando sua aprovação)`, 'pend', emp2.id);
+    registrarPendenciaUsuario({tipo:'estrategica',quem:manager.name,texto:exec.resultado || del.tarefa,justificativa:'A gerente considera esta decisão estratégica/irreversível e quer registrar sua preferência.',plano:null});
+  } else if(avaliacao.aprovado){
+    addLog(`${manager.name} confirmou a entrega de ${emp2.name}: ${exec.resultado}`, 'ok', manager.id);
   } else {
-    addLog(`${emp2.name} → ${exec.resultado}`, 'ok', emp2.id);
+    addLog(`${manager.name} não aceitou a entrega de ${emp2.name} e determinou correção.`, 'pend', manager.id);
   }
   emp2.state = 'sitting'; emp2.forced = false;
 
@@ -1002,10 +1585,13 @@ async function analyzeMetrics(){
 
   if(manager){ manager.thinking = false; manager.icon = null; }
   btn.disabled = false;
-  if(!out){ card.textContent = 'Não consegui a análise agora. Tente de novo.'; return; }
-  emp.analise = out;
-  card.innerHTML = `<h3>Leitura da gerente</h3><div class="field">${escapeHtml(out.leitura)}</div><div class="field"><b>Próxima ação sugerida:</b> ${escapeHtml(out.proxima_acao)}</div>`;
-  addLog(`${manager ? manager.name : 'Gerente'} analisou métricas → ${out.proxima_acao}`, 'info', manager?.id);
+  const analise = {
+    leitura: String(out?.leitura || 'Os números ainda são poucos para tirar uma conclusão firme.'),
+    proxima_acao: String(out?.proxima_acao || 'Continuar executando tarefas e observar as próximas métricas.')
+  };
+  emp.analise = analise;
+  card.innerHTML = `<h3>Leitura da gerente</h3><div class="field">${escapeHtml(analise.leitura)}</div><div class="field"><b>Próxima ação sugerida:</b> ${escapeHtml(analise.proxima_acao)}</div>`;
+  addLog(`${manager ? manager.name : 'Gerente'} analisou métricas → ${analise.proxima_acao}`, 'info', manager?.id);
   saveDB();
 }
 
@@ -1030,10 +1616,11 @@ function hireFlow(){
     document.getElementById('modalBox').innerHTML = `<h2>Contratando...</h2><div class="msub">A gerente está escolhendo a pessoa certa.</div>`;
     const sys = `Você é a sócia-gerente da ${emp.nome} (${emp.ramo}). Responda SOMENTE JSON: {"nome":"primeiro nome","cargo":"cargo em até 5 palavras"}.`;
     const out = await askAI(sys, `Necessidade: ${need}`, 80, MODEL_GERENTE);
-    if(!out){ closeModal(); addLog('Contratação falhou ao consultar o modelo.', 'pend'); return; }
+    const nomeNovo = String(out?.nome || '').trim() || 'Nova pessoa';
+    const cargoNovo = String(out?.cargo || '').trim() || need.slice(0,40);
     const novo = {
-      id:'a'+Date.now(), nome:out.nome, papel:'func', cargo:out.cargo,
-      cor: PALETA[emp.equipe.length % PALETA.length], historico:[]
+      id:'a'+Date.now(), nome:nomeNovo, papel:'func', cargo:cargoNovo,
+      cor: PALETA[emp.equipe.length % PALETA.length], historico:[], norte:{produto:'', equipe:''}
     };
     emp.equipe.push(novo);
     saveDB(); closeModal(); buildRuntime(); renderStaff(); resizeStage();
@@ -1044,6 +1631,150 @@ function hireFlow(){
 /* ============================================================
    Render de UI
    ============================================================ */
+function renderModelUI(){
+  const emp=empresaAtual();
+  const escolhido=emp?.modeloIA || modeloSelecionado;
+  const sel=document.getElementById('modelSelect');
+  const detail=document.getElementById('modelDetail');
+  if(sel){
+    const disponiveis=Object.values(MODELOS).filter(m=>modeloInstalado(m.id));
+    sel.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===escolhido?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
+    sel.disabled=!disponiveis.length;
+  }
+  const m=configModelo(escolhido);
+  if(detail) detail.textContent=modeloInstalado(m.id) ? `${m.tamanho} · ${m.detalhe} · Este será o modelo usado por esta empresa.` : 'Nenhum modelo instalado. Abra IA / Modelos para baixar um.';
+  renderModelManager();
+}
+
+function abrirCentralModelos(){
+  const panel=document.getElementById('aiModelsPanel'); if(!panel) return;
+  panel.hidden=false;
+  document.getElementById('mainApp')?.setAttribute('hidden','');
+  renderModelManager();
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function fecharCentralModelos(){
+  const panel=document.getElementById('aiModelsPanel'); if(panel) panel.hidden=true;
+  renderAll();
+}
+
+function renderModelManager(){
+  const list=document.getElementById('modelManagerList');
+  const sum=document.getElementById('activeModelSummary');
+  if(!list) return;
+  const ativo=configModelo();
+  if(sum) sum.textContent = modeloInstalado(ativo.id) ? `${ativo.nome} · ${ativo.tamanho} · ativo e pronto para uso.` : 'Nenhum modelo ativo. Baixe um modelo abaixo.';
+  const gpu=(navigator.gpu && typeof navigator.gpu.requestAdapter==='function');
+  const od=document.getElementById('offlineDiag'); if(od) od.textContent=`Offline: ${runtimeOfflineSource ? 'runtime preparado ✓' : 'runtime ainda não preparado'} · Worker: ${typeof Worker!=='undefined'?'disponível ✓':'indisponível'} · WebAssembly: ${typeof WebAssembly!=='undefined'?'disponível ✓':'indisponível'} · WebGPU: ${gpu?'detectado ✓':'não detectado'} · 135M: WASM/q8 · Internet atual: ${navigator.onLine?'sim':'não'}`;
+  list.innerHTML=Object.entries(MODELOS).map(([key,m])=>{
+    const installed=modeloInstalado(m.id), active=m.id===modeloSelecionado && installed, downloading=modelosBaixando.has(m.id);
+    const safeId='model_'+key;
+    const status=downloading ? 'BAIXANDO' : installed ? (active?'ATIVO':'INATIVO') : 'NÃO INSTALADO';
+    const statusClass=downloading?'tag-info':active?'tag-ok':installed?'tag-info':'tag-pend';
+    return `<div class="card" style="padding:12px;">
+      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
+        <div><div style="font-weight:700;">${escapeHtml(m.nome)}</div><div class="stage-note">${escapeHtml(m.nivel)} · ${escapeHtml(m.tamanho)} · RAM ${escapeHtml(m.memoria)}</div></div>
+        <span class="tag-status ${statusClass}">${status}</span>
+      </div>
+      <div class="stage-note" style="margin-top:6px;">${escapeHtml(m.detalhe)}</div>
+      <div class="stage-note" style="margin-top:3px;">Modelo: ${escapeHtml(m.id)}</div>
+      <div class="modal-actions" style="margin-top:9px;">
+        ${!installed ? `<button class="btn small primary" data-model-action="download" data-model-id="${escapeHtml(m.id)}" data-model-key="${safeId}" ${downloading?'disabled':''}>${downloading?'Baixando…':'Baixar e instalar'}</button>` : ''}
+        ${installed && !active ? `<button class="btn small" data-model-action="activate" data-model-id="${escapeHtml(m.id)}">Ativar</button>` : ''}
+        ${installed ? `<button class="btn small danger" data-model-action="uninstall" data-model-id="${escapeHtml(m.id)}" ${active?'disabled title="Ative outro modelo antes de desinstalar este."':''}>Desinstalar</button>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+  const ot=document.getElementById('offlineTestBtn');
+  if(ot) ot.onclick=async()=>{
+    ot.disabled=true; setAIStatus('loading','Testando modo offline','A partir de agora esta verificação proíbe acesso remoto ao modelo.',null);
+    try{
+      if(!modeloInstalado(modeloSelecionado)) throw new Error('Instale um modelo antes do teste offline.');
+      await prepararRuntimeOffline();
+      encerrarWorkerIA();
+      const w=criarWorkerIA();
+      await new Promise((resolve,reject)=>{ workerReadyResolve=resolve; workerReadyReject=reject; w.postMessage({type:'load',modelId:modeloSelecionado,dtype:configModelo().dtype,runtimeSource:runtimeOfflineSource,allowRemote:false}); setTimeout(()=>{ if(!pipelineIA && workerReadyReject){ workerReadyReject(new Error('O teste offline não terminou em 45 segundos.')); workerReadyResolve=null; workerReadyReject=null; } },120000); });
+      setAIStatus('ready','OFFLINE confirmado ✓',`${configModelo().nome} carregou sem permitir acesso remoto. Agora você pode desligar a internet e testar uma ordem.`);
+      try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
+    }catch(e){ setAIStatus('error','OFFLINE não confirmado',String(e?.message||e)); }
+    finally{ot.disabled=false; renderModelManager();}
+  };
+  list.querySelectorAll('[data-model-action]').forEach(btn=>btn.onclick=()=>{
+    const action=btn.dataset.modelAction, id=btn.dataset.modelId;
+    if(action==='download') baixarModeloIA(id);
+    if(action==='activate') ativarModeloIA(id);
+    if(action==='uninstall') desinstalarModeloIA(id);
+  });
+}
+
+async function baixarModeloIA(id){
+  const m=configModelo(id);
+  if(modeloInstalado(id)) return ativarModeloIA(id);
+  try{
+    modelosBaixando.add(id); renderModelManager();
+    setAIStatus('loading','Preparando pacote offline',`${m.nome} · primeiro uso precisa de internet para baixar runtime + modelo. Depois poderá funcionar sem internet.`,0);
+    renderModelManager();
+    await prepararRuntimeOffline();
+    // O mesmo motor usado pela aplicação é carregado aqui de propósito:
+    // concluir este carregamento é a confirmação prática de que o modelo
+    // está disponível para uso no navegador.
+    encerrarWorkerIA();
+    await carregarIAComModelo(id);
+    marcarModeloInstalado(id);
+    modelosBaixando.delete(id);
+    // Não mantemos o modelo apenas porque foi baixado; o usuário decide qual fica ativo.
+    encerrarWorkerIA();
+    modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
+    const emp=empresaAtual(); if(emp) emp.modeloIA=id;
+    persistirModelos();
+    try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
+    setAIStatus('ready','Modelo instalado ✓',`${m.nome} está baixado e ativo. Pronto para uso.`);
+    renderModelManager(); renderModelUI();
+  }catch(err){
+    modelosBaixando.delete(id);
+    setAIStatus('error','Falha ao instalar modelo',String(err?.message||err));
+    renderModelManager();
+  }
+}
+
+async function carregarIAComModelo(id){
+  const anterior=modeloSelecionado;
+  modeloSelecionado=id;
+  try{ return await carregarIA(); }
+  finally{ if(!pipelineIA) modeloSelecionado=anterior; }
+}
+
+async function ativarModeloIA(id){
+  if(!modeloInstalado(id)) return;
+  encerrarWorkerIA();
+  modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
+  const emp=empresaAtual(); if(emp) emp.modeloIA=id;
+  persistirModelos();
+  setAIStatus('loading','Ativando modelo',`${configModelo().nome} · preparando para uso…`,null);
+  renderModelManager(); renderModelUI();
+  try{ await carregarIA(); setAIStatus('ready','IA local pronta ✓',`${configModelo().nome} está ativo e pronto para a empresa.`); renderModelManager(); renderModelUI(); }
+  catch(e){ setAIStatus('error','Modelo não conseguiu iniciar',String(e?.message||e)); renderModelManager(); }
+}
+
+async function desinstalarModeloIA(id){
+  if(id===modeloSelecionado){ setAIStatus('error','Não é possível desinstalar','Ative outro modelo antes de remover o modelo atual.'); return; }
+  encerrarWorkerIA();
+  try{
+    const names=await caches.keys();
+    for(const name of names){
+      const cache=await caches.open(name);
+      for(const req of await cache.keys()){
+        const u=req.url||'';
+        if(u.includes(id) || u.includes(encodeURIComponent(id)) || u.includes(id.replace('onnx-community/',''))){ await cache.delete(req); }
+      }
+    }
+  }catch(e){ console.warn('Limpeza do cache do modelo falhou',e); }
+  modelosInstalados=modelosInstalados.filter(x=>x!==id);
+  persistirModelos();
+  setAIStatus('idle','Modelo desinstalado',`${configModelo(id).nome} foi removido da lista local. O navegador pode manter algum cache interno que não seja controlável por esta página.`);
+  renderModelManager(); renderModelUI();
+}
+
 function renderAll(){
   const emp = empresaAtual();
   document.getElementById('emptyState').hidden = !!emp;
@@ -1051,6 +1782,8 @@ function renderAll(){
   const sel = document.getElementById('companySelect');
   sel.hidden = DB.empresas.length < 2;
   sel.innerHTML = DB.empresas.map(e => `<option value="${e.id}" ${e.id===DB.atual?'selected':''}>${escapeHtml(e.nome)}</option>`).join('');
+  renderModelUI();
+  renderApprovals();
   if(!emp){
     document.getElementById('brandName').textContent = 'Escritório';
     document.getElementById('brandSub').textContent = 'nenhuma empresa fundada';
@@ -1059,10 +1792,12 @@ function renderAll(){
   }
   document.getElementById('brandName').textContent = emp.nome;
   document.getElementById('brandSub').textContent = `${emp.ramo} · ${emp.equipe.length} pessoas`;
+  if(emp.modeloIA && modeloInstalado(emp.modeloIA)){ modeloSelecionado=emp.modeloIA; MODEL_BARATO=emp.modeloIA; MODEL_GERENTE=emp.modeloIA; }
   document.getElementById('cfgNome').value = emp.nome;
   document.getElementById('cfgRamo').value = emp.ramo;
   document.getElementById('cfgMissao').value = emp.missao;
   document.getElementById('cfgTom').value = emp.tom;
+  renderModelUI();
   buildRuntime(); resizeStage(); renderLog(); renderMetrics(); renderTokens(); renderFiles();
   renderApprovals(); renderStaff();
   const card = document.getElementById('analysisCard');
@@ -1135,7 +1870,7 @@ function renderInspector(){
     <h3>${escapeHtml(rt.name)}</h3>
     <div class="role">${escapeHtml(rt.cargo)} · ${escapeHtml(emp.nome)}</div>
     <div class="field"><b>Estado:</b> ${escapeHtml(statusLabel(rt))}</div>
-    <div class="field"><b>Tarefa atual:</b> ${escapeHtml(rt.currentTask || '— nenhuma —')}</div>
+    <div class="field"><b>Tarefa atual:</b> ${escapeHtml(rt.currentTask || '— nenhuma —')}</div><div class="field"><b>Produto final:</b> ${escapeHtml(rt.norte?.produto || '—')}</div><div class="field"><b>Equipe:</b> ${escapeHtml(rt.norte?.equipe || '—')}</div><div class="field"><b>Qualidade:</b> ${rt.qualidade ? escapeHtml(`${rt.qualidade.nota}/10 · ${rt.qualidade.status}${rt.qualidade.problema ? ' · '+rt.qualidade.problema : ''}`) : '— ainda não revisada —'}</div>
     <div class="field"><b>Modelo:</b> <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></div>
     <div class="field"><b>Consumo:</b> ${f && f.tokens ? `${fmtNum(f.tokens.entrada+f.tokens.saida)} tokens em ${f.tokens.chamadas} chamadas · ${fmtCusto(f.tokens.custo)}` : 'nenhuma chamada ainda'}</div>
     <div class="field"><b>Últimos eventos:</b></div>
@@ -1232,7 +1967,7 @@ async function pedirEntregavel(pedido){
   alvo.state = 'acting'; alvo.icon = '📄'; alvo.thinking = true;
 
   const sys = `Você é ${alvo.name}, ${alvo.cargo} da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Tom da marca: ${emp.tom}. Produza o material pedido de verdade, pronto para uso. ${FORMATO_ARQUIVO}`;
-  const out = await askAIBlock(sys, pedido, 2500, MODEL_BARATO, alvo.id);
+  const out = await askAIBlock(sys, pedido, 384, MODEL_BARATO, alvo.id);
 
   alvo.thinking = false; alvo.icon = null; alvo.currentTask = null;
   const ok = out && out.conteudo.trim();
@@ -1307,7 +2042,7 @@ RESULTADO: <o que mudou, ate 12 palavras>
 ${f.conteudo}
 
 ALTERAÇÃO PEDIDA: ${instrucao}`;
-  const out = await askAIBlock(sys, usr, 2500, MODEL_BARATO, alvo.id);
+  const out = await askAIBlock(sys, usr, 384, MODEL_BARATO, alvo.id);
 
   alvo.thinking = false; alvo.icon = null; alvo.currentTask = null;
   alvo.state = 'talking'; alvo.bubbleText = (out && out.conteudo.trim()) ? 'Arquivo atualizado ✓' : 'Não consegui editar';
@@ -1361,32 +2096,59 @@ function renderMetrics(){
   ];
   document.getElementById('metricsGrid').innerHTML = items.map(i =>
     `<div class="metric"><div class="mv">${i.v}</div><div class="ml">${i.l}</div></div>`).join('');
+  const dc=document.getElementById('managerDecisionsCard');
+  if(dc){
+    const hist=(emp.historicoDecisoes||[]).slice(-5).reverse();
+    dc.innerHTML=`<h3>Decisões da gerente</h3>${hist.length?hist.map(d=>`<div class="field"><b>${escapeHtml(d.tipo||'decisão')}</b> — ${escapeHtml(d.quem||'empresa')}<br>${escapeHtml(d.justificativa||'sem justificativa')}</div>`).join(''):`<div class="stage-note">A gerente ainda está formando histórico de decisões.</div>`}`;
+  }
 }
 
 function renderApprovals(){
   const emp = empresaAtual(); if(!emp) return;
   const box = document.getElementById('approvalBox');
   const list = document.getElementById('approvalList');
-  if(!emp.aprovacoes.length){ box.hidden = true; return; }
+  const pend=emp.aprovacoes||[];
+  if(!pend.length){ box.hidden = true; return; }
   box.hidden = false;
-  list.innerHTML = emp.aprovacoes.map(a => `
-    <div class="approval-item">
-      <div><b>${escapeHtml(a.quem)}</b>: ${escapeHtml(a.texto)}</div>
-      <div class="ai-actions">
-        <button class="btn small" data-ok="${a.id}">Aprovar</button>
-        <button class="btn small danger" data-no="${a.id}">Recusar</button>
-      </div>
-    </div>`).join('');
+  list.innerHTML = pend.map(a => {
+    const feedback=a.tipo==='feedback_rumo';
+    return `<div class="approval-item">
+      <div style="flex:1"><b>${escapeHtml(a.quem||'Gerente')}</b>: ${escapeHtml(a.texto||'')}</div>
+      <div class="approval-meta">${feedback?'Consulta de rumo — não bloqueia a empresa.':'Pendência encaminhada ao usuário.'}</div>
+      ${a.justificativa?`<div class="approval-rationale"><b>Justificativa:</b> ${escapeHtml(a.justificativa)}</div>`:''}
+      <div class="ai-actions">${feedback
+        ? `<button class="btn small" data-rumo-ok="${a.id}">Estou satisfeito</button><button class="btn small danger" data-rumo-no="${a.id}">Quero mudar o rumo</button>`
+        : `<button class="btn small" data-ok="${a.id}">Aprovar</button><button class="btn small danger" data-no="${a.id}">Recusar</button>`}</div>
+    </div>`;
+  }).join('');
   list.querySelectorAll('[data-ok]').forEach(b => b.onclick = () => resolveApproval(b.dataset.ok, true));
   list.querySelectorAll('[data-no]').forEach(b => b.onclick = () => resolveApproval(b.dataset.no, false));
+  list.querySelectorAll('[data-rumo-ok]').forEach(b => b.onclick = () => resolveApproval(b.dataset.rumoOk, true));
+  list.querySelectorAll('[data-rumo-no]').forEach(b => b.onclick = () => pedirFeedbackRumo(b.dataset.rumoNo));
 }
-function resolveApproval(id, ok){
-  const emp = empresaAtual();
-  const item = emp.aprovacoes.find(a => a.id === id);
-  if(!item) return;
+async function pedirFeedbackRumo(id){
+  const emp=empresaAtual(); const item=emp?.aprovacoes?.find(a=>a.id===id); if(!item)return;
+  const resposta=prompt('O que você gostaria que a gerente mudasse no rumo?');
+  if(resposta===null)return;
+  item.respostaUsuario=String(resposta||'Quero mudar o rumo.').slice(0,500);
+  await resolveApproval(id,false);
+  addLog(`Você pediu mudança de rumo à gerente: ${item.respostaUsuario}`,'info');
+}
+async function resolveApproval(id, ok){
+  const emp = empresaAtual(); if(!emp) return;
+  const item = (emp.aprovacoes||[]).find(a => a.id === id); if(!item) return;
   emp.aprovacoes = emp.aprovacoes.filter(a => a.id !== id);
   addLog(`Você ${ok ? 'aprovou' : 'recusou'}: ${item.texto}`, ok ? 'ok' : 'pend');
   renderApprovals(); saveDB();
+  // Uma aprovação do usuário nunca paralisa a empresa; libera apenas a ação específica que estava aguardando.
+  if(ok && item.plano){
+    const rt=runtime.find(r=>r.id===item.plano.agentId) || runtime.find(r=>r.name===item.quem);
+    if(rt){rt.forced=true;try{await executarIdeia(rt,item.plano);rt.state='sitting';}finally{rt.forced=false;saveDB();}}
+  }
+  if(item.tipo==='feedback_rumo' && !ok && item.respostaUsuario){
+    emp.rumoFeedback={texto:item.respostaUsuario,ts:Date.now()};
+    addLog(`A gerente recebeu seu feedback de rumo e deve incorporá-lo às próximas decisões.`,'info');
+  }
 }
 
 function renderStaff(){
@@ -1402,7 +2164,7 @@ function renderStaff(){
     emp.equipe = emp.equipe.filter(x => x.id !== b.dataset.fire);
     if(selectedAgentId === b.dataset.fire) selectedAgentId = null;
     saveDB(); buildRuntime(); renderStaff(); resizeStage(); renderInspector();
-    addLog(`${f.nome} saiu da empresa.`, 'info');
+    addLog(`Você demitiu ${f.nome} manualmente.`, 'info');
   });
 }
 
@@ -1519,6 +2281,7 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
 });
 document.getElementById('foundBtn').onclick = foundCompanyFlow;
 document.getElementById('newCompanyBtn').onclick = foundCompanyFlow;
+document.getElementById('resetAllTopBtn').onclick = () => document.getElementById('resetAllBtn')?.click();
 document.getElementById('companySelect').onchange = e => {
   DB.atual = e.target.value; selectedAgentId = null; saveDB(); renderAll();
 };
@@ -1563,17 +2326,35 @@ document.getElementById('saveCfgBtn').onclick = () => {
   emp.tom = document.getElementById('cfgTom').value.trim();
   saveDB(); renderAll(); addLog('Configuração da empresa atualizada.', 'info');
 };
+document.getElementById('applyModelBtn').onclick = () => {
+  const id=document.getElementById('modelSelect')?.value;
+  if(id) ativarModeloIA(id);
+};
+document.getElementById('aiModelsTopBtn').onclick = abrirCentralModelos;
+document.getElementById('closeAIModelsBtn').onclick = fecharCentralModelos;
+document.getElementById('resetAllBtn').onclick = () => {
+  openModal(`
+    <h2>Destruir tudo e recomeçar?</h2>
+    <div class="msub">Isso apaga <b>todas as empresas</b>, equipes, arquivos, métricas, aprovações, histórico e a seleção atual. Também tenta remover do cache do navegador os arquivos dos modelos da IA. Não dá para desfazer.</div>
+    <div class="modal-actions">
+      <button class="btn" id="cancelReset">Cancelar</button>
+      <button class="btn primary danger" id="confirmReset">Destruir tudo</button>
+    </div>`);
+  document.getElementById('cancelReset').onclick=closeModal;
+  document.getElementById('confirmReset').onclick=limparCacheModelos;
+};
 document.getElementById('deleteCompanyBtn').onclick = () => {
   const emp = empresaAtual(); if(!emp) return;
   openModal(`
     <h2>Fechar ${escapeHtml(emp.nome)}?</h2>
-    <div class="msub">Isso apaga a equipe, o log e as métricas dessa empresa. Não dá pra desfazer.</div>
+    <div class="msub">Isso destrói esta empresa, incluindo equipe, arquivos, log, métricas e aprovações. As outras empresas permanecem. Não dá para desfazer.</div>
     <div class="modal-actions">
       <button class="btn" id="cancelDel">Cancelar</button>
-      <button class="btn primary danger" id="confirmDel">Fechar empresa</button>
+      <button class="btn primary danger" id="confirmDel">Destruir empresa</button>
     </div>`);
   document.getElementById('cancelDel').onclick = closeModal;
   document.getElementById('confirmDel').onclick = () => {
+    autonomyToken++;
     DB.empresas = DB.empresas.filter(x => x.id !== emp.id);
     DB.atual = DB.empresas.length ? DB.empresas[0].id : null;
     selectedAgentId = null; saveDB(); closeModal(); renderAll();
@@ -1583,6 +2364,15 @@ document.getElementById('modalBackdrop').onclick = e => {
   if(e.target.id === 'modalBackdrop') closeModal();
 };
 
+document.getElementById('aiRetryBtn')?.addEventListener('click', async () => {
+  iaBloqueadaAte=0;
+  const b=document.getElementById('aiRetryBtn');
+  if(b) b.hidden=true;
+  encerrarWorkerIA();
+  setAIStatus('loading','Reiniciando a IA local','Limpando o motor anterior e tentando novamente…');
+  try{ await carregarIA(); workerFalhas=0; }catch(e){ setAIStatus('error','A IA não conseguiu iniciar',String(e?.message||e)); }
+});
+
 /* ============================================================
    Boot
    ============================================================ */
@@ -1590,14 +2380,12 @@ document.getElementById('modalBackdrop').onclick = e => {
   await loadDB();
   if(DB.empresas.length && !DB.atual) DB.atual = DB.empresas[0].id;
   renderAll();
+  if(modeloInstalado(modeloSelecionado) && await runtimeOfflinePronto()) setAIStatus('ready','Pacote offline pronto ✓',`${configModelo().nome} está instalado e o runtime local foi preparado. A IA não depende de API nem de servidor.`);
+  else if(modeloInstalado(modeloSelecionado)) setAIStatus('loading','Finalize a preparação offline',`${configModelo().nome} está instalado, mas o runtime offline ainda não foi preparado. Abra IA / Modelos.`);
+  else setAIStatus('idle','Escolha um modelo de IA','Abra IA / Modelos para baixar um modelo gratuito e deixá-lo pronto para uso.');
   setInterval(tickCards, 350);
   requestAnimationFrame(loop);
 })();
-
-const retry = document.getElementById('aiRetryBtn');
-if(retry) retry.onclick = () => carregarIA().catch(()=>{});
-// Começa o download só depois de a interface aparecer.
-setTimeout(() => carregarIA().catch(()=>{}), 250);
 </script>
 
 </body>
