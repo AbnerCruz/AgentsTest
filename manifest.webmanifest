@@ -1,7 +1,7 @@
 {
   "name": "Estúdio — simulador com entregas reais",
   "short_name": "Estúdio",
-  "description": "Jogo de gerenciamento em que a equipe de IA produz arquivos reais que você baixa e vende.",
+  "description": "Simulação de equipe de IA trabalhando autonomamente em projetos persistentes e produzindo arquivos reais.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

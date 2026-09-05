@@ -115,14 +115,37 @@ window.S = window.S || {};
       f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-5) : [];
       f.uso = f.uso || { chamadas: 0, tokens: 0 };
     });
-    e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
-    e.contratos = Array.isArray(e.contratos) ? e.contratos : [];
+    e.projetos = Array.isArray(e.projetos) ? e.projetos : [];
+    if (!e.projetos.length) {
+      e.projetos.push({ id: uid('proj'), nome: 'Projeto principal', objetivo: e.missao, status: 'ativo',
+        criadoEm: e.criadoEm || Date.now(), tarefaIds: [], arquivoIds: [], atividade: [] });
+    }
+    e.projetos.forEach(pr => {
+      pr.id = pr.id || uid('proj');
+      pr.nome = String(pr.nome || 'Projeto');
+      pr.objetivo = String(pr.objetivo || e.missao);
+      pr.status = pr.status || 'ativo';
+      pr.tarefaIds = Array.isArray(pr.tarefaIds) ? pr.tarefaIds : [];
+      pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
+      pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
+    });
+    e.contratos = []; // contratos/encomendas pertencem ao modo antigo e não participam mais da simulação.
+
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
+    e.tarefas.forEach(t => {
+      t.projectId = t.projectId || (e.projetos[0] && e.projetos[0].id);
+      t.dependsOn = Array.isArray(t.dependsOn) ? t.dependsOn : [];
+      t.handoff = t.handoff || null;
+    });
     e.arquivos.forEach(a => {
       a.classe = ['esboco', 'prototipo', 'candidato', 'produto'].includes(a.classe) ? a.classe : 'esboco';
       a.versao = Number(a.versao) || 1;
       a.qualidade = Number.isFinite(a.qualidade) ? a.qualidade : 55;
       a.linhagem = a.linhagem || slug(a.nome);
+    });
+    e.projetos.forEach(pr => {
+      pr.tarefaIds = e.tarefas.filter(t => t.projectId === pr.id).map(t => t.id);
+      pr.arquivoIds = e.arquivos.filter(a => a.projectId === pr.id).map(a => a.id);
     });
     e.aprovacoes = Array.isArray(e.aprovacoes) ? e.aprovacoes : [];
     e.decisoes = Array.isArray(e.decisoes) ? e.decisoes : [];
@@ -210,7 +233,7 @@ window.S = window.S || {};
     e.xp = Math.max(0, (e.xp || 0) + (Number(qtd) || 0));
     const depois = nivelDe(e.xp);
     if (depois > antes) {
-      registrar(`O estúdio subiu para o nível ${depois}. Novos tipos de entrega foram liberados.`, 'ok');
+      registrar(`A experiência acumulada do estúdio chegou ao nível ${depois}.`, 'ok');
       S.bus.emit('nivel', depois);
     }
     S.bus.emit('estudio');

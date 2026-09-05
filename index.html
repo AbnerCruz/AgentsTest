@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0E1113">
-<meta name="description" content="Simulador de estúdio criativo: a equipe de IA trabalha sozinha e entrega arquivos reais que você baixa e vende.">
-<title>Estúdio — simulador com entregas reais</title>
+<meta name="description" content="Simulação de estúdio criativo: agentes de IA trabalham autonomamente em projetos persistentes e produzem arquivos reais.">
+<title>Estúdio — simulação de equipe com projetos persistentes</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <link rel="stylesheet" href="app.css">
@@ -73,10 +73,6 @@
       <span>Entregas</span>
       <i class="nav-badge" id="badgeEntregas" hidden></i>
     </button>
-    <button class="nav-item" data-view="negocio" type="button">
-      <svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-5 3 3 5-7"/></svg>
-      <span>Negócio</span>
-    </button>
     <button class="nav-item" data-view="motor" type="button">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 4v2m0 12v2M4 12h2m12 0h2M6.5 6.5 8 8m8 8 1.5 1.5m0-11L16 8M8 16l-1.5 1.5"/></svg>
       <span>Motor</span>
@@ -93,11 +89,11 @@
           <svg viewBox="0 0 24 24" width="30" height="30"><path d="M6 18V6h5.5a3.5 3.5 0 0 1 0 7H8.5l4.5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </div>
         <h1>Um estúdio que entrega arquivos de verdade</h1>
-        <p>É um jogo de gerenciamento: você funda o estúdio, contrata, dá ordens e acompanha o caixa. Mas o que a equipe produz não é cenário — são páginas, textos, planilhas e marcas prontas para baixar, usar e vender.</p>
+        <p>É um ambiente de simulação: você observa uma equipe de agentes trabalhando sozinha em projetos contínuos. O que ela produz não é cenário — são páginas, textos, planilhas e marcas reais.</p>
         <div class="steps">
           <div class="step"><b>1</b><span>Funde o estúdio e escolha o ramo.</span></div>
           <div class="step"><b>2</b><span>Conecte uma chave Groq gratuita no Motor.</span></div>
-          <div class="step"><b>3</b><span>Aceite contratos e baixe as entregas.</span></div>
+          <div class="step"><b>3</b><span>Observe a equipe transformar trabalho em artefatos persistentes.</span></div>
         </div>
         <div class="hero-actions">
           <button class="btn btn-primary btn-lg" id="fundarBtn" type="button">Fundar estúdio</button>
@@ -126,18 +122,11 @@
     <!-- TRABALHO -->
     <section class="view" id="v-trabalho">
       <div class="panel">
-        <div class="panel-head"><span class="panel-label">Ordem para a equipe</span></div>
-        <div class="composer">
-          <input id="ordemInput" type="text" placeholder="ex: preparar o lançamento da coleção de inverno" autocomplete="off">
-          <button class="btn btn-primary" id="ordemBtn" type="button">Enviar</button>
-        </div>
-        <p class="panel-foot">A gerente quebra a ordem em tarefas concretas e distribui para quem tem a especialidade certa.</p>
+        <div class="panel-head"><span class="panel-label">Projetos em andamento</span><span class="chip">autônomo</span></div>
+        <p class="panel-foot">A equipe decide o próximo passo, distribui tarefas por especialidade e reutiliza os artefatos já produzidos. Você acompanha; não precisa ficar jogando.</p>
+        <div id="projetosList"></div>
       </div>
       <div class="panel" id="aprovacoesPanel" hidden></div>
-      <div class="panel">
-        <div class="panel-head"><span class="panel-label">Contratos</span><button class="btn btn-mini" id="buscarContratoBtn" type="button">Prospectar</button></div>
-        <div id="contratosList"></div>
-      </div>
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Plano de trabalho</span><span class="chip" id="backlogChip">0 abertas</span></div>
         <div id="backlogList"></div>
@@ -151,13 +140,12 @@
     <!-- ENTREGAS -->
     <section class="view" id="v-entregas">
       <div class="panel">
-        <div class="panel-head"><span class="panel-label">Encomendar entrega</span></div>
-        <div class="kits" id="kitsList"></div>
-        <p class="panel-foot"><span class="tag tag-real">REAL</span> Tudo aqui vira arquivo de verdade no seu aparelho: HTML que abre no navegador, CSV que importa na planilha, SVG vetorial, Markdown. É seu para usar, editar e vender. <span class="tag tag-sim">SIMULADO</span> Caixa, clientes e reputação são o placar do jogo.</p>
+        <div class="panel-head"><span class="panel-label">Produção e arquivos</span><span class="chip">persistente</span></div>
+        <p class="panel-foot"><span class="tag tag-real">REAL</span> Cada entrega vira um arquivo persistido no projeto. Versões anteriores continuam disponíveis; quando um produto muda, a equipe pode gerar uma nova versão. Sites e catálogos usam o que já existe no projeto.</p>
       </div>
       <div class="panel">
         <div class="panel-head">
-          <span class="panel-label">Arquivos</span>
+          <span class="panel-label">Arquivos do projeto</span>
           <button class="btn btn-mini" id="exportarTudoBtn" type="button">Exportar .zip</button>
         </div>
         <div class="segmented" id="filtroArquivos">
@@ -170,15 +158,6 @@
         <p class="panel-foot" id="pipelineNota"></p>
         <div id="filesList"></div>
       </div>
-    </section>
-
-    <!-- NEGÓCIO -->
-    <section class="view" id="v-negocio">
-      <div class="kpis" id="kpiGrid"></div>
-      <div class="panel" id="caixaPanel"></div>
-      <div class="panel" id="funilPanel"></div>
-      <div class="panel" id="drePanel"></div>
-      <div class="panel" id="decisoesPanel"></div>
     </section>
 
     <!-- MOTOR -->
@@ -205,7 +184,7 @@
             <option value="normal">Normal — 1 chamada a cada 5 min</option>
             <option value="intenso">Intenso — 1 chamada a cada 2 min</option>
           </select>
-          <p class="hint">Define quanta autonomia a equipe tem por hora. Entregas pedidas por você furam a fila e acontecem na hora.</p>
+          <p class="hint">Define o intervalo mínimo entre decisões autônomas da gerência. A equipe trabalha sem depender de comandos do usuário.</p>
         </div>
         <div class="row-actions">
           <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>

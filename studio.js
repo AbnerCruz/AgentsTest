@@ -89,7 +89,7 @@
     ['O cliente já respondeu?', 'Silêncio total ainda.'],
     ['Travei numa ideia agora.', 'Dá uma volta, ajuda a pensar.'],
     ['Semana corrida, hein.', 'Nem me fala.'],
-    ['Alguém pega esse contrato novo?', 'Eu topo depois.'],
+    ['Você viu o que saiu no projeto?', 'Vi, vou aproveitar na próxima etapa.'],
     ['Gostei da mesa nova.', 'Fica melhor assim mesmo.']
   ];
   const SOZINHO = ['Só esticando as pernas.', 'Pensando na próxima ideia.', 'Um respiro rápido.', 'Café resolve tudo.'];
@@ -139,13 +139,16 @@
   /* ---------- vitais ---------- */
   function tickVitais() {
     const e = S.state.atual(); if (!e) return;
-    const rel = S.market.relogio(e);
+    const hora = new Date().getHours() + new Date().getMinutes()/60;
+    const rel = { expediente: hora >= 8 && hora < 18 };
     rt.forEach(p => {
       const f = p.ref;
       if (!f) return;
-      if (p.ocupado) f.energia = clamp(f.energia - 1.6, 0, 100);
-      else if (p.estado === 'pausa' || !rel.expediente) f.energia = clamp(f.energia + 2.4, 0, 100);
-      else f.energia = clamp(f.energia - 0.35, 0, 100);
+      // Energia é proporcional ao tempo real, não ao número de ciclos.
+      // Um ciclo de 7 s não pode equivaler a horas de trabalho.
+      if (p.ocupado) f.energia = clamp(f.energia - 0.12, 0, 100);
+      else if (p.estado === 'pausa' || !rel.expediente) f.energia = clamp(f.energia + 0.25, 0, 100);
+      else f.energia = clamp(f.energia - 0.015, 0, 100);
       // Humor volta devagar para o meio quando nada acontece.
       f.humor = clamp(f.humor + (f.humor < 60 ? 0.35 : -0.12), 0, 100);
       if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado) {
@@ -176,7 +179,7 @@
     const salvos = lista.map(a => {
       const arq = {
         id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
-        classe: meta.classe || 'esboco', kit: meta.kit || 'legado',
+        classe: meta.classe || 'esboco', kit: meta.kit || 'legado', projectId: meta.projectId || (e.projetos[0] && e.projetos[0].id),
         qualidade: meta.qualidade == null ? 50 : meta.qualidade,
         viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '')),
         autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora()
@@ -210,6 +213,23 @@
       publicadoPor: quem || 'você', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now()
     });
     e.arquivos.unshift(produto);
+    const proj = e.projetos.find(x => x.id === (base.projectId || '')) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+    if (proj) {
+      if (!proj.arquivoIds.includes(produto.id)) proj.arquivoIds.unshift(produto.id);
+      proj.atividade.unshift({ t: Date.now(), tipo: 'publicacao', texto: `${produto.nome} entrou no projeto.` });
+      proj.atividade = proj.atividade.slice(-40);
+      // O site é tratado como artefato vivo do projeto: quando um produto novo
+      // entra, a equipe agenda a integração em vez de deixar o site desatualizado.
+      if (base.kit !== 'landing') {
+        const site = e.arquivos.find(a => a.classe === 'produto' && a.kit === 'landing');
+        const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && t.kit === 'landing' && /atualiz|catálogo|catalogo/i.test(t.titulo));
+        if (site && !jaExiste) {
+          novaTarefa({ titulo: `Atualizar site com ${produto.nome}`, kit: 'landing',
+            briefing: `Atualizar o site existente e integrar o novo produto ${produto.nome}; preservar o que já funciona.`,
+            projectId: proj.id, baseArquivoId: site.id });
+        }
+      }
+    }
     S.state.registrar(`${produto.publicadoPor} publicou ${produto.nome}${motivo ? ' — ' + motivo : ''}.`, 'ok');
     S.state.ganharXP(25);
     S.state.gravar();
@@ -222,12 +242,20 @@
     const e = S.state.atual(); if (!e) return null;
     const titulo = String(dados.titulo || '').trim(); if (!titulo) return null;
     if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
+    const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     const t = {
       id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: dados.briefing || titulo,
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
-      contrato: dados.contrato || null, criadaEm: Date.now()
+      projectId: projeto ? projeto.id : null,
+      dependsOn: Array.isArray(dados.dependsOn) ? dados.dependsOn : [],
+      handoff: dados.handoff || null, criadaEm: Date.now()
     };
     e.tarefas.unshift(t);
+    if (projeto) {
+      projeto.tarefaIds.unshift(t.id);
+      projeto.atividade.unshift({ t: Date.now(), tipo: 'tarefa', texto: `${t.titulo}${t.para ? '' : ' — aguardando distribuição'}` });
+      projeto.atividade = projeto.atividade.slice(-40);
+    }
     if (e.tarefas.length > 60) e.tarefas.length = 60;
     S.state.gravar(); S.bus.emit('trabalho');
     return t;
@@ -235,8 +263,15 @@
   function tarefasAbertas() {
     const e = S.state.atual(); return e ? e.tarefas.filter(t => t.status === 'aberta') : [];
   }
+  function dependenciasOK(t) {
+    const e = S.state.atual(); if (!e) return false;
+    return (t.dependsOn || []).every(id => {
+      const dep = e.tarefas.find(x => x.id === id);
+      return dep && dep.status === 'feita';
+    });
+  }
   function proximaPara(p) {
-    const abertas = tarefasAbertas();
+    const abertas = tarefasAbertas().filter(dependenciasOK);
     return abertas.find(t => t.para === p.id)
       || abertas.find(t => !t.para && (S.factory.porId(t.kit) || {}).especialidade === p.especialidade)
       || abertas.find(t => !t.para) || null;
@@ -256,14 +291,20 @@
 
     let ok = false;
     try {
-      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref });
+      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref, projectId: tarefa.projectId, baseArquivoId: tarefa.baseArquivoId });
       if (saida && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, saida, p);
+        const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, { projectId: tarefa.projectId }), p);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
         tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
+        tarefa.handoff = `${p.nome}: ${salvos.map(a => a.nome).join(', ')} prontos para a próxima etapa.`;
+        const proj = e.projetos.find(x => x.id === tarefa.projectId);
+        if (proj) {
+          salvos.forEach(a => { if (!proj.arquivoIds.includes(a.id)) proj.arquivoIds.unshift(a.id); });
+          proj.atividade.unshift({ t: Date.now(), tipo: 'entrega', texto: `${p.nome} concluiu ${tarefa.titulo}.` });
+          proj.atividade = proj.atividade.slice(-40);
+        }
         ok = true;
         humor(p, 8, `entreguei ${salvos[0].nome}`);
-        if (tarefa.contrato) fecharContrato(tarefa.contrato, salvos[0], saida.qualidade);
         if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
       } else {
         tarefa.status = 'aberta';
@@ -282,37 +323,6 @@
       S.state.gravar(); S.bus.emit('trabalho'); S.bus.emit('equipe');
     }
     return ok;
-  }
-
-  /* ---------- contratos ---------- */
-  function aceitarContrato(id) {
-    const e = S.state.atual(); if (!e) return;
-    const c = e.contratos.find(x => x.id === id); if (!c || c.status !== 'oferta') return;
-    c.status = 'aceito'; c.aceitoEm = Date.now();
-    novaTarefa({
-      titulo: c.titulo, kit: c.kit, briefing: c.briefing,
-      origem: 'contrato', contrato: c.id
-    });
-    S.state.registrar(`Contrato aceito: ${c.titulo} · ${S.fmt.brl(c.valor)}.`, 'ok');
-    S.state.gravar(); S.bus.emit('trabalho');
-  }
-  function recusarContrato(id) {
-    const e = S.state.atual(); if (!e) return;
-    const c = e.contratos.find(x => x.id === id); if (!c) return;
-    c.status = 'recusado';
-    S.state.gravar(); S.bus.emit('trabalho');
-  }
-  /* O pagamento é proporcional à qualidade aferida. Entrega fraca não
-     recebe cheio — é o que dá peso à decisão de quem faz o quê. */
-  function fecharContrato(contratoId, arquivo, qualidade) {
-    const e = S.state.atual(); if (!e) return;
-    const c = e.contratos.find(x => x.id === contratoId); if (!c || c.status !== 'aceito') return;
-    const fator = clamp(0.45 + (qualidade - 45) / 70, 0.35, 1.15);
-    const pago = Math.round(c.valor * fator);
-    c.status = 'entregue'; c.pago = pago; c.qualidade = qualidade; c.arquivo = arquivo.id; c.entregueEm = Date.now();
-    S.market.creditar(e, pago, `contrato ${c.cliente}`);
-    S.state.ganharXP(Math.round(pago / 40));
-    S.bus.emit('trabalho');
   }
 
   /* ---------- decisões da gerência (custam 1 chamada barata) ---------- */
@@ -339,38 +349,45 @@
   async function planejar(g) {
     const e = S.state.atual(); if (!e) return;
     const kits = kitsDisponiveis();
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    if (!projeto) return;
     const equipe = rt.filter(p => p.papel === 'func').map(p => `${p.id}=${p.nome}(${p.especialidade})`).join('; ') || 'só a gerente';
-    const feitos = e.arquivos.slice(0, 5).map(a => a.nome).join(', ') || 'nada ainda';
+    const recentes = (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
+      .map(a => `${a.nome} [${a.classe}, q${a.qualidade}]`).join(', ') || 'nenhuma entrega ainda';
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'planejando';
     const r = await S.ai.perguntar({
-      sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome} (${e.ramo}). Defina as próximas 3 entregas.
-Tipos possíveis (use exatamente o código): ${kits.map(k => k.id).join(', ')}.
+      sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Trabalhe como gerente de um projeto contínuo, não como um jogo.
+Projeto: ${projeto.nome}. Objetivo: ${projeto.objetivo}.
 Equipe: ${equipe}.
-Responda SOMENTE nestas linhas:
-KIT1: <código>
-PARA1: <id da pessoa>
-BRIEF1: <o que entregar, até 14 palavras>
-KIT2: <código>
-PARA2: <id>
-BRIEF2: <até 14 palavras>
-KIT3: <código>
-PARA3: <id>
-BRIEF3: <até 14 palavras>`,
-      pedido: `Missão: ${e.missao}. Público: ${e.publico}. Já existe: ${feitos}. Não repita o que já existe.`,
-      tokens: 260, agente: g.nome, motivo: 'planejar trabalho'
+Entregas existentes: ${recentes}.
+Crie no máximo 2 próximas tarefas que realmente dependam do que já foi feito. Prefira revisão, integração, dados, conteúdo e evolução sobre começar do zero.
+Tipos: ${kits.map(k => k.id).join(', ')}.
+Responda SOMENTE:
+KIT1: <código ou vazio>
+PARA1: <id ou vazio>
+BRIEF1: <até 20 palavras>
+DEP1: <id de tarefa anterior ou vazio>
+KIT2: <código ou vazio>
+PARA2: <id ou vazio>
+BRIEF2: <até 20 palavras>
+DEP2: <id de tarefa anterior ou vazio>`,
+      pedido: `Missão: ${e.missao}. Não crie uma entrega duplicada. Faça a próxima etapa do projeto usando os artefatos persistidos.`,
+      tokens: 300, agente: g.nome, motivo: 'planejar projeto'
     });
     g.ocupado = false; g.balao = null; g.estado = 'sentado';
-    if (!r) { S.state.registrar(`${g.nome} não conseguiu montar o plano agora.`, 'alerta', g.id); return; }
+    if (!r) return;
     let criadas = 0;
-    ['1', '2', '3'].forEach(n => {
-      const kitId = String(r.campos['kit' + n] || '').trim();
-      const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief' + n]));
+    ['1','2'].forEach(n => {
+      const kitId = String(r.campos['kit'+n] || '').trim();
+      const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief'+n]));
       if (!kit || kit.nivel > S.state.nivelDe(e.xp)) return;
-      const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para' + n] || '').trim());
-      const brief = String(r.campos['brief' + n] || kit.desc);
-      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null })) criadas++;
+      const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para'+n] || '').trim());
+      const brief = String(r.campos['brief'+n] || kit.desc).trim();
+      const dep = e.tarefas.find(t => t.id === String(r.campos['dep'+n] || '').trim() && t.status === 'feita');
+      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null,
+        projectId: projeto.id, dependsOn: dep ? [dep.id] : [] })) criadas++;
     });
-    S.state.registrar(criadas ? `${g.nome} colocou ${criadas} entrega(s) no plano.` : `${g.nome} revisou o plano e não viu necessidade de tarefa nova.`, criadas ? 'ok' : 'info', g.id);
+    S.state.registrar(criadas ? `${g.nome} atualizou o projeto e criou ${criadas} próxima(s) etapa(s).` : `${g.nome} revisou o projeto e manteve o plano.`, criadas ? 'ok' : 'info', g.id);
   }
 
   async function avaliar(g) {
@@ -403,61 +420,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.state.gravar(); S.bus.emit('negocio');
   }
 
-  /* ---------- ordem do usuário ---------- */
-  async function darOrdem(texto) {
-    const e = S.state.atual(); if (!e || !texto.trim()) return;
-    S.state.registrar(`Você: "${texto}"`, 'info');
-    const g = gerente();
-    const kits = kitsDisponiveis();
-    let criadas = 0;
-    if (g && S.ai.pronta()) {
-      g.ocupado = true; g.balao = 'anotando';
-      const r = await S.ai.perguntar({
-        sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome} (${e.ramo}). Traduza a ordem do sócio em até 3 entregas concretas.
-Tipos possíveis (use o código exato): ${kits.map(k => k.id).join(', ')}.
-Responda SOMENTE nestas linhas:
-KIT1: <código>
-BRIEF1: <até 14 palavras>
-KIT2: <código ou vazio>
-BRIEF2: <até 14 palavras ou vazio>
-KIT3: <código ou vazio>
-BRIEF3: <até 14 palavras ou vazio>
-RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
-        pedido: `Ordem: ${texto}\nMissão: ${e.missao}. Público: ${e.publico}.`,
-        tokens: 240, agente: g.nome, motivo: 'interpretar ordem'
-      });
-      g.ocupado = false; g.balao = null;
-      if (r) {
-        ['1', '2', '3'].forEach(n => {
-          const kit = S.factory.porId(String(r.campos['kit' + n] || '').trim());
-          const brief = String(r.campos['brief' + n] || '').trim();
-          if (!kit || !brief || kit.nivel > S.state.nivelDe(e.xp)) return;
-          if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, origem: 'você' })) criadas++;
-        });
-        if (r.campos.resposta) await falar(g, String(r.campos.resposta).slice(0, 90), 2600);
-      }
-    }
-    if (!criadas) {
-      const kitId = kitPorPalavra(texto) || 'landing';
-      const kit = S.factory.porId(kitId);
-      if (novaTarefa({ titulo: `${kit.nome}: ${texto.slice(0, 60)}`, kit: kit.id, briefing: texto, origem: 'você' })) criadas = 1;
-    }
-    S.state.registrar(criadas ? `${criadas} entrega(s) entraram no plano.` : 'Nenhuma tarefa nova foi criada.', criadas ? 'ok' : 'alerta');
-    S.bus.emit('trabalho');
-  }
-
-  /* Encomenda direta: fura a fila da autonomia e produz agora. */
-  async function encomendar(kitId, briefing) {
-    const e = S.state.atual(); if (!e) return null;
-    const kit = S.factory.porId(kitId); if (!kit) return null;
-    const candidatos = rt.filter(p => p.papel === 'func' && !p.ocupado);
-    const p = candidatos.find(x => x.especialidade === kit.especialidade) || candidatos[0] || gerente();
-    if (!p) return null;
-    const t = novaTarefa({ titulo: `${kit.nome}: ${String(briefing).slice(0, 50)}`, kit: kit.id, briefing, para: p.id, origem: 'você' });
-    if (!t) return null;
-    await executar(p, t);
-    return t;
-  }
+  /* O usuário observa; a equipe decide e distribui o trabalho autonomamente. */
 
   /* ---------- contratação ---------- */
   function custoContratacao(e) { return 600 + (e.equipe.length - 1) * 350; }
@@ -490,6 +453,10 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     const e = S.state.normalizarEstudio({
       id: uid('e'), nome, ramo: dados.ramo, missao: dados.missao, tom: dados.tom, publico: dados.publico,
       criadoEm: Date.now(), xp: 0,
+      projetos: [{
+        id: uid('proj'), nome: 'Projeto principal', objetivo: dados.missao || 'Construir e melhorar o portfólio do estúdio.',
+        status: 'ativo', criadoEm: Date.now(), tarefaIds: [], arquivoIds: [], atividade: []
+      }],
       equipe: [
         { id: 'a0', nome: dados.gerente || 'Ana', papel: 'gerente', cargo: 'Sócia-gerente', especialidade: 'geral', cor: S.state.PALETA[0], energia: 88, humor: 74 },
         { id: 'a1', nome: pick(NOMES), papel: 'func', cargo: 'Criação', especialidade: 'criacao', cor: S.state.PALETA[1], energia: 85, humor: 70 },
@@ -500,7 +467,6 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     S.DB.estudios.unshift(e);
     S.DB.atual = e.id;
     S.state.gravarJa();
-    S.factory.prospectar(e, 3).catch(err => console.error('prospectar', err));
     S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
     S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
     return e;
@@ -511,7 +477,6 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     if (meu !== token) return;
     const e = S.state.atual();
     if (!e) return;
-    S.market.tick(e);
     S.bus.emit('relogio');
 
     if (!S.ai.disponivel()) return;
@@ -616,21 +581,43 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
         cx.beginPath(); cx.arc(x, y, 18, 0, Math.PI * 2); cx.stroke();
       }
 
-      cx.fillStyle = p.cor;
-      cx.beginPath(); cx.arc(x, y, 13, 0, Math.PI * 2); cx.fill();
-      if (p.estado === 'pausa') { cx.fillStyle = 'rgba(0,0,0,.35)'; cx.beginPath(); cx.arc(x, y, 13, 0, Math.PI * 2); cx.fill(); }
-
-      cx.fillStyle = '#14100D'; cx.font = '700 11px -apple-system,system-ui,sans-serif';
-      cx.textAlign = 'center'; cx.textBaseline = 'middle';
-      cx.fillText(p.nome.slice(0, 2).toUpperCase(), x, y + .5);
-      cx.textBaseline = 'alphabetic';
-
-      cx.fillStyle = '#8C9497'; cx.font = '500 10px -apple-system,system-ui,sans-serif';
-      cx.fillText(p.nome, x, y + 30);
-
+      // Sprite vetorial: cabeça, cabelo, roupa, braços e pernas.
+      // Mantém leitura clara mesmo em telas pequenas e dá identidade por agente.
+      const pulse = p.ocupado ? Math.sin(agora / 150) * 1.2 : 0;
+      const skin = ['#E8B08A','#C9825B','#F0C29B','#A96448'][Math.abs(p.id.charCodeAt(1) || 0) % 4];
+      const hair = p.papel === 'gerente' ? '#24272A' : ['#2A211D','#6B3F2A','#B87943','#30343A'][Math.abs(p.id.charCodeAt(2) || 0) % 4];
+      // pernas
+      cx.strokeStyle = '#202428'; cx.lineWidth = 4; cx.lineCap = 'round';
+      cx.beginPath(); cx.moveTo(x-5,y+10); cx.lineTo(x-6,y+18); cx.moveTo(x+5,y+10); cx.lineTo(x+6,y+18); cx.stroke();
+      // corpo
+      cx.fillStyle = p.cor; rrect(x-9,y-1+pulse,18,15,6); cx.fill();
+      // braços
+      cx.strokeStyle = p.cor; cx.lineWidth = 5;
+      cx.beginPath(); cx.moveTo(x-8,y+3+pulse); cx.lineTo(x-13,y+10+pulse); cx.moveTo(x+8,y+3+pulse); cx.lineTo(x+13,y+10+pulse); cx.stroke();
+      // pescoço + cabeça
+      cx.fillStyle = skin; rrect(x-3.5,y-8+pulse,7,6,2); cx.fill();
+      cx.beginPath(); cx.arc(x,y-11+pulse,9,0,Math.PI*2); cx.fill();
+      // cabelo
+      cx.fillStyle = hair; cx.beginPath(); cx.arc(x,y-13+pulse,9.3,Math.PI,Math.PI*2); cx.fill();
+      cx.fillRect(x-9,y-14+pulse,18,4);
+      // olhos
+      cx.fillStyle = '#202124'; cx.fillRect(x-4,y-11+pulse,2,2); cx.fillRect(x+2,y-11+pulse,2,2);
+      // notebook quando trabalhando
+      if (p.ocupado) {
+        cx.fillStyle = '#D6D9D7'; rrect(x-8,y+1+pulse,16,8,2); cx.fill();
+        cx.fillStyle = '#7C8588'; cx.fillRect(x-6,y+3+pulse,12,1.5);
+      }
+      // pausa
+      if (p.estado === 'pausa') { cx.fillStyle = 'rgba(0,0,0,.42)'; cx.beginPath(); cx.arc(x,y-4,12,0,Math.PI*2); cx.fill(); }
+      // seleção
+      if (p.id === selecionado) {
+        cx.strokeStyle = '#E9E7E2'; cx.lineWidth = 1.5;
+        cx.beginPath(); cx.roundRect(x-16,y-25,x*0+32,48,9); cx.stroke();
+      }
+      cx.fillStyle = '#8C9497'; cx.font = '600 10px -apple-system,system-ui,sans-serif';
+      cx.textAlign = 'center'; cx.fillText(p.nome, x, y + 30);
       if (p.papel === 'gerente') {
-        cx.fillStyle = '#D9A441';
-        cx.beginPath(); cx.arc(x + 11, y - 10, 3.4, 0, Math.PI * 2); cx.fill();
+        cx.fillStyle = '#D9A441'; cx.beginPath(); cx.arc(x + 10, y - 23, 3.4, 0, Math.PI * 2); cx.fill();
       }
 
       if (p.balao) {
@@ -689,9 +676,9 @@ RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
-    novaTarefa, tarefasAbertas, executar, darOrdem, encomendar,
+    novaTarefa, tarefasAbertas, executar,
     salvarArquivos, publicar,
-    aceitarContrato, recusarContrato, contratar, demitir, custoContratacao, fundar,
+    contratar, demitir, custoContratacao, fundar,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };

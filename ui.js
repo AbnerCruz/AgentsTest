@@ -39,8 +39,7 @@
     $('#nav').style.visibility = e ? 'visible' : 'hidden';
     if (view === 'estudio') { S.studio.ajustarCanvas(); }
     if (view === 'motor') pintarMotor();
-    if (view === 'negocio') pintarNegocio();
-    if (view === 'entregas') { pintarKits(); pintarArquivos(); }
+    if (view === 'entregas') { pintarArquivos(); }
     if (view === 'trabalho') pintarTrabalho();
   }
 
@@ -51,7 +50,7 @@
     const e = S.state.atual();
     $('#brandName').textContent = e ? e.nome : 'Estúdio';
     $('#brandSub').textContent = e
-      ? `${e.ramo} · nível ${S.state.nivelDe(e.xp)}`
+      ? `${e.ramo} · ${F.num(e.xp)} XP de experiência`
       : 'nenhum estúdio fundado';
     $('#topClock').hidden = !e;
     pintarPulso();
@@ -69,9 +68,9 @@
   }
   function pintarRelogio() {
     const e = S.state.atual(); if (!e) return;
-    const r = S.market.relogio(e);
-    $('#clockDay').textContent = 'Dia ' + r.dia;
-    $('#clockHour').textContent = r.hora;
+    const d = new Date();
+    $('#clockDay').textContent = d.toLocaleDateString('pt-BR', { day:'2-digit', month:'short' });
+    $('#clockHour').textContent = d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' });
   }
 
   /* ============================================================
@@ -115,7 +114,7 @@
       <div class="meter"><i style="width:${pr.pct}%"></i></div>
       <div class="stat"><span>${F.num(e.xp)} XP acumulado</span><b>${pr.falta > 0 ? 'faltam ' + F.num(pr.falta) : 'nível máximo'}</b></div>
       <div class="stat"><span>Tipos de entrega liberados</span><b>${liberados}/${kits.length}</b></div>
-      <p class="panel-foot">XP vem de entrega concluída, contrato pago e publicação. ${proximo.length ? 'No próximo nível: ' + proximo.map(k => k.nome).join(', ') + '.' : 'Tudo liberado.'}</p>`;
+      <p class="panel-foot">XP representa experiência acumulada por entregas concluídas e evolução do projeto. ${proximo.length ? 'No próximo nível: ' + proximo.map(k => k.nome).join(', ') + '.' : 'Tudo liberado.'}</p>`;
   }
 
   function painelPessoa(id) {
@@ -148,42 +147,38 @@
   /* ============================================================
      Trabalho
      ============================================================ */
-  function pintarTrabalho() { pintarContratos(); pintarBacklog(); pintarLog(); pintarPendencias(); pintarBadges(); }
+  function pintarTrabalho() { pintarProjetos(); pintarBacklog(); pintarLog(); pintarPendencias(); pintarBadges(); }
 
   function pintarBadges() {
     const e = S.state.atual(); if (!e) return;
-    const ofertas = e.contratos.filter(c => c.status === 'oferta').length;
     const candidatos = e.arquivos.filter(a => a.classe === 'candidato').length;
-    $('#badgeTrabalho').hidden = ofertas === 0;
+    $('#badgeTrabalho').hidden = true;
     $('#badgeEntregas').hidden = candidatos === 0;
   }
 
-  function pintarContratos() {
+  function pintarProjetos() {
     const e = S.state.atual(); if (!e) return;
-    const lista = e.contratos.filter(c => c.status === 'oferta' || c.status === 'aceito').slice(0, 6);
-    $('#contratosList').innerHTML = lista.length ? lista.map(c => {
-      const kit = S.factory.porId(c.kit);
-      return `<div class="item">
-        <span class="dot-state ${c.status === 'aceito' ? 'fazendo' : ''}"></span>
+    const projetos = e.projetos || [];
+    $('#projetosList').innerHTML = projetos.length ? projetos.map(pr => {
+      const abertas = e.tarefas.filter(t => t.projectId === pr.id && t.status !== 'feita').length;
+      const feitas = e.tarefas.filter(t => t.projectId === pr.id && t.status === 'feita').length;
+      const arquivos = (pr.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+      const qualidade = arquivos.length ? Math.round(arquivos.reduce((n,a)=>n+(Number(a.qualidade)||0),0)/arquivos.length) : 0;
+      const atividade = (pr.atividade || []).slice(-4).reverse();
+      return `<div class="item project-item">
+        <span class="dot-state ${pr.status === 'ativo' ? 'fazendo' : ''}"></span>
         <div class="item-body">
-          <div class="item-title">${esc(c.cliente)} — ${esc(kit ? kit.nome : c.kit)}</div>
-          <div class="item-meta">
-            <span class="tag tag-sim">${esc(F.brl(c.valor))} simulado</span>
-            <span>${esc(c.briefing).slice(0, 90)}</span>
+          <div class="item-title">${esc(pr.nome)}</div>
+          <div class="item-meta"><span>${esc(pr.objetivo)}</span></div>
+          <div class="stats project-stats">
+            <div class="stat"><span>Etapas</span><b>${feitas} feitas · ${abertas} abertas</b></div>
+            <div class="stat"><span>Artefatos</span><b>${arquivos.length}</b></div>
+            <div class="stat"><span>Qualidade média</span><b>${qualidade || '—'}</b></div>
           </div>
-        </div>
-        <div class="item-actions">
-          ${c.status === 'oferta'
-          ? `<button class="btn btn-mini btn-primary" data-aceitar="${c.id}" type="button">Aceitar</button>
-               <button class="btn btn-mini" data-recusar="${c.id}" type="button">Passar</button>`
-          : '<span class="chip">em produção</span>'}
+          ${atividade.length ? `<div class="project-feed">${atividade.map(a=>`<div><span>${F.hora(a.t)}</span>${esc(a.texto)}</div>`).join('')}</div>` : ''}
         </div>
       </div>`;
-    }).join('') : '<div class="empty">Nenhum contrato na mesa. Toque em Prospectar para bater na porta de novos clientes.</div>';
-    $$('#contratosList [data-aceitar]').forEach(b => b.onclick = () => {
-      S.studio.aceitarContrato(b.dataset.aceitar); toast('Contrato aceito. Entrou no plano de trabalho.', 'ok');
-    });
-    $$('#contratosList [data-recusar]').forEach(b => b.onclick = () => S.studio.recusarContrato(b.dataset.recusar));
+    }).join('') : '<div class="empty">A equipe ainda não criou um projeto.</div>';
   }
 
   function pintarBacklog() {
@@ -199,22 +194,13 @@
           <div class="item-title">${esc(t.titulo)}</div>
           <div class="item-meta">
             <span>${esc(t.status)}</span>
-            ${quem ? `<span>· ${esc(quem)}</span>` : '<span>· sem responsável</span>'}
+            ${quem ? `<span>· ${esc(quem)}</span>` : '<span>· aguardando distribuição</span>'}
             ${t.qualidade ? `<span>· qualidade ${t.qualidade}</span>` : ''}
-            ${t.origem === 'contrato' ? '<span class="tag">contrato</span>' : ''}
+            ${t.handoff ? `<span>· ${esc(t.handoff)}</span>` : ''}
           </div>
         </div>
-        ${t.status === 'aberta' ? `<div class="item-actions"><button class="btn btn-mini" data-agora="${t.id}" type="button">Fazer agora</button></div>` : ''}
       </div>`;
-    }).join('') : '<div class="empty">O plano está vazio. Dê uma ordem, aceite um contrato ou espere a gerente montar o próximo passo.</div>';
-    $$('#backlogList [data-agora]').forEach(b => b.onclick = async () => {
-      const t = e.tarefas.find(x => x.id === b.dataset.agora); if (!t) return;
-      b.disabled = true; b.textContent = 'produzindo…';
-      const p = S.studio.pessoas().find(x => x.papel === 'func' && !x.ocupado) || S.studio.gerente();
-      if (!p) return;
-      await S.studio.executar(p, t);
-      toast(t.status === 'feita' ? 'Entrega pronta na aba Entregas.' : 'A tentativa falhou.', t.status === 'feita' ? 'ok' : 'erro');
-    });
+    }).join('') : '<div class="empty">O plano está vazio. A gerente cria as próximas etapas conforme o projeto evolui.</div>';
   }
 
   function pintarPendencias() {
@@ -223,21 +209,18 @@
     const painel = $('#aprovacoesPanel');
     painel.hidden = cands.length === 0;
     if (!cands.length) return;
-    painel.innerHTML = `<div class="panel-head"><span class="panel-label">Aguardando sua decisão</span><span class="chip">${cands.length}</span></div>
+    painel.innerHTML = `<div class="panel-head"><span class="panel-label">Revisões da gerência</span><span class="chip">${cands.length}</span></div>
       ${cands.map(a => `<div class="item">
         <span class="dot-state feita"></span>
         <div class="item-body">
           <div class="item-title">${esc(a.nome)}</div>
           <div class="item-meta"><span>qualidade ${a.qualidade}</span><span>· por ${esc(a.autor)}</span></div>
         </div>
-        <div class="item-actions"><button class="btn btn-mini btn-primary" data-pub="${a.id}" type="button">Publicar</button></div>
+
       </div>`).join('')}
-      <p class="panel-foot">Publicar congela a versão e coloca o material no mercado — é o que faz o funil começar a girar.</p>`;
-    $$('#aprovacoesPanel [data-pub]').forEach(b => b.onclick = () => {
-      const p = S.studio.publicar(b.dataset.pub, 'você', 'publicação direta');
-      if (p) toast('Publicado: ' + p.nome, 'ok');
-    });
+      <p class="panel-foot">A gerente avalia os candidatos automaticamente. Quando um artefato é aprovado, a versão é congelada e permanece no histórico do projeto.</p>`;
   }
+
 
   function pintarLog() {
     const e = S.state.atual(); if (!e) return;
@@ -250,51 +233,11 @@
   /* ============================================================
      Entregas
      ============================================================ */
-  function pintarKits() {
-    const e = S.state.atual(); if (!e) return;
-    const nivel = S.state.nivelDe(e.xp);
-    $('#kitsList').innerHTML = S.factory.KITS.map(k => {
-      const travado = k.nivel > nivel;
-      return `<button class="kit" data-kit="${k.id}" type="button" ${travado ? 'disabled' : ''}>
-        <span class="kit-top"><span class="kit-ext">.${k.ext}</span>${travado ? `<span class="tag">nível ${k.nivel}</span>` : ''}</span>
-        <span class="kit-nome">${esc(k.nome)}</span>
-        <span class="kit-desc">${esc(k.desc)}</span>
-      </button>`;
-    }).join('');
-    $$('#kitsList [data-kit]').forEach(b => b.onclick = () => painelEncomenda(b.dataset.kit));
-  }
-
-  function painelEncomenda(kitId) {
-    const kit = S.factory.porId(kitId); if (!kit) return;
-    const e = S.state.atual();
-    folha(`
-      <h2>${esc(kit.nome)}</h2>
-      <p class="sub">${esc(kit.vende)}</p>
-      <div class="field">
-        <label for="briefInput">O que essa entrega precisa cobrir</label>
-        <textarea id="briefInput" placeholder="ex: destacar a coleção de inverno para clientes que já compraram"></textarea>
-        <p class="hint">Gera ${kit.multiplo ? 'vários arquivos' : 'um arquivo .' + kit.ext} de verdade. Custa uma chamada de IA (~${kit.tokens} tokens de saída).</p>
-      </div>
-      <div class="sheet-actions">
-        <button class="btn" id="cancelEnc" type="button">Cancelar</button>
-        <button class="btn btn-primary" id="okEnc" type="button">Produzir agora</button>
-      </div>`, box => {
-      box.querySelector('#cancelEnc').onclick = fecharFolha;
-      box.querySelector('#okEnc').onclick = async ev => {
-        const brief = box.querySelector('#briefInput').value.trim() || `${kit.nome} para ${e.ramo}`;
-        ev.target.disabled = true; ev.target.textContent = 'produzindo…';
-        fecharFolha();
-        toast('Produzindo ' + kit.nome + '…');
-        const t = await S.studio.encomendar(kit.id, brief);
-        toast(t && t.status === 'feita' ? 'Arquivo pronto.' : 'Não deu certo dessa vez.', t && t.status === 'feita' ? 'ok' : 'erro');
-        mostrar('entregas');
-      };
-    });
-  }
+  function pintarKits() { /* Produção é autônoma; não há encomendas manuais. */ }
 
   const ROTULO_CLASSE = { esboco: 'esboço', prototipo: 'protótipo', candidato: 'candidato', produto: 'produto final' };
   const EXPLICA_CLASSE = {
-    todos: 'A ordem é rígida: esboço → protótipo → candidato → produto final. Só o que vira produto final entra no mercado da simulação.',
+    todos: 'O pipeline registra a evolução dos artefatos: esboço → protótipo → candidato → produto final. Versões anteriores permanecem no histórico.',
     esboco: 'Material incompleto ou feito sem IA. Serve de base, não de entrega.',
     prototipo: 'Primeira versão utilizável. Ainda vale revisar antes de mandar para alguém.',
     candidato: 'Passou na checagem estrutural e está esperando sua publicação.',
@@ -332,7 +275,7 @@
         ${previa ? `<iframe class="file-frame" sandbox="allow-same-origin" srcdoc="${esc(a.conteudo)}"></iframe>` : ''}
         ${aberto === 'codigo' ? `<div class="file-view">${esc(a.conteudo.slice(0, 9000))}</div>` : ''}
       </div>`;
-    }).join('') : `<div class="empty">Nenhum arquivo ${filtroClasse === 'todos' ? '' : 'nesse estágio '}ainda. Encomende uma entrega acima ou aceite um contrato.</div>`;
+    }).join('') : `<div class="empty">Nenhum arquivo ${filtroClasse === 'todos' ? '' : 'nesse estágio '}ainda. A equipe ainda não produziu um artefato neste projeto.</div>`;
 
     $$('#filesList [data-previa]').forEach(b => b.onclick = () => {
       abertos[b.dataset.previa] = abertos[b.dataset.previa] === 'previa' ? null : 'previa'; pintarArquivos();
@@ -392,69 +335,6 @@
       <path d="${d} L${L} ${A} L0 ${A} Z" fill="${cor}" opacity=".10"/>
       <path d="${d}" fill="none" stroke="${cor}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
     </svg>`;
-  }
-
-  function pintarNegocio() {
-    const e = S.state.atual(); if (!e) return;
-    S.market.tick(e);
-    const i = S.market.indicadores(e); if (!i) return;
-
-    $('#kpiGrid').innerHTML = [
-      { v: F.brl(i.caixa), l: 'caixa', d: i.lucroOperacional >= 0 ? 'operação positiva' : 'queimando caixa', up: i.lucroOperacional >= 0 },
-      { v: F.brl(i.receita), l: 'receita total', d: `${F.brl(i.receitaContratos)} de contratos`, up: true },
-      { v: F.num(i.clientes), l: 'clientes', d: `${F.num(i.leads)} leads no funil`, up: true },
-      { v: F.pct(i.convTotal, 2), l: 'visita → pedido', d: `${F.num(i.visitas)} visitas`, up: i.convTotal > 0 }
-    ].map(k => `<div class="kpi">
-      <div class="kpi-v">${k.v}</div>
-      <div class="kpi-l">${k.l}</div>
-      <div class="kpi-d ${k.up ? 'up' : 'down'}">${esc(k.d)}</div>
-    </div>`).join('');
-
-    $('#caixaPanel').innerHTML = `
-      <div class="panel-head"><span class="panel-label">Caixa ao longo do tempo</span><span class="tag tag-sim">SIMULADO</span></div>
-      ${sparkline(i.historico, 'caixa')}
-      <div class="stats">
-        <div class="stat"><span>Runway</span><b>${Number.isFinite(i.runway) ? i.runway.toFixed(1) + ' meses' : '∞'}</b></div>
-        <div class="stat"><span>Queima mensal estimada</span><b>${F.brl(i.burnMes)}</b></div>
-        <div class="stat"><span>Folha por hora de expediente</span><b>${F.brl(i.folhaHora)}</b></div>
-      </div>`;
-
-    const p = i.presenca;
-    const kitsPublicados = p.kits.map(k => (S.factory.porId(k) || { nome: k }).nome);
-    $('#funilPanel').innerHTML = `
-      <div class="panel-head"><span class="panel-label">Funil e presença</span></div>
-      <div class="stats">
-        <div class="stat"><span>Visitas</span><b>${F.num(i.visitas)}</b></div>
-        <div class="stat"><span>Leads</span><b>${F.num(i.leads)} · ${F.pct(i.convVisitaLead, 2)}</b></div>
-        <div class="stat"><span>Pedidos</span><b>${F.num(i.pedidos)} · ${F.pct(i.convLeadPedido, 2)}</b></div>
-        <div class="stat"><span>Ticket médio</span><b>${F.brl(i.ticket)}</b></div>
-        <div class="stat"><span>Reputação</span><b>${Math.round(i.reputacao)}/100</b></div>
-        <div class="stat"><span>Qualidade média publicada</span><b>${Math.round(i.qualidade)}/100</b></div>
-      </div>
-      <p class="panel-foot">${p.oferta
-        ? `O funil gira porque existem ${p.itens} produto(s) publicado(s): ${esc(kitsPublicados.join(', '))}. Cada tipo mexe num fator diferente — anúncio traz gente, catálogo e e-mail convertem, marca sustenta reputação.`
-        : 'Nada foi publicado ainda, então não há visitas nem vendas. Publique um material na aba Entregas para o mercado começar a existir.'}</p>`;
-
-    $('#drePanel').innerHTML = `
-      <div class="panel-head"><span class="panel-label">Resultado</span></div>
-      <div class="stats">
-        <div class="stat"><span>Receita de mercado</span><b>${F.brl(i.receitaMercado)}</b></div>
-        <div class="stat"><span>Receita de contratos</span><b>${F.brl(i.receitaContratos)}</b></div>
-        <div class="stat"><span>Custo direto</span><b>−${F.brl(i.custoDireto)}</b></div>
-        <div class="stat"><span>Lucro bruto</span><b>${F.brl(i.lucroBruto)} · ${F.pct(i.margemBruta)}</b></div>
-        <div class="stat"><span>Despesas operacionais</span><b>−${F.brl(i.opex)}</b></div>
-        <div class="stat"><span>Lucro operacional</span><b>${F.brl(i.lucroOperacional)} · ${F.pct(i.margemOperacional)}</b></div>
-      </div>
-      <p class="panel-foot">Nenhum destes números é sorteado nem inventado pela IA. Eles saem do tempo de operação, do que está publicado, da qualidade aferida e do custo da equipe. O relógio anda 1 hora a cada minuto real.</p>`;
-
-    const decisoes = (e.decisoes || []).slice(0, 6);
-    $('#decisoesPanel').innerHTML = `
-      <div class="panel-head"><span class="panel-label">Decisões da gerência</span></div>
-      ${decisoes.length ? decisoes.map(d => `<div class="item">
-        <span class="dot-state ${d.tipo === 'publicação' ? 'feita' : ''}"></span>
-        <div class="item-body"><div class="item-title">${esc(d.tipo)} — ${esc(d.quem)}</div>
-        <div class="item-meta"><span>${esc(d.texto)}</span></div></div>
-      </div>`).join('') : '<div class="empty">A gerente ainda não tomou decisões registradas.</div>'}`;
   }
 
   /* ============================================================
@@ -552,7 +432,7 @@
         });
         fecharFolha();
         mostrar('estudio');
-        toast('Estúdio fundado. Três contratos já estão na mesa.', 'ok');
+        toast('Estúdio fundado. A equipe começou a organizar o projeto.', 'ok');
       };
     });
   }
@@ -639,30 +519,6 @@
       if (p) painelPessoa(p.id);
     };
 
-    $('#ordemBtn').onclick = async () => {
-      const inp = $('#ordemInput');
-      const txt = inp.value.trim(); if (!txt) return;
-      inp.value = ''; $('#ordemBtn').disabled = true;
-      await S.studio.darOrdem(txt);
-      $('#ordemBtn').disabled = false;
-      pintarTrabalho();
-    };
-    $('#ordemInput').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#ordemBtn').click(); });
-
-    $('#buscarContratoBtn').onclick = async () => {
-      const e = S.state.atual(); if (!e) return;
-      const btn = $('#buscarContratoBtn');
-      btn.disabled = true; const rotulo = btn.textContent; btn.textContent = 'Prospectando…';
-      try {
-        const n = await S.factory.prospectar(e, 2);
-        toast(n > 0 ? n + ' contrato(s) na mesa.' : 'Já há contratos esperando decisão.');
-      } catch (err) {
-        toast('Não deu para prospectar agora.', 'erro');
-      } finally {
-        btn.disabled = false; btn.textContent = rotulo;
-        pintarContratos();
-      }
-    };
     $('#limparLogBtn').onclick = () => { const e = S.state.atual(); if (e) { e.log = []; S.state.gravarJa(); pintarLog(); } };
 
     $$('#filtroArquivos button').forEach(b => b.onclick = () => {
@@ -694,7 +550,7 @@
 
     $('#fecharEstudioBtn').onclick = () => {
       const e = S.state.atual(); if (!e) return;
-      confirmar('Fechar ' + e.nome + '?', 'Some com a equipe, os contratos e todos os arquivos deste estúdio. Exporte o .zip antes se quiser guardar as entregas.', () => {
+      confirmar('Fechar ' + e.nome + '?', 'Some com a equipe, os projetos e todos os arquivos deste estúdio. Exporte o .zip antes se quiser guardar as entregas.', () => {
         S.state.remover(e.id); toast('Estúdio fechado.');
       });
     };
@@ -705,7 +561,7 @@
     };
 
     window.addEventListener('resize', () => { if (viewAtual === 'estudio') S.studio.ajustarCanvas(); });
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) { pintarRelogio(); if (viewAtual === 'negocio') pintarNegocio(); } });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { pintarRelogio(); } });
   }
 
   /* ---------- reações a eventos ---------- */
@@ -716,7 +572,7 @@
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
     S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
-    S.bus.on('negocio', () => { if (viewAtual === 'negocio') pintarNegocio(); });
+    S.bus.on('negocio', () => { });
     S.bus.on('relogio', () => { pintarRelogio(); });
     S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
     S.bus.on('trocou', () => { S.studio.montar(); pintarTopo(); mostrar(S.state.atual() ? (viewAtual === 'vazio' ? 'estudio' : viewAtual) : 'vazio'); pintarTudo(); });
@@ -726,7 +582,7 @@
   function pintarTudo() {
     pintarTopo(); pintarRelogio();
     if (!S.state.atual()) return;
-    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarKits(); pintarArquivos(); pintarNegocio(); pintarMotor();
+    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor();
   }
 
   /* ---------- início ---------- */
@@ -739,7 +595,6 @@
     pintarTudo();
     setInterval(() => {
       pintarRelogio();
-      if (viewAtual === 'negocio') pintarNegocio();
       if (viewAtual === 'motor') pintarMotor();
     }, 5000);
     window.addEventListener('beforeunload', () => S.state.gravarJa());

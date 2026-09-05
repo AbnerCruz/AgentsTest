@@ -82,6 +82,19 @@
      Gabarito da página HTML — usado por landing e proposta.
      Um só lugar cuida do CSS, então toda página sai com o mesmo padrão.
      ============================================================ */
+  function portfolioHTML(ctx) {
+    const arquivos = ctx.projeto && Array.isArray(ctx.projeto.arquivos) ? ctx.projeto.arquivos : [];
+    const produtos = arquivos.filter(a => a.classe === 'produto' || /catalogo|produto/i.test(a.nome)).slice(0, 8);
+    if (!produtos.length) return '';
+    return `<section class="portfolio"><h2>O que já produzimos</h2><div class="cards">
+      ${produtos.map((a, i) => {
+        const nome = a.nome.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' ');
+        const detalhe = String(a.conteudo || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 150);
+        return `<div class="card"><span class="num">${i + 1}</span><h3>${esc(nome)}</h3><p>${esc(detalhe || 'Material desenvolvido pela equipe e mantido no projeto.')}</p></div>`;
+      }).join('')}
+    </div></section>`;
+  }
+
   function paginaHTML(o) {
     const p = o.paleta;
     return `<!doctype html>
@@ -155,6 +168,8 @@ ${o.corpo}
         return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva o texto de uma página de vendas em português do Brasil.
 Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
 Pedido: ${ctx.briefing}
+Projeto persistente: ${ctx.projeto ? ctx.projeto.nome : 'principal'} — ${ctx.projeto ? ctx.projeto.objetivo : ''}
+Artefatos já produzidos devem ser aproveitados e integrados, especialmente produtos/catálogos.
 Responda SOMENTE nestas linhas, sem markdown, sem comentários, uma linha por campo:
 CHAPEU: <2 a 4 palavras>
 TITULO: <promessa principal, até 10 palavras>
@@ -193,6 +208,7 @@ COR: <uma cor que combine com a marca, em hexadecimal>`;
       ${benef.map((b, i) => `<div class="card"><span class="num">${i + 1}</span><h3>${esc(b.t)}</h3><p>${esc(b.d)}</p></div>`).join('\n      ')}
     </div>
   </section>
+  ${portfolioHTML(ctx)}
   ${faqs.length ? `<section><h2>Perguntas frequentes</h2><dl class="faq">${faqs.map(f => `<dt>${esc(f.p)}</dt><dd>${esc(f.r)}</dd>`).join('')}</dl></section>` : ''}
   <section id="contato" style="border-bottom:0">
     <div class="oferta">
@@ -642,7 +658,9 @@ Sem numeração, sem markdown.`;
       estudio: e.nome, ramo: e.ramo, missao: e.missao, tom: e.tom, publico: e.publico,
       autor: agente ? agente.nome : 'a equipe',
       cargo: agente ? agente.cargo : 'produção',
-      briefing: String(op.briefing || kit.desc).slice(0, 420)
+      briefing: String(op.briefing || kit.desc).slice(0, 420),
+      projectId: op.projectId || null,
+      projeto: contextoProjeto(e, op.projectId)
     };
 
     let campos = null, bruto = '', viaIA = false;
@@ -650,7 +668,7 @@ Sem numeração, sem markdown.`;
       try {
         const r = await S.ai.chamar({
           sistema: kit.instrucao(ctx),
-          pedido: contextoCurto(e),
+          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto),
           tipo: 'conteudo', tokens: kit.tokens,
           agente: ctx.autor, motivo: 'produzir ' + kit.nome
         });
@@ -667,18 +685,41 @@ Sem numeração, sem markdown.`;
     if (!arquivos.length) return null;
 
     /* Sem IA o arquivo é real, mas genérico: nasce como esboço e com teto
-       de qualidade, para não pagar contrato cheio por um gabarito vazio. */
+       de qualidade para deixar claro que não passou pela produção da IA. */
     const bruta = aferir(kit, campos, arquivos, agente);
     const qualidade = viaIA ? bruta : Math.min(36, bruta);
     const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
     return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
   }
 
+  function contextoProjeto(e, projectId) {
+    const projeto = (e.projetos || []).find(p => p.id === projectId) || (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0];
+    if (!projeto) return { nome: 'Projeto principal', objetivo: e.missao, arquivos: [], tarefas: [] };
+    const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).slice(0, 10)
+      .map(a => ({ id: a.id, nome: a.nome, tipo: a.tipo, classe: a.classe, qualidade: a.qualidade, conteudo: String(a.conteudo).slice(0, 1800) }));
+    const tarefas = (projeto.tarefaIds || []).map(id => e.tarefas.find(t => t.id === id)).filter(Boolean).slice(0, 10)
+      .map(t => ({ id: t.id, titulo: t.titulo, status: t.status, handoff: t.handoff || '' }));
+    return { id: projeto.id, nome: projeto.nome, objetivo: projeto.objetivo, arquivos, tarefas };
+  }
+
+  function contextoProjetoPrompt(projeto) {
+    if (!projeto) return '';
+    const arquivos = (projeto.arquivos || []).slice(0, 5).map(a =>
+      `ARQUIVO ${a.nome} [${a.classe}, q${a.qualidade}]\n${String(a.conteudo || '').slice(0, 700)}`
+    ).join('\n');
+    const tarefas = (projeto.tarefas || []).slice(0, 5).map(t =>
+      `${t.status.toUpperCase()}: ${t.titulo}${t.handoff ? ` | ${t.handoff}` : ''}`
+    ).join('\n');
+    return `\nPROJETO PERSISTENTE: ${projeto.nome}\nOBJETIVO: ${projeto.objetivo}\nETAPAS:\n${tarefas || 'nenhuma'}\nARTEFATOS:\n${arquivos || 'nenhum'}`;
+  }
+
   /* Contexto curto de propósito: quanto menor, mais barata a chamada. */
   function contextoCurto(e) {
     const publicados = (e.arquivos || []).filter(a => a.classe === 'produto').slice(0, 4).map(a => a.nome);
     const ultimos = (e.log || []).slice(-3).map(l => l.texto).join(' | ');
-    return `Contexto do estúdio: já publicamos ${publicados.length ? publicados.join(', ') : 'nada ainda'}. Últimos eventos: ${ultimos || 'nenhum'}. Não repita material já publicado.`;
+    const projeto = (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0];
+    const ativos = projeto ? (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).map(a => `${a.nome} (${a.classe})`).join(', ') : '';
+    return `Contexto persistente: projeto ${projeto ? projeto.nome : 'principal'}; objetivo: ${projeto ? projeto.objetivo : e.missao}. Artefatos existentes: ${ativos || 'nenhum'}. Publicados: ${publicados.length ? publicados.join(', ') : 'nada'}. Últimos eventos: ${ultimos || 'nenhum'}. Preserve e evolua o que já existe; não comece do zero sem motivo.`;
   }
 
   function camposDeContingencia(kit, ctx) {
@@ -709,122 +750,8 @@ Sem numeração, sem markdown.`;
     return base;
   }
 
-  /* ============================================================
-     Contratos — o lado "jogo". O valor é simulado; o arquivo entregue
-     ao aceitar o contrato é real e fica com você de qualquer forma.
-     O cliente e o pedido são pensados para o ramo do PRÓPRIO estúdio
-     (a IA inventa; sem IA, cai num gabarito que ao menos cita o ramo
-     em vez de sortear um negócio qualquer sem relação nenhuma).
-     ============================================================ */
-  const VALOR_BASE = { landing: 1400, anuncios: 700, artigo: 550, emails: 900, catalogo: 800, marca: 2200, proposta: 950, calendario: 1200 };
-  const TEMAS_GENERICOS = ['o carro-chefe', 'o lançamento da vez', 'a temporada atual', 'quem ainda não conhece o trabalho',
-    'a linha mais pedida', 'a novidade recente', 'o público fiel', 'a proposta de valor'];
-  const PEDIDOS_GENERICOS = {
-    landing: ['precisa de uma página para lançar {tema}', 'quer trocar o site antigo por uma página que venda {tema}'],
-    anuncios: ['vai anunciar {tema} e não tem copy', 'quer testar seis abordagens de anúncio para {tema}'],
-    artigo: ['quer aparecer no Google falando sobre {tema}', 'precisa de um texto de autoridade sobre {tema}'],
-    emails: ['tem uma lista parada e quer reativar com {tema}', 'quer uma sequência de boas-vindas sobre {tema}'],
-    catalogo: ['vai organizar {tema} com preço e descrição', 'precisa listar {tema} de forma apresentável'],
-    marca: ['vai relançar a identidade em torno de {tema}', 'não tem logo nem paleta para {tema}'],
-    proposta: ['precisa enviar uma proposta sobre {tema} até sexta', 'perdeu negócio por falta de proposta formal sobre {tema}'],
-    calendario: ['quer um mês inteiro de conteúdo sobre {tema}', 'não sabe o que postar sobre {tema}']
-  };
-
-  function valorContrato(e, kitId, nivel) {
-    const ind = S.market.indicadores(e);
-    const reput = ind ? ind.reputacao : 46;
-    const base = VALOR_BASE[kitId] || 800;
-    return Math.round(base * (0.75 + reput / 140) * (0.9 + nivel * 0.12));
-  }
-
-  /* gabarito local — usado quando não há IA configurada. Sem lista de
-     negócios genéricos: o "cliente" nasce do ramo/público do próprio
-     estúdio, então ao menos fica plausível dentro do mundo dele. */
-  function clienteLocal(e) {
-    const formato = pick([
-      `Parceria dentro de ${e.ramo}`,
-      `Contato próximo a ${e.publico}`,
-      `Colega do ramo de ${e.ramo}`,
-      `Indicação de ${e.publico}`,
-      `Rede de ${e.ramo}`
-    ]);
-    return formato.slice(0, 48);
-  }
-
-  function gerarContratoLocal(e) {
-    const nivel = S.state.nivelDe(e.xp);
-    const kits = disponiveis(nivel);
-    const kit = pick(kits);
-    const cliente = clienteLocal(e);
-    const tema = pick(TEMAS_GENERICOS);
-    const frase = pick(PEDIDOS_GENERICOS[kit.id] || ['precisa de {tema}']).replace('{tema}', tema);
-    return {
-      id: S.util.uid('c'), cliente, kit: kit.id, tema,
-      titulo: `${kit.nome} para ${cliente}`,
-      briefing: `${cliente} ${frase}, dentro do ramo de ${e.ramo}. Público: ${e.publico}.`,
-      valor: valorContrato(e, kit.id, nivel), prazoHoras: 6 + Math.round(Math.random() * 10),
-      status: 'oferta', criadoEm: Date.now()
-    };
-  }
-
-  /* gabarito por IA — o caminho principal. Pede um cliente e um pedido
-     que façam sentido dentro do ramo declarado do estúdio. */
-  async function gerarContratoIA(e) {
-    const nivel = S.state.nivelDe(e.xp);
-    const kits = disponiveis(nivel);
-    if (!kits.length) return null;
-    const recentes = (e.contratos || []).slice(0, 6).map(c => c.cliente).filter(Boolean).join(', ') || 'nenhum ainda';
-    const r = await S.ai.perguntar({
-      sistema: `Você prospecta contratos para o estúdio ${e.nome}, cujo ramo é "${e.ramo}". Público do estúdio: ${e.publico}. Missão: ${e.missao}.
-Invente UM cliente e um pedido que façam sentido DENTRO ou bem próximos desse ramo específico — nunca um negócio genérico de outro ramo qualquer (nada de padaria, clínica ou oficina, a não ser que o ramo seja literalmente esse).
-Tipos de entrega possíveis (use o código exato): ${kits.map(k => k.id).join(', ')}.
-Responda SOMENTE nestas linhas, sem nada antes ou depois:
-CLIENTE: <nome do cliente ou pessoa, até 5 palavras>
-KIT: <código>
-TEMA: <do que se trata, até 6 palavras>
-BRIEF: <o pedido do cliente, na voz dele, até 22 palavras>`,
-      pedido: `Clientes recentes (não repetir): ${recentes}.`,
-      tokens: 200, agente: 'prospecção', motivo: 'gerar contrato'
-    });
-    if (!r) return null;
-    const kit = porId(String(r.campos.kit || '').trim()) || pick(kits);
-    const cliente = String(r.campos.cliente || '').trim().slice(0, 60) || clienteLocal(e);
-    const tema = String(r.campos.tema || '').trim().slice(0, 60) || pick(TEMAS_GENERICOS);
-    const brief = String(r.campos.brief || '').trim().slice(0, 240) || `precisa de ${kit.nome.toLowerCase()} sobre ${tema}`;
-    return {
-      id: S.util.uid('c'), cliente, kit: kit.id, tema,
-      titulo: `${kit.nome} para ${cliente}`,
-      briefing: `${cliente}: "${brief}" Público: ${e.publico}.`,
-      valor: valorContrato(e, kit.id, nivel), prazoHoras: 6 + Math.round(Math.random() * 10),
-      status: 'oferta', criadoEm: Date.now()
-    };
-  }
-
-  async function gerarContrato(e) {
-    if (S.ai.pronta && S.ai.pronta()) {
-      try {
-        const c = await gerarContratoIA(e);
-        if (c) return c;
-      } catch (err) { /* sem sorte com a IA agora — cai no gabarito local */ }
-    }
-    return gerarContratoLocal(e);
-  }
-
-  async function prospectar(e, quantos) {
-    const abertos = e.contratos.filter(c => c.status === 'oferta').length;
-    const alvo = Math.min(4, (quantos || 2) + abertos) - abertos;
-    for (let i = 0; i < alvo; i++) {
-      const c = await gerarContrato(e);
-      e.contratos.unshift(c);
-      S.state.gravar(); S.bus.emit('trabalho');
-    }
-    if (e.contratos.length > 24) e.contratos.length = 24;
-    S.state.gravar(); S.bus.emit('trabalho');
-    return alvo;
-  }
-
   S.factory = {
     KITS, porId, disponiveis, produzir, aferir, paleta, corDeTexto, iniciais,
-    gerarContrato, prospectar, csv, paginaHTML
+    csv, paginaHTML
   };
 })(window.S);
