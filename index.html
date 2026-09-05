@@ -1124,7 +1124,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   const mq=qAtual.model?.[modeloDaChamada] || {requests:0,tokens:0};
   if(mq.tokens >= GROQ_FREE_DEFAULT.tpd || mq.requests >= GROQ_FREE_DEFAULT.rpd) throw new Error(`Limite diário local atingido para ${configModelo(modeloDaChamada).nome}.`);
   const conteudo = tipo === 'conteudo';
-  const limite=Math.min(Number(maxTokens)||300, conteudo?900:500);
+  const limite=Math.min(Number(maxTokens)||300, conteudo?1200:700);
   const sysText=String(system||'').slice(0,7000);
   const userTextSafe=String(userText||'').slice(0,7000);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
@@ -1133,7 +1133,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   const monId=monInicio({agente:nomeDeAgente(agentId),motivo:'API Groq',teto:90000,pedido:userTextSafe.slice(0,400)});
   try{
     setAIStatus('loading','IA processando…',`${API_PROVIDER} · ${modeloDaChamada}`,null);
-    const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:limite,temperature:0.35,stream:false})});
+    const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:limite,temperature:0.35,stream:false,reasoning_effort:'low',include_reasoning:false})});
     let data=null; try{data=await resp.json();}catch(e){}
     lerHeadersQuota(resp);
     if(!resp.ok){
@@ -2508,7 +2508,7 @@ function renderModelManager(){
     test.disabled=true;
     try{
       salvarGroqConfig();
-      const r=await chamarAPI('Responda apenas com a palavra OK.','OK',8,modeloSelecionado,'diag','decisao');
+      const r=await chamarAPI('Responda apenas com a palavra OK.','OK',64,modeloSelecionado,'diag','decisao');
       const texto=String(r?.text||'').trim();
       setAIStatus('ready','GERAÇÃO CONFIRMADA ✓',`Resposta da API: ${texto.slice(0,120)}`);
       monEvento('Teste real da API concluído: “'+texto.slice(0,80)+'”.','ok');
@@ -2528,7 +2528,7 @@ function renderModelManager(){
     testConn.disabled=true;
     try{
       salvarGroqConfig();
-      const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',8,modeloSelecionado,'diag');
+      const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',64,modeloSelecionado,'diag');
       setAIStatus('ready','Conexão confirmada ✓',String(r.text).slice(0,120));
     }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); }
     finally{testConn.disabled=false;renderModelManager();}
