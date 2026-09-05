@@ -101,6 +101,11 @@ window.S = window.S || {};
     e.publico = String(e.publico || 'pequenos negócios');
     e.criadoEm = e.criadoEm || Date.now();
     e.xp = Number(e.xp) || 0;
+    e.gerencia = e.gerencia && typeof e.gerencia === 'object' ? e.gerencia : {};
+    e.gerencia.ultimaAvaliacao = Number(e.gerencia.ultimaAvaliacao) || 0;
+    e.gerencia.recomendacao = String(e.gerencia.recomendacao || 'A gerente está observando a carga, qualidade e dependências da equipe.');
+    e.gerencia.alertas = Array.isArray(e.gerencia.alertas) ? e.gerencia.alertas.slice(-20) : [];
+    e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
     e.equipe = Array.isArray(e.equipe) ? e.equipe : [];
     e.equipe.forEach((f, i) => {
       f.id = f.id || 'a' + i;

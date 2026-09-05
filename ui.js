@@ -102,6 +102,7 @@
       </button>`;
     }).join('') || '<div class="empty">Sem equipe.</div>';
     $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
+    pintarGerencia();
   }
 
   function pintarXP() {
@@ -273,6 +274,7 @@
           <button class="btn btn-mini" data-codigo="${a.id}" type="button">${aberto === 'codigo' ? 'Fechar' : 'Ver conteúdo'}</button>
           <button class="btn btn-mini btn-primary" data-baixar="${a.id}" type="button">Baixar</button>
           ${a.classe !== 'produto' ? `<button class="btn btn-mini" data-publicar="${a.id}" type="button">Publicar</button>` : ''}
+          ${a.classe !== 'produto' ? `<button class="btn btn-mini" data-editar="${a.id}" type="button">Editar</button>` : ''}
           ${a.classe !== 'produto' ? `<button class="btn btn-mini btn-danger" data-apagar="${a.id}" type="button">Apagar</button>` : ''}
         </div>
         ${previa ? `<iframe class="file-frame" sandbox="allow-same-origin" srcdoc="${esc(a.conteudo)}"></iframe>` : ''}
@@ -295,6 +297,23 @@
       const p = S.studio.publicar(b.dataset.publicar, 'você', 'publicação direta');
       if (p) toast('Publicado: ' + p.nome, 'ok');
     });
+    $$('#filesList [data-editar]').forEach(b => b.onclick = () => {
+      const a = e.arquivos.find(x => x.id === b.dataset.editar); if (!a || a.classe === 'produto') return;
+      folha(`
+        <h2>Editar artefato</h2>
+        <p class="sub">Este material ainda está em produção. Ao editar, ele volta para revisão da gerente antes de poder virar produto final.</p>
+        <div class="field"><label for="editNome">Nome</label><input id="editNome" value="${esc(a.nome)}"></div>
+        <div class="field"><label for="editConteudo">Conteúdo</label><textarea id="editConteudo" rows="16" style="width:100%;resize:vertical">${esc(a.conteudo)}</textarea></div>
+        <div class="sheet-actions"><button class="btn" id="cancelEdit" type="button">Cancelar</button><button class="btn btn-primary" id="saveEdit" type="button">Salvar edição</button></div>`, box => {
+        box.querySelector('#cancelEdit').onclick = fecharFolha;
+        box.querySelector('#saveEdit').onclick = () => {
+          const ok = S.studio.editarArquivo(a.id, box.querySelector('#editConteudo').value, box.querySelector('#editNome').value);
+          if (ok) { fecharFolha(); toast('Artefato editado e devolvido à revisão.', 'ok'); pintarArquivos(); }
+          else toast('Não foi possível editar este artefato.', 'erro');
+        };
+      });
+    });
+
     $$('#filesList [data-apagar]').forEach(b => b.onclick = () => {
       e.arquivos = e.arquivos.filter(x => x.id !== b.dataset.apagar);
       S.state.gravar(); pintarArquivos();
@@ -603,6 +622,8 @@
   /* ---------- reações a eventos ---------- */
   function assinar() {
     S.bus.on('ia', () => { pintarPulso(); if (viewAtual === 'motor') pintarMotor(); });
+    S.bus.on('gerencia', () => pintarGerencia());
+    S.bus.on('equipe', () => pintarGerencia());
     S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
     S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); S.studio.ajustarCanvas(); } });
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });

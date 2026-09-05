@@ -59,3 +59,10 @@ Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que
 
 ## Sala de reuniões
 A versão v5 adiciona uma sala persistente para conversa direta com a equipe. Mensagens, relatórios e ordens ficam registrados no estúdio. Ordens claras podem virar até duas tarefas no projeto ativo usando o modelo de decisão econômico. A sala envia contexto amplo do projeto e mantém a saída curta para reduzir custo.
+
+
+## Governança da produção
+- Artefatos em esboço, protótipo e candidato podem ser editados ou apagados dentro do estúdio.
+- Produto final publicado é imutável no histórico do estúdio. Correções posteriores precisam gerar uma nova versão e passar novamente pela gerente.
+- A gerente acompanha continuamente carga, dependências, energia, execução e cobertura de especialidades; quando identifica gargalo sustentado, registra recomendação de contratação.
+- A aprovação de produto final exige produção com IA e qualidade aferida mínima de 82/100, além da decisão da gerente.

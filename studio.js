@@ -201,6 +201,32 @@
     return salvos;
   }
 
+  /* Artefatos em produção podem ser corrigidos. Produto final é imutável:
+     qualquer correção após publicação gera uma nova versão por nova tarefa. */
+  function editarArquivo(arqId, novoConteudo, novoNome) {
+    const e = S.state.atual(); if (!e) return false;
+    const a = e.arquivos.find(x => x.id === arqId);
+    if (!a) return false;
+    if (a.classe === 'produto') {
+      S.state.registrar(`Tentativa de editar ${a.nome} bloqueada: produto final é imutável.`, 'alerta');
+      return false;
+    }
+    const conteudo = String(novoConteudo == null ? '' : novoConteudo).trim();
+    if (!conteudo) return false;
+    a.conteudo = conteudo;
+    if (novoNome && String(novoNome).trim()) a.nome = String(novoNome).trim();
+    a.editadoEm = Date.now();
+    a.quando = S.fmt.dataHora();
+    a.versaoEdicao = Number(a.versaoEdicao || 0) + 1;
+    a.qualidade = Math.min(Number(a.qualidade || 50), 69);
+    if (a.classe === 'candidato') a.classe = 'prototipo';
+    a.avaliado = false;
+    S.state.registrar(`${a.nome} foi editado em produção e voltou para revisão.`, 'info');
+    S.state.gravar();
+    S.bus.emit('arquivos'); S.bus.emit('trabalho'); S.bus.emit('equipe');
+    return true;
+  }
+
   /* Publicar congela uma versão. Produto final nunca é reescrito:
      correção vira versão nova, e o histórico permanece. */
   function publicar(arqId, quem, motivo) {
@@ -415,7 +441,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     });
     g.ocupado = false; g.balao = null;
     if (!r) return;
-    if (r.campos.publicar === true && cand.qualidade >= 45) {
+    if (r.campos.publicar === true && cand.qualidade >= 82) {
       publicar(cand.id, g.nome, String(r.campos.motivo || ''));
       e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
     } else {
@@ -429,6 +455,44 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   }
 
   /* O usuário observa; a equipe decide e distribui o trabalho autonomamente. */
+
+  /* A gerente observa a operação continuamente: carga, gargalos, qualidade,
+     dependências e cobertura de especialidades. Só recomenda contratação quando
+     existe uma necessidade operacional sustentada. */
+  function monitorarEquipe(g) {
+    const e = S.state.atual(); if (!e || !g) return;
+    const agora = Date.now();
+    if (agora - (e.gerencia && e.gerencia.ultimaAvaliacao || 0) < 30000) return;
+    e.gerencia = e.gerencia || {};
+    const funcs = e.equipe.filter(x => x.papel !== 'gerente');
+    const abertas = e.tarefas.filter(t => t.status !== 'feita');
+    const porPessoa = funcs.map(f => {
+      const minhas = e.tarefas.filter(t => t.para === f.id);
+      const feitas = minhas.filter(t => t.status === 'feita').length;
+      const ativas = minhas.filter(t => t.status === 'fazendo').length;
+      const travadas = minhas.filter(t => t.status !== 'feita' && t.dependsOn && t.dependsOn.some(id => { const d=e.tarefas.find(x=>x.id===id); return d && d.status!=='feita'; })).length;
+      return { f, feitas, ativas, travadas };
+    });
+    const alertas = [];
+    porPessoa.forEach(x => {
+      if (x.ativas > 1) alertas.push(`${x.f.nome} está com ${x.ativas} tarefas simultâneas.`);
+      if (x.travadas > 0) alertas.push(`${x.f.nome} tem ${x.travadas} tarefa(s) aguardando dependências.`);
+      if ((x.f.energia || 0) < 25) alertas.push(`${x.f.nome} está com baixa energia; redistribuir antes de sobrecarregar.`);
+    });
+    const especialidades = funcs.map(f => f.especialidade);
+    const faltantes = S.studio.ESPECIALIDADES.filter(x => !especialidades.includes(x.id)).map(x => x.cargo);
+    let rec = abertas.length > Math.max(2, funcs.length * 2) ? `Carga acima da capacidade atual: ${abertas.length} etapas abertas para ${funcs.length} funcionários.` : 'Carga compatível com a equipe atual.';
+    if (faltantes.length && abertas.length > funcs.length) rec += ` Cobertura ausente: ${faltantes.slice(0,2).join(' e ')}.`;
+    if (!funcs.length) rec = 'Não há funcionários além da gerente; avaliar contratação para executar produção.';
+    e.gerencia.ultimaAvaliacao = agora;
+    e.gerencia.recomendacao = rec;
+    e.gerencia.alertas = alertas.slice(-20);
+    g.ref.foco = 'Monitorando desempenho, gargalos e necessidade de equipe';
+    g.ref.pensamento = `Acompanho carga, qualidade, dependências e capacidade da equipe. ${rec}`.slice(0,240);
+    if (alertas.length) S.state.registrar(`${g.nome}: ${alertas[0]}`, 'alerta', g.id);
+    if (abertas.length > Math.max(3, funcs.length * 3) && faltantes.length) S.state.registrar(`${g.nome} recomenda avaliar nova contratação para ${faltantes[0]}.`, 'info', g.id);
+    S.state.gravar(); S.bus.emit('equipe'); S.bus.emit('gerencia');
+  }
 
   /* ============================================================
      Sala de reuniões — canal persistente entre você e a equipe.
@@ -551,6 +615,10 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     if (!e) return;
     S.bus.emit('relogio');
 
+    // A supervisão operacional não depende de IA: a gerente sempre acompanha
+    // carga, gargalos e capacidade mesmo quando a produção de conteúdo está parada.
+    const g = gerente();
+    if (g) monitorarEquipe(g);
     if (!S.ai.disponivel()) return;
 
     // Prioridade 1: alguém livre com tarefa aberta.
@@ -560,10 +628,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       if (t && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
     }
     // Prioridade 2: gerência.
-    const g = gerente();
     if (g && !g.ocupado && S.ai.reservarAutonomia()) {
-      if (tarefasAbertas().length < 2) await planejar(g);
-      else await avaliar(g);
+      const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
+      if (candidato) await avaliar(g);
+      else if (tarefasAbertas().length < 2) await planejar(g);
+      else monitorarEquipe(g);
     }
   }
 
@@ -750,7 +819,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
     novaTarefa, tarefasAbertas, executar,
-    salvarArquivos, publicar,
+    salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
