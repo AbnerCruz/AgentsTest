@@ -261,8 +261,8 @@
 
   <div class="ai-status" id="aiStatus">
     <span class="ai-dot" id="aiDot"></span>
-    <strong id="aiStatusTitle">IA local pronta para carregar</strong>
-    <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
+    <strong id="aiStatusTitle">IA por API pronta para configurar</strong>
+    <span class="ai-detail" id="aiStatusDetail">Usa sua própria chave da API Groq; nenhum modelo é baixado para o celular.</span>
     <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
     <button class="btn small" id="aiRetryBtn" type="button" hidden>Tentar novamente</button>
   </div>
@@ -273,7 +273,7 @@
   <!-- estado vazio -->
   <div id="emptyState" class="empty-state">
     <h2>Nenhuma empresa ainda</h2>
-    <p>Funde a empresa sem depender da IA. Depois escolha, baixe e ative um modelo gratuito na área <b>IA / Modelos</b>. A gerente assume a operação quando houver um modelo ativo.</p>
+    <p>Funde a empresa. Depois configure a API Groq em <b>IA / Modelos</b>. A gerente assume a operação quando a conexão estiver ativa.</p>
     <button class="btn primary" id="foundBtn">Fundar nova empresa</button>
   </div>
 
@@ -281,17 +281,29 @@
   <section id="aiModelsPanel" class="card" hidden style="margin-top:12px;">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
       <div>
-        <h2 style="margin:0 0 4px;font-size:19px;">Central de IA local</h2>
-        <div class="msub">Todos os modelos são gratuitos para uso local. Baixe uma vez; depois o navegador usa o cache. Nada é enviado para uma API paga.</div>
+        <h2 style="margin:0 0 4px;font-size:19px;">Central de IA por API</h2>
+        <div class="msub">A IA agora roda na nuvem pela API da Groq. O celular não baixa nem executa modelos. Você usa sua própria chave gratuita.</div>
       </div>
       <button class="btn small" id="closeAIModelsBtn">Fechar</button>
     </div>
     <div class="card" style="margin-top:10px;padding:12px;">
-      <div style="font-weight:700;">Modelo ativo</div>
-      <div id="activeModelSummary" class="stage-note" style="margin-top:5px;"></div><div id="offlineDiag" class="stage-note" style="margin-top:6px;"></div><div class="modal-actions" style="margin-top:9px;"><button class="btn small" id="aiGenerationTestBtn">Testar geração real (OK)</button> <button class="btn small" id="offlineTestBtn">Testar operação 100% offline</button></div>
+      <div style="font-weight:700;">Configuração da API</div>
+      <div class="stage-note" style="margin-top:5px;">Sua chave fica somente neste navegador. Não coloque uma chave pessoal diretamente no código do GitHub.</div>
+      <div class="form-row" style="margin-top:10px;"><label for="groqApiKeyInput">Chave Groq</label><input class="field-input" id="groqApiKeyInput" type="password" autocomplete="off" placeholder="gsk_..."></div>
+      <div class="form-row" style="margin-top:8px;"><label for="groqModelSelect">Modelo</label><select class="field-input" id="groqModelSelect"></select></div>
+      <div class="modal-actions" style="margin-top:10px;"><button class="btn primary" id="saveGroqBtn">Salvar e ativar API</button> <button class="btn" id="testGroqBtn">Testar conexão</button></div>
+      <div id="groqApiStatus" class="stage-note" style="margin-top:8px;"></div>
+      <div class="modal-actions" style="margin-top:8px;"><button class="btn small" id="aiGenerationTestBtn">Testar geração: OK</button></div>
+      <div class="card" style="margin-top:10px;padding:12px;">
+        <div style="font-weight:700;">Consumo e limite da API</div>
+        <div id="groqQuotaBox" class="stage-note" style="margin-top:6px;">Aguardando uma chamada para ler os limites da Groq.</div>
+        <div id="groqQuotaRows" style="margin-top:7px;"></div>
+        <div class="stage-note" style="margin-top:7px;">O app lê os cabeçalhos de limite da Groq quando disponíveis e soma os tokens usados nas respostas. O contador diário local é uma estimativa; a Groq é a fonte oficial do limite.</div>
+        <button class="btn small" id="groqResetUsageBtn" style="margin-top:8px;">Zerar contador local</button>
+      </div>
     </div>
-    <div id="modelManagerList" style="display:grid;gap:9px;margin-top:10px;"></div>
-    <div class="stage-note" style="margin-top:10px;">Regra recomendada: mantenha só 1 modelo ativo para reduzir RAM. Modelos instalados podem ficar inativos; desinstale os que não quiser manter no cache.</div>
+    <div id="modelManagerList" hidden></div>
+    <div class="stage-note" style="margin-top:10px;">A execução agora é remota. O celular não baixa, carrega ou executa nenhum modelo local.</div>
   </section>
 
   <!-- app principal -->
@@ -449,42 +461,66 @@
    do Web Worker; a página principal não duplica o consumo de RAM.
    ============================================================ */
 const MODELOS = {
-  // dtype 'q4' (não 'q4f16'): o q4f16 usa ativações fp16, que disparam um bug
-  // conhecido de fusão de grafo no ONNX Runtime WASM (SimplifiedLayerNormFusion/
-  // InsertedPrecisionFreeCast) — o processo do Worker morre sem ErrorEvent útil.
-  // 'q4' usa ativações fp32, sem esse bug, e é a combinação estável em WASM.
-  minimo: { id:'onnx-community/SmolLM2-135M-Instruct-ONNX-MHA', dtype:'q4', nome:'SmolLM2 135M · diagnóstico', nivel:'Diagnóstico', tamanho:'~182 MB', detalhe:'Modelo pequeno para provar que o motor local consegue carregar e gerar no aparelho.', memoria:'Baixa', licenca:'Apache-2.0' },
-  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q4', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~480 MB', detalhe:'Mais capaz que o 135M, ainda voltado a aparelhos com pouca memória.', memoria:'Baixa–média', licenca:'Apache-2.0' },
-  recomendado: { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q4', nome:'Qwen2.5 0.5B · recomendado', nivel:'Recomendado', tamanho:'~790 MB', detalhe:'Modelo indicado para a produção: melhor instrução e português, usando o arquivo ONNX q4 (ativações fp32, estável em WASM).', memoria:'Média', licenca:'Apache-2.0' },
-  forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,9 GB', detalhe:'Maior qualidade de decisão e escrita, mas exige mais memória e tempo.', memoria:'Alta', licenca:'Apache-2.0' },
-};const MODEL_PADRAO = MODELOS.recomendado.id;
-if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-  // O Service Worker so serve para cachear os arquivos do runtime/modelo para
-  // uso offline. O "modo turbo" (WASM multi-thread via SharedArrayBuffer) foi
-  // desligado: em celulares com pouca RAM ele derrubava o processo do Worker
-  // sem gerar excecao (o app so via "navegador encerrou o processo da IA").
-  // Rodar sempre em 1 thread e mais lento, porem muito mais estavel no celular.
-  navigator.serviceWorker.register('sw.js').catch(()=>{});
-}
-let modeloSelecionado = localStorage.getItem('modelo-ia-ativo') || MODEL_PADRAO;
-if(modeloSelecionado==='onnx-community/SmolLM-135M-Instruct-ONNX'){ modeloSelecionado=MODEL_PADRAO; try{localStorage.setItem('modelo-ia-ativo',MODEL_PADRAO);}catch(e){} }
+  rapido: { id:'openai/gpt-oss-20b', dtype:'api', nome:'GPT-OSS 20B · rápido', nivel:'API', tamanho:'nuvem', detalhe:'Modelo remoto rápido para decisões, gestão e produção.', memoria:'mínima no celular', licenca:'API' },
+  forte: { id:'openai/gpt-oss-120b', dtype:'api', nome:'GPT-OSS 120B · forte', nivel:'API', tamanho:'nuvem', detalhe:'Modelo remoto mais forte para escrita e decisões complexas.', memoria:'mínima no celular', licenca:'API' },
+};
+const MODEL_PADRAO = MODELOS.rapido.id;
+const API_PROVIDER = 'Groq';
+const GROQ_ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_KEY_STORAGE = 'groq-api-key';
+const GROQ_MODEL_STORAGE = 'groq-model';
+let groqApiKey = '';
+try{ groqApiKey = localStorage.getItem(GROQ_KEY_STORAGE) || ''; }catch(e){}
+let modeloSelecionado = localStorage.getItem(GROQ_MODEL_STORAGE) || MODEL_PADRAO;
 if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
-// Migração: versões anteriores registravam q8 para modelos que só tinham q4f16.
-// O dtype agora é sempre o arquivo ONNX realmente existente no repositório.
-try{ localStorage.removeItem('modelo-ia-dtype'); }catch(e){}
+
 let modelosInstalados = [];
 const modelosBaixando = new Set();
 const progressoDownloads = new Map();
+const GROQ_QUOTA_KEY = 'groq-usage-v1';
+const GROQ_FREE_DEFAULT = { rpd:1000, tpd:200000, tpm:8000 };
+let groqQuota = {date:'', requests:0, inputTokens:0, outputTokens:0, totalTokens:0, last:null, model:{}};
+try{ const q=JSON.parse(localStorage.getItem(GROQ_QUOTA_KEY)||'null'); if(q && typeof q==='object') groqQuota={...groqQuota,...q}; }catch(e){}
+function quotaHoje(){ const d=new Date().toISOString().slice(0,10); if(groqQuota.date!==d){ groqQuota={date:d,requests:0,inputTokens:0,outputTokens:0,totalTokens:0,last:null,model:{}}; persistirQuota(); } return groqQuota; }
+function persistirQuota(){ try{ localStorage.setItem(GROQ_QUOTA_KEY,JSON.stringify(groqQuota)); }catch(e){} }
+function numFmt(n){ return Number(n||0).toLocaleString('pt-BR'); }
+function lerHeadersQuota(resp){
+  const h=n=>resp.headers.get(n), q=quotaHoje();
+  q.last={limitRequests:Number(h('x-ratelimit-limit-requests')||0)||null,remainingRequests:Number(h('x-ratelimit-remaining-requests')||0)||null,resetRequests:h('x-ratelimit-reset-requests')||null,limitTokens:Number(h('x-ratelimit-limit-tokens')||0)||null,remainingTokens:Number(h('x-ratelimit-remaining-tokens')||0)||null,resetTokens:h('x-ratelimit-reset-tokens')||null,at:Date.now()};
+  persistirQuota(); renderGroqQuota();
+}
+function registrarUsoGroq(model,usage){
+  const q=quotaHoje(); q.requests++;
+  q.inputTokens += Number(usage?.prompt_tokens ?? usage?.input_tokens ?? 0)||0; q.outputTokens += Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0)||0;
+  q.totalTokens += Number(usage?.total_tokens ?? ((usage?.prompt_tokens||0)+(usage?.completion_tokens||0)))||0;
+  const key=String(model||'desconhecido'); q.model[key]=q.model[key]||{requests:0,tokens:0,input:0,output:0};
+  q.model[key].requests++; q.model[key].tokens += Number(usage?.total_tokens||0)||0; q.model[key].input += Number(usage?.prompt_tokens||usage?.input_tokens||0)||0; q.model[key].output += Number(usage?.completion_tokens||usage?.output_tokens||0)||0;
+  persistirQuota(); renderGroqQuota();
+}
+function renderGroqQuota(){
+  const box=document.getElementById('groqQuotaBox'), rows=document.getElementById('groqQuotaRows'); if(!box||!rows) return;
+  const q=quotaHoje(), h=q.last||{}; const rLim=h.limitRequests||GROQ_FREE_DEFAULT.rpd, rRem=h.remainingRequests;
+  const rUsed=rRem!=null && h.limitRequests ? Math.max(0,h.limitRequests-rRem) : q.requests; const tLim=h.limitTokens||GROQ_FREE_DEFAULT.tpm, tRem=h.remainingTokens;
+  const tUsedMinute=tRem!=null && h.limitTokens ? Math.max(0,h.limitTokens-tRem) : null; const dailyPct=Math.min(100,(q.totalTokens/GROQ_FREE_DEFAULT.tpd)*100); const reqPct=Math.min(100,(rUsed/rLim)*100);
+  box.innerHTML=`Hoje: <b>${numFmt(q.requests)}</b> chamadas · <b>${numFmt(q.totalTokens)}</b> tokens (${dailyPct.toFixed(1)}% da referência de ${numFmt(GROQ_FREE_DEFAULT.tpd)} tokens/dia).`;
+  rows.innerHTML=`<div class="row"><span>Requisições restantes</span><span class="val">${rRem!=null?numFmt(rRem):'—'} / ${numFmt(rLim)} <small>(${reqPct.toFixed(1)}% usado)</small></span></div>
+  <div class="row"><span>Tokens usados hoje</span><span class="val">${numFmt(q.totalTokens)} / ${numFmt(GROQ_FREE_DEFAULT.tpd)}</span></div>
+  <div class="row"><span>Tokens nesta janela</span><span class="val">${tRem!=null?`${numFmt(tUsedMinute)} / ${numFmt(tLim)} usados · ${numFmt(tRem)} restantes`:'aguardando cabeçalho da Groq'}</span></div>
+  <div class="row"><span>Entrada / saída hoje</span><span class="val">${numFmt(q.inputTokens)} / ${numFmt(q.outputTokens)}</span></div>
+  <div class="row"><span>Próximo reset de requisições</span><span class="val">${escapeHtml(h.resetRequests||'a Groq informará na próxima resposta')}</span></div>
+  <div class="row"><span>Modo de uso</span><span class="val">máximo · decisões 20B / produção 120B</span></div>`;
+}
+
 try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados') || '[]'); } catch(e) { modelosInstalados=[]; }
 if(!Array.isArray(modelosInstalados)) modelosInstalados=[];
 modelosInstalados = modelosInstalados.filter(id => Object.values(MODELOS).some(m=>m.id===id));
-function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.recomendado; }
+function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.rapido; }
 const MODEL_LOCAL = MODEL_PADRAO;
 /* Dois papeis de modelo, com pesos diferentes:
    DECISAO  - chamado o tempo todo, respostas curtas em formato fixo.
    PRODUCAO - chamado poucas vezes, escreve o arquivo que o cliente recebe. */
-let MODEL_DECISAO = localStorage.getItem('modelo-ia-decisao') || modeloSelecionado;
-let MODEL_PRODUCAO = localStorage.getItem('modelo-ia-producao') || modeloSelecionado;
+let MODEL_DECISAO = localStorage.getItem('modelo-ia-decisao') || MODELOS.rapido.id;
+let MODEL_PRODUCAO = localStorage.getItem('modelo-ia-producao') || MODELOS.forte.id;
 let MODEL_BARATO = MODEL_DECISAO;
 let MODEL_GERENTE = MODEL_DECISAO;
 function modeloDoTipo(tipo){
@@ -500,7 +536,7 @@ function persistirPapeis(){
 }
 const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.nome]));
 function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
-function modeloInstalado(id){ return modelosInstalados.includes(id); }
+function modeloInstalado(id){ return Object.values(MODELOS).some(m=>m.id===id); }
 async function validarModelosInstalados(){
   if(!('caches' in window)) return;
   const cache=await caches.open('ia-modelos-v1').catch(()=>null);
@@ -518,7 +554,7 @@ async function validarModelosInstalados(){
   }
   if(bons.length!==modelosInstalados.length){
     modelosInstalados=bons;
-    if(!modeloInstalado(modeloSelecionado)){
+    if(!groqApiKey){
       modeloSelecionado=MODEL_PADRAO;
       try{ localStorage.setItem('modelo-ia-ativo',''); }catch(e){}
     }
@@ -968,50 +1004,11 @@ function criarWorkerIA(){
 }
 
 async function carregarIA(){
-  if(!modeloInstalado(modeloSelecionado)) throw new Error('Motor desligado: nenhum modelo foi ativado. Baixe e ative um modelo em IA / Modelos.');
-  if(pipelineIA && workerIA && iaPronta) return true;
-  if(Date.now() < iaBloqueadaAte) throw new Error('A IA local está temporariamente pausada após uma falha no navegador. Toque em “Tentar novamente” para uma nova tentativa.');
-  if(carregandoIA) return carregandoIA;
-  avisarSeMemoriaBaixa();
-  carregandoIA=(async()=>{
-    await prepararRuntimeOffline();
-    setAIStatus('loading','Preparando o motor de IA',`${configModelo().nome} · carregando em segundo plano.`,null);
-    try{
-      const w=criarWorkerIA();
-      await new Promise((resolve,reject)=>{
-        workerReadyResolve=resolve; workerReadyReject=reject;
-        w.postMessage({type:'load', modelId:modeloSelecionado, dtype:configModelo().dtype, runtimeSource: runtimeOfflineSource, allowRemote: !modeloInstalado(modeloSelecionado)});
-        // Em vez de um prazo fixo, vigiamos a inatividade: enquanto o worker
-        // enviar progresso do download, o carregamento continua livremente.
-        ultimoSinalWorker = Date.now();
-        const vigia = setInterval(()=>{
-          if(pipelineIA || !workerReadyReject){ clearInterval(vigia); return; }
-          if(Date.now() - ultimoSinalWorker > 180000){
-            clearInterval(vigia);
-            workerReadyReject(new Error('O motor local ficou 3 minutos sem responder. Verifique a conexão e tente novamente em IA / Modelos.'));
-            workerReadyResolve=null; workerReadyReject=null;
-          }
-        },5000);
-      });
-      iaPronta=true;
-      iaBloqueadaAte=0;
-      return true;
-    }catch(err){
-      const reinicio = /reiniciado/i.test(String(err?.message||''));
-      encerrarWorkerIA();
-      if(reinicio && !recarregando){
-        // Alguem trocou/reiniciou o motor no meio do carregamento. Isso nao e
-        // falha do modelo: tentamos mais uma vez em vez de bloquear a IA.
-        recarregando = true;
-        try{ return await carregarIA(); }
-        finally{ recarregando = false; }
-      }
-      iaBloqueadaAte=Date.now()+45000;
-      setAIStatus('error','A IA não conseguiu iniciar',String(err?.message||err),null);
-      throw err;
-    }
-  })();
-  try{return await carregandoIA;}finally{carregandoIA=null;}
+  if(!groqApiKey) throw new Error('Configure sua chave gratuita do Groq em IA / Configuração da API.');
+  if(iaPronta) return true;
+  iaPronta=true;
+  setAIStatus('ready','IA por API pronta ✓',`${configModelo().nome} via ${API_PROVIDER}. O celular não baixa nem executa modelo local.`);
+  return true;
 }
 async function trocarModeloIA(id){ return ativarModeloIA(id); }
 
@@ -1100,117 +1097,45 @@ PRECISA_USUARIO: sim ou nao`;
 }
 
 async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='decisao'){
-  if(!modeloInstalado(modeloSelecionado)) throw new Error('Nenhum modelo de IA ativo e instalado. Abra IA / Modelos, conclua o download e toque em “Ativar e executar”.');
+  if(!groqApiKey) throw new Error('IA não configurada. Abra IA / Modelos, informe sua chave Groq e teste a conexão.');
   await carregarIA();
-  setAIStatus('loading','IA processando…','O modelo está trabalhando em segundo plano; o escritório continua livre.',null);
-  const memoria = Number(navigator.deviceMemory || 0);
-  // Em CPU cada token custa tempo real, mas cortar tudo entrega arquivo pela
-  // metade. Decisao curta e apertada; conteudo entregavel tem folga.
-  const conteudo = tipo === 'conteudo';
-  const fraco = memoria && memoria <= 4;
-  const tetoCelular = conteudo ? (fraco ? 220 : 360) : (fraco ? 48 : 80);
-  const limite=Math.min(Number(maxTokens)||80,tetoCelular);
-  const corte = conteudo ? 1100 : 650;
-  const sysText=String(system||'').slice(0,corte);
-  const userTextSafe=String(userText||'').slice(0,corte);
-  const messages=[{role:'user',content:sysText+'\n\n'+userTextSafe}];
   const modeloDaChamada = modeloDoTipo(tipo);
+  const qAtual=quotaHoje();
+  const mq=qAtual.model?.[modeloDaChamada] || {requests:0,tokens:0};
+  if(mq.tokens >= GROQ_FREE_DEFAULT.tpd || mq.requests >= GROQ_FREE_DEFAULT.rpd) throw new Error(`Limite diário local atingido para ${configModelo(modeloDaChamada).nome}.`);
+  const conteudo = tipo === 'conteudo';
+  const limite=Math.min(Number(maxTokens)||300, conteudo?900:500);
+  const sysText=String(system||'').slice(0,7000);
+  const userTextSafe=String(userText||'').slice(0,7000);
+  const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
   chamadasNaFila++;
-  const inicioGeracao = Date.now();
-  const tetoMon = 15000 + limite*3500;
-  const monId = monInicio({
-    agente: nomeDeAgente(agentId),
-    motivo: (sysText.match(/^[^\n.]{0,60}/)||[''])[0].trim() || 'chamada de IA',
-    teto: tetoMon,
-    pedido: userTextSafe.slice(0,400),
-  });
+  const inicioGeracao=Date.now();
+  const monId=monInicio({agente:nomeDeAgente(agentId),motivo:'API Groq',teto:90000,pedido:userTextSafe.slice(0,400)});
   try{
-    const trabalho = filaIA.catch(()=>{}).then(async () => {
-      const enviar = (msgs, temperatura) => new Promise((resolve,reject)=>{
-        const id=++workerSeq;
-        if(!workerIA || !iaPronta){ reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
-        // Prazo fixo nao funciona bem em 1 thread: o tempo por resposta varia
-        // muito com o aparelho. Em vez disso vigiamos INATIVIDADE — o worker
-        // avisa a cada pedaco de texto gerado (ou a cada 2s como reserva) — e
-        // so cortamos se ficar tempo real sem nenhum sinal. O teto absoluto
-        // e so uma rede de seguranca bem mais folgada que antes.
-        const inicioChamada = Date.now();
-        let ultimoSinal = Date.now();
-        const inatividadeMax = 40000;
-        const absolutoMax = 15000 + limite*3500;
-        const vigia = setInterval(()=>{
-          const agora = Date.now();
-          if(agora - ultimoSinal > inatividadeMax){
-            clearInterval(vigia); workerPendentes.delete(id);
-            reject(new Error(`O motor ficou ${Math.round(inatividadeMax/1000)}s sem gerar nenhum token novo e foi interrompido.`));
-          } else if(agora - inicioChamada > absolutoMax){
-            clearInterval(vigia); workerPendentes.delete(id);
-            reject(new Error(`A geração passou de ${Math.round(absolutoMax/1000)}s e foi interrompida.`));
-          }
-        }, 2000);
-        workerPendentes.set(id,{
-          resolve:v=>{ clearInterval(vigia); resolve(v); },
-          reject:e=>{ clearInterval(vigia); reject(e); },
-          tocar:()=>{ ultimoSinal = Date.now(); }
-        });
-        workerIA.postMessage({type:'generate',id,modelId:modeloDaChamada,dtype:configModelo(modeloDaChamada).dtype,messages:msgs,maxTokens:limite,temperatura,runtimeSource:runtimeOfflineSource,allowRemote:false});
-      });
-      let bruto = await enviar(messages, 0.7);
-      if(!extrairTextoGerado(bruto).trim()){
-        // Modelo pequeno costuma ignorar o papel "system" e devolver vazio.
-        // Segunda tentativa com tudo em uma mensagem so e mais temperatura.
-        monEvento(`${nomeDeAgente(agentId)}: resposta veio vazia; tentando de novo com o pedido em bloco unico.`,'aviso');
-        bruto = await enviar([{role:'user',content:sysText+'\n\n'+userTextSafe}], 0.95);
-      }
-      return bruto;
-    });
-    filaIA = trabalho.catch(()=>{});
-    const result = await trabalho;
-    const text=extrairTextoGerado(result);
-    if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
-    setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
-    // Sem contagem de tokens exposta, o tamanho serve de indicio: texto que
-    // encosta no teto quase sempre foi cortado no meio.
-    var truncado = text.length > limite*3.2;
-    monFim(monId, truncado ? 'cortado' : 'ok', {resposta:text.slice(0,400), erro: truncado ? 'bateu no limite de tokens; pode estar incompleta' : ''});
-    if(truncado) monEvento(`Resposta de ${nomeDeAgente(agentId)} bateu no limite de ${limite} tokens; pode ter vindo incompleta.`,'aviso');
-    contabilizar(modeloSelecionado,{ms:Date.now()-inicioGeracao},agentId);
-    return {text,cortado:truncado};
-  }catch(err){
-    setAIStatus('error','Erro ao gerar resposta',String(err?.message || err || 'erro desconhecido'),null);
-    monFim(monId,'erro',{erro:String(err?.message||err||'erro')});
-    throw err;
-  }finally{
-    chamadasNaFila--;
-    renderMonitor();
+    setAIStatus('loading','IA processando…',`${API_PROVIDER} · ${modeloDaChamada}`,null);
+    const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:limite,temperature:0.35,stream:false})});
+    let data=null; try{data=await resp.json();}catch(e){}
+    lerHeadersQuota(resp);
+    if(!resp.ok){
+      const msg=data?.error?.message || `Groq respondeu HTTP ${resp.status}.`;
+      if(resp.status===401) throw new Error('Chave Groq inválida ou expirada.');
+      if(resp.status===429) throw new Error('Limite gratuito da Groq atingido. Aguarde e tente novamente.');
+      throw new Error(msg);
+    }
+    const text=String(data?.choices?.[0]?.message?.content||'').trim();
+    if(!text) throw new Error('A API respondeu sem texto.');
+    registrarUsoGroq(modeloDaChamada,data?.usage||{});
+    monFim(monId,{ok:true,ms:Date.now()-inicioGeracao});
+    contabilizar(modeloDaChamada,{ms:Date.now()-inicioGeracao,usage:data?.usage||{}},agentId);
+    chamadasNaFila=Math.max(0,chamadasNaFila-1);
+    setAIStatus('ready','IA pronta ✓',`${API_PROVIDER} respondeu em ${((Date.now()-inicioGeracao)/1000).toFixed(1)}s.`);
+    return {text,cortado:false};
+  }catch(e){
+    monFim(monId,{ok:false,ms:Date.now()-inicioGeracao});
+    chamadasNaFila=Math.max(0,chamadasNaFila-1);
+    setAIStatus('error','Falha na API de IA',String(e?.message||e));
+    throw e;
   }
-}
-
-// Conserta JSON truncado ou com quebras de linha cruas dentro das aspas.
-function repararJSON(bruto){
-  let t = bruto.replace(/```json|```/g,'').trim();
-  const ini = t.indexOf('{'); if(ini > 0) t = t.slice(ini);
-  try{ return JSON.parse(t); }catch(e){}
-
-  let saida = '', dentro = false, escape = false;
-  for(const c of t){
-    if(escape){ saida += c; escape = false; continue; }
-    if(c === '\\'){ saida += c; escape = true; continue; }
-    if(c === '"'){ dentro = !dentro; saida += c; continue; }
-    if(dentro && c === '\n'){ saida += '\\n'; continue; }
-    if(dentro && c === '\r'){ continue; }
-    if(dentro && c === '\t'){ saida += '\\t'; continue; }
-    saida += c;
-  }
-  try{ return JSON.parse(saida); }catch(e){}
-
-  let t2 = saida;
-  if(dentro) t2 += '"';
-  const abre = (t2.match(/{/g)||[]).length, fecha = (t2.match(/}/g)||[]).length;
-  const abreA = (t2.match(/\[/g)||[]).length, fechaA = (t2.match(/]/g)||[]).length;
-  t2 += ']'.repeat(Math.max(0, abreA-fechaA)) + '}'.repeat(Math.max(0, abre-fecha));
-  try{ return JSON.parse(t2); }catch(e){}
-  return null;
 }
 
 async function askAI(system, userText, maxTokens, model, agentId){
@@ -1252,12 +1177,15 @@ TIPO: <md|txt|html|css|js|csv|json>
 ---
 <aqui o conteudo completo do arquivo, quantas linhas forem precisas>`;
 
-/* A IA e local e gratuita: o que custa aqui e tempo de aparelho, nao dinheiro. */
+/* Métricas locais da empresa + consumo real devolvido pela API. */
 function contabilizar(model, usage, agentId){
   const emp = empresaAtual(); if(!emp || !usage) return;
   const ms = Number(usage.ms) || 0;
-  if(!emp.uso) emp.uso = { chamadas:0, ms:0 };
+  if(!emp.uso) emp.uso = { chamadas:0, ms:0, tokens:0, entrada:0, saida:0 };
   emp.uso.chamadas += 1; emp.uso.ms += ms;
+  emp.uso.tokens = (emp.uso.tokens||0) + Number(usage?.usage?.total_tokens||0);
+  emp.uso.entrada = (emp.uso.entrada||0) + Number(usage?.usage?.prompt_tokens||0);
+  emp.uso.saida = (emp.uso.saida||0) + Number(usage?.usage?.completion_tokens||0);
   if(agentId){
     const f = emp.equipe.find(x => x.id === agentId);
     if(f){
@@ -1322,11 +1250,11 @@ function nomeDeAgente(id){
 }
 function estadoMotor(){
   if(motorPausado) return {txt:'equipe pausada', cor:'aviso'};
-  if(!modeloInstalado(modeloSelecionado)) return {txt:'sem modelo instalado', cor:'erro'};
-  if(carregandoIA) return {txt:'carregando modelo', cor:'aviso'};
-  if(workerIA && iaPronta) return {txt: MON.ativas.size ? 'gerando resposta' : 'ligado e ocioso', cor:'ok'};
-  if(Date.now() < iaBloqueadaAte) return {txt:'em espera apos falha', cor:'erro'};
-  return {txt:'desligado', cor:'erro'};
+  if(!groqApiKey) return {txt:'API não configurada', cor:'erro'};
+  const q=quotaHoje();
+  if(q.requests>=GROQ_FREE_DEFAULT.rpd || q.totalTokens>=GROQ_FREE_DEFAULT.tpd) return {txt:'limite diário atingido', cor:'erro'};
+  if(MON.ativas.size) return {txt:'gerando resposta', cor:'ok'};
+  return {txt:'API ligada e ociosa', cor:'ok'};
 }
 function renderMonitor(){
   const box = document.getElementById('monResumo'); if(!box) return;
@@ -1399,7 +1327,7 @@ async function vigiaMotor(){
     chamadasNaFila = 0; filaIA = Promise.resolve();
     monEvento('Contador de fila estava preso sem chamada real. Fila destravada.','aviso');
   }
-  if(motorPausado || !empresaAtual() || !modeloInstalado(modeloSelecionado)) { renderMonitor(); return; }
+  if(motorPausado || !empresaAtual() || !groqApiKey) { renderMonitor(); return; }
   if(!workerIA || !iaPronta){
     if(carregandoIA || agora < iaBloqueadaAte){ renderMonitor(); return; }
     if(MON.falhasSeguidas >= 6){
@@ -2017,7 +1945,7 @@ async function autonomiaDecisao(rt,token){
     // Necessidade fisica vem antes da tarefa, e nao consome IA.
     if(await atenderNecessidade(rt)) continue;
     if(chamadasNaFila>0) continue;
-    if(!modeloInstalado(modeloSelecionado)) continue;
+    if(!groqApiKey) continue;
     const tarefa=proximaTarefaDe(rt);
     if(!tarefa){
       // Ocioso e de bem: propoe uma ideia propria para o plano de trabalho.
@@ -2133,7 +2061,7 @@ async function autonomiaGerente(manager,token){
     if(token!==autonomyToken||manager.forced) continue;
     if(chamadasNaFila>0) continue;
     const emp=empresaAtual(); if(!emp) continue;
-    if(!modeloInstalado(modeloSelecionado)) continue;
+    if(!groqApiKey) continue;
     manager.forced=true;
     try{
       const abertas=backlog().filter(t=>t.status!=='feita').length;
@@ -2299,12 +2227,12 @@ function foundCompanyFlow(){
     DB.empresas.push({
       id, nome, ramo, missao, tom:'direto e criativo', equipe, log:[],
       metricas:{vendas:0,visitas:0,seguidores:0,tarefas:0}, aprovacoes:[], pendenciasUsuario:[],
-      analise:null, rumoFeedback:null, historicoDecisoes:[], modeloIA:(modeloInstalado(modeloSelecionado)?modeloSelecionado:null), arquivos:[],
+      analise:null, rumoFeedback:null, historicoDecisoes:[], modeloIA:(groqApiKey?modeloSelecionado:null), arquivos:[],
       tokens:{entrada:0,saida:0,chamadas:0,custo:0}
     });
     DB.atual=id; saveDB(); closeModal(); renderAll();
     addLog(`Empresa ${nome} fundada sem consultar a IA.`, 'ok');
-    if(!modeloInstalado(modeloSelecionado)){
+    if(!groqApiKey){
       setAIStatus('idle','Empresa fundada ✓','Escolha um modelo em IA / Modelos e baixe-o para ativar a gerente.');
     } else {
       setAIStatus('idle','Modelo disponível','A empresa foi fundada. A IA só será carregada quando for necessária.');
@@ -2369,7 +2297,7 @@ async function runCycle(order){
   let delRaw = null;
   // A empresa nunca fica bloqueada esperando o motor. Se a IA estiver desligada
   // ou ainda não estiver pronta, a gerente usa uma decisão determinística local.
-  if(modeloInstalado(modeloSelecionado) && workerIA && iaPronta){
+  if(groqApiKey){
     delRaw = await askAI(sysD, order, 120, MODEL_GERENTE, manager.id);
   }
   if(!delRaw){
@@ -2410,7 +2338,7 @@ NOME: <nome-do-arquivo, ou "nenhum" se a tarefa nao produz arquivo>
 TIPO: <md|txt|html|css|js|csv|json, ou vazio>
 ---
 <conteudo completo do arquivo, se houver; deixe vazio se nao houver>`;
-    if(modeloInstalado(modeloSelecionado) && workerIA && iaPronta){
+    if(groqApiKey){
       exec = await askAIBlock(sysE, del.tarefa, 384, MODEL_BARATO, emp2.id) || exec;
     }
     if(!exec.conteudo?.trim()) exec = criarProdutoLocalDeContingencia(emp, emp2, del.tarefa);
@@ -2515,13 +2443,13 @@ function renderModelUI(){
   const sel=document.getElementById('modelSelect');
   const detail=document.getElementById('modelDetail');
   if(sel){
-    const disponiveis=Object.values(MODELOS).filter(m=>modeloInstalado(m.id));
+    const disponiveis=Object.values(MODELOS);
     sel.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===escolhido?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
     sel.disabled=!disponiveis.length;
   }
   const selP=document.getElementById('modelProdSelect');
   if(selP){
-    const disponiveis=Object.values(MODELOS).filter(m=>modeloInstalado(m.id));
+    const disponiveis=Object.values(MODELOS);
     selP.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===MODEL_PRODUCAO?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
     selP.disabled=!disponiveis.length;
   }
@@ -2546,86 +2474,35 @@ function fecharCentralModelos(){
 }
 
 function renderModelManager(){
-  const list=document.getElementById('modelManagerList');
-  const sum=document.getElementById('activeModelSummary');
-  if(!list) return;
-  const ativo=configModelo();
-  if(sum) sum.textContent = modeloInstalado(ativo.id) ? `${ativo.nome} · ${ativo.tamanho} · baixado e ativo para execução.` : 'Nenhum modelo ativo. Baixe um modelo abaixo.';
-  const note=document.getElementById('modelDownloadNote');
-  if(note) note.textContent='Importante: Baixar modelo apenas salva os arquivos. A IA só ocupa RAM e começa a executar quando você tocar em “Ativar e executar”.';
-  const gpu=(navigator.gpu && typeof navigator.gpu.requestAdapter==='function');
-  const od=document.getElementById('offlineDiag'); if(od) od.textContent=`Offline: ${runtimeOfflineSource ? 'runtime preparado ✓' : 'runtime ainda não preparado'} · Worker: ${typeof Worker!=='undefined'?'disponível ✓':'indisponível'} · WebAssembly: ${typeof WebAssembly!=='undefined'?'disponível ✓':'indisponível'} · WebGPU: ${gpu?'detectado ✓':'não detectado'} · Diagnóstico: 135M q4/WASM · Internet atual: ${navigator.onLine?'sim':'não'}`;
-  list.innerHTML=Object.entries(MODELOS).map(([key,m])=>{
-    const installed=modeloInstalado(m.id), active=m.id===modeloSelecionado && installed, downloading=modelosBaixando.has(m.id);
-    const safeId='model_'+key;
-    const status=downloading ? 'BAIXANDO' : installed ? (active?'ATIVO':'BAIXADO · DESLIGADO') : 'NÃO INSTALADO';
-    const statusClass=downloading?'tag-info':active?'tag-ok':installed?'tag-info':'tag-pend';
-    const dp=progressoDownloads.get(m.id);
-    const pct=dp && typeof dp.pct==='number' ? dp.pct : 0;
-    const detalheDown=dp ? `${escapeHtml(dp.file||'preparando')} · ${escapeHtml(dp.mbDone||'0 MB')} / ${escapeHtml(dp.mbTotal||'calculando…')}${dp.fileTotal ? ` · arquivo ${escapeHtml(dp.fileDone||'0 MB')} / ${escapeHtml(dp.fileTotal)}`:''}` : '';
-    return `<div class="card" style="padding:12px;">
-      <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
-        <div><div style="font-weight:700;">${escapeHtml(m.nome)}</div><div class="stage-note">${escapeHtml(m.nivel)} · ${escapeHtml(m.tamanho)} · RAM ${escapeHtml(m.memoria)}</div></div>
-        <span class="tag-status ${statusClass}">${status}</span>
-      </div>
-      <div class="stage-note" style="margin-top:6px;">${escapeHtml(m.detalhe)}</div>
-      <div class="stage-note" style="margin-top:3px;">Modelo: ${escapeHtml(m.id)}</div>
-      ${downloading ? `<div style="margin-top:10px;"><div style="height:10px;background:var(--grid);border-radius:999px;overflow:hidden;border:1px solid var(--line);"><div data-download-bar="${safeId}" style="height:100%;width:${pct}%;background:var(--amber);transition:width .2s ease;"></div></div><div data-download-detail="${safeId}" class="stage-note" style="margin-top:5px;">${detalheDown || 'Preparando download…'}</div></div>` : ''}
-      <div class="modal-actions" style="margin-top:9px;">
-        ${!installed ? `<button class="btn small primary" data-model-action="download" data-model-id="${escapeHtml(m.id)}" data-model-key="${safeId}" ${downloading?'disabled':''}>${downloading?'Baixando…':'Baixar modelo'}</button>` : ''}
-        ${installed && !active ? `<button class="btn small" data-model-action="activate" data-model-id="${escapeHtml(m.id)}">Ativar e executar</button>` : ''}
-        ${installed ? `<button class="btn small danger" data-model-action="uninstall" data-model-id="${escapeHtml(m.id)}" ${active?'disabled title="Ative outro modelo antes de desinstalar este."':''}>Desinstalar</button>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-  const diag=document.getElementById('aiGenerationTestBtn');
-  if(diag) diag.onclick=async()=>{
-    diag.disabled=true;
-    const diagModel=MODELOS.minimo.id;
+  const key=document.getElementById('groqApiKeyInput');
+  const sel=document.getElementById('groqModelSelect');
+  const status=document.getElementById('groqApiStatus');
+  if(key && document.activeElement!==key) key.value=groqApiKey;
+  if(sel){ sel.innerHTML=Object.values(MODELOS).map(m=>`<option value="${escapeHtml(m.id)}" ${m.id===modeloSelecionado?'selected':''}>${escapeHtml(m.nome)}</option>`).join(''); }
+  if(status) status.textContent=groqApiKey ? `✓ Chave configurada · modelo ${configModelo().nome} · celular sem modelo local.` : 'Nenhuma chave configurada. Crie uma chave gratuita e cole aqui.';
+  renderGroqQuota();
+  const old=document.getElementById('modelManagerList'); if(old) old.hidden=true;
+  const diag=document.getElementById('offlineDiag'); if(diag) diag.textContent=`Motor: API ${API_PROVIDER} · Internet: ${navigator.onLine?'conectada':'desconectada'} · Modelo: ${configModelo().id}`;
+  const test=document.getElementById('aiGenerationTestBtn');
+  if(test) test.onclick=async()=>{
+    test.disabled=true;
     try{
-      if(!modeloInstalado(diagModel)) throw new Error('Primeiro baixe o modelo de diagnóstico de 135M.');
-      modeloSelecionado=diagModel; MODEL_DECISAO=diagModel; MODEL_GERENTE=diagModel; MODEL_PRODUCAO=diagModel; persistirPapeis();
-      encerrarWorkerIA();
-      setAIStatus('loading','Teste real de geração','Carregando o 135M q4 e pedindo uma única palavra: OK.',null);
-      await carregarIA();
-      const bruto=await new Promise((resolve,reject)=>{
-        const id=++workerSeq; let ultimo=Date.now();
-        const timer=setInterval(()=>{ if(Date.now()-ultimo>45000){clearInterval(timer);workerPendentes.delete(id);reject(new Error('O teste ficou 45s sem resposta do motor.'));}},2000);
-        workerPendentes.set(id,{resolve:v=>{clearInterval(timer);resolve(v);},reject:e=>{clearInterval(timer);reject(e);},tocar:()=>{ultimo=Date.now();}});
-        workerIA.postMessage({type:'generate-plain',id,modelId:diagModel,dtype:MODELOS.minimo.dtype,prompt:'Responda apenas com: OK',maxTokens:8,runtimeSource:runtimeOfflineSource,allowRemote:false});
-      });
-      const texto=extrairTextoGerado(bruto).trim();
-      if(!texto) throw new Error('O motor respondeu sem texto.');
-      setAIStatus('ready','GERAÇÃO CONFIRMADA ✓',`Resposta bruta: ${texto.slice(0,120)}`);
-      monEvento(`Teste real do motor concluído: “${texto.slice(0,80)}”.`,'ok');
-    }catch(e){
-      const msg=String(e?.message||e);
-      setAIStatus('error','Teste real falhou',msg);
-      monEvento('Teste real falhou: '+msg,'erro');
-    }finally{ diag.disabled=false; renderModelManager(); }
+      salvarGroqConfig();
+      const r=await chamarAPI('Responda apenas com a palavra OK.','OK',8,modeloSelecionado,'diag','decisao');
+      const texto=String(r?.text||'').trim();
+      setAIStatus('ready','GERAÇÃO CONFIRMADA ✓',`Resposta da API: ${texto.slice(0,120)}`);
+      monEvento('Teste real da API concluído: “'+texto.slice(0,80)+'”.','ok');
+    }catch(e){ setAIStatus('error','Teste da API falhou',String(e?.message||e)); monEvento('Teste da API falhou: '+String(e?.message||e),'erro'); }
+    finally{test.disabled=false;renderModelManager();}
   };
-
-  const ot=document.getElementById('offlineTestBtn');
-  if(ot) ot.onclick=async()=>{
-    ot.disabled=true; setAIStatus('loading','Testando modo offline','A partir de agora esta verificação proíbe acesso remoto ao modelo.',null);
-    try{
-      if(!modeloInstalado(modeloSelecionado)) throw new Error('Instale um modelo antes do teste offline.');
-      await prepararRuntimeOffline();
-      encerrarWorkerIA();
-      const w=criarWorkerIA();
-      await new Promise((resolve,reject)=>{ workerReadyResolve=resolve; workerReadyReject=reject; w.postMessage({type:'load',modelId:modeloSelecionado,dtype:configModelo().dtype,runtimeSource:runtimeOfflineSource,allowRemote:false}); ultimoSinalWorker=Date.now(); const vg=setInterval(()=>{ if(pipelineIA || !workerReadyReject){ clearInterval(vg); return; } if(Date.now()-ultimoSinalWorker>180000){ clearInterval(vg); workerReadyReject(new Error('O teste offline ficou 3 minutos sem resposta.')); workerReadyResolve=null; workerReadyReject=null; } },5000); });
-      setAIStatus('ready','OFFLINE confirmado ✓',`${configModelo().nome} carregou sem permitir acesso remoto. Agora você pode desligar a internet e testar uma ordem.`);
-      try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
-    }catch(e){ setAIStatus('error','OFFLINE não confirmado',String(e?.message||e)); }
-    finally{ot.disabled=false; renderModelManager();}
-  };
-  list.querySelectorAll('[data-model-action]').forEach(btn=>btn.onclick=()=>{
-    const action=btn.dataset.modelAction, id=btn.dataset.modelId;
-    if(action==='download') baixarModeloIA(id);
-    if(action==='activate') ativarModeloIA(id);
-    if(action==='uninstall') desinstalarModeloIA(id);
-  });
+  const save=document.getElementById('saveGroqBtn');
+  if(save) save.onclick=()=>{ salvarGroqConfig(); setAIStatus(groqApiKey?'ready':'error',groqApiKey?'API configurada ✓':'API não configurada',groqApiKey?`${configModelo().nome} será usado pela empresa.`:'Informe a chave Groq.'); renderModelManager(); renderModelUI(); };
+  const testConn=document.getElementById('testGroqBtn');
+  if(testConn) testConn.onclick=async()=>{ testConn.disabled=true; try{ salvarGroqConfig(); const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',8,modeloSelecionado,'diag'); setAIStatus('ready','Conexão confirmada ✓',String(r.text).slice(0,120)); }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); } finally{testConn.disabled=false;renderModelManager();} };
+  const resetQ=document.getElementById('groqResetUsageBtn');
+  if(resetQ) resetQ.onclick=()=>{ groqQuota={date:new Date().toISOString().slice(0,10),requests:0,inputTokens:0,outputTokens:0,totalTokens:0,last:null,model:{}}; persistirQuota(); renderGroqQuota(); };
 }
+
 
 function atualizarProgressoDownloadUI(id, info){
   progressoDownloads.set(id, info||{});
@@ -2699,27 +2576,8 @@ async function baixarModeloDiretoSemIA(id){
 }
 
 async function baixarModeloIA(id){
-  const m=configModelo(id);
-  if(modeloInstalado(id)){ setAIStatus('idle','Modelo já baixado',`${m.nome} está instalado. O download não inicia a IA. Use “Ativar” para executar.`); renderModelManager(); return; }
-  if(modelosBaixando.has(id)) return;
-  try{
-    modelosBaixando.add(id);
-    progressoDownloads.set(id,{pct:0,file:'Preparando download…',mbDone:'0 MB',mbTotal:'calculando…'});
-    renderModelManager();
-    setAIStatus('loading','Baixando modelo — IA desligada',`${m.nome} · download separado da execução. O modelo não será carregado na RAM.`,0);
-    // IMPORTANTE: este caminho NÃO cria Worker de IA, NÃO importa Transformers.js
-    // e NÃO chama carregarIA(). É somente rede + Cache Storage.
-    await baixarModeloDiretoSemIA(id);
-    marcarModeloInstalado(id);
-    modelosBaixando.delete(id);
-    progressoDownloads.set(id,{pct:100,file:'Download concluído',mbDone:progressoDownloads.get(id)?.mbDone||'',mbTotal:progressoDownloads.get(id)?.mbTotal||''});
-    setAIStatus('idle','Download concluído ✓',`${m.nome} está instalado e permanece desligado. Agora o botão “Ativar e executar” é o único caminho que carrega a IA.`);
-    renderModelManager(); renderModelUI();
-  }catch(err){
-    modelosBaixando.delete(id);
-    setAIStatus('error','Falha no download do modelo',String(err?.message||err));
-    renderModelManager();
-  }
+  setAIStatus('idle','Download desativado',`Esta versão usa API ${API_PROVIDER}; não é necessário baixar modelo para o celular.`);
+  abrirCentralModelos();
 }
 
 async function carregarIAComModelo(id){
@@ -2730,18 +2588,10 @@ async function carregarIAComModelo(id){
 }
 
 async function ativarModeloIA(id){
-  if(!modeloInstalado(id)) return;
-  if(carregandoIA){ try{ await carregandoIA; }catch(e){} }
-  encerrarWorkerIA();
-  modeloSelecionado=id; MODEL_DECISAO=id;
-  if(!modeloInstalado(MODEL_PRODUCAO)) MODEL_PRODUCAO=id;
-  persistirPapeis();
-  const emp=empresaAtual(); if(emp) emp.modeloIA=id;
-  persistirModelos();
-  setAIStatus('loading','Ativando modelo',`${configModelo().nome} · preparando para uso…`,null);
+  if(!Object.values(MODELOS).some(m=>m.id===id)) return;
+  modeloSelecionado=id; MODEL_DECISAO=id; MODEL_PRODUCAO=id; persistirPapeis(); persistirModelos();
+  setAIStatus(groqApiKey?'ready':'error',groqApiKey?'IA por API pronta ✓':'API precisa de chave',groqApiKey?`${configModelo().nome} está selecionado.`:'Abra IA / Modelos e informe sua chave Groq.');
   renderModelManager(); renderModelUI();
-  try{ await carregarIA(); setAIStatus('ready','IA local pronta ✓',`${configModelo().nome} está ativo e pronto para a empresa.`); renderModelManager(); renderModelUI(); }
-  catch(e){ setAIStatus('error','Modelo não conseguiu iniciar',String(e?.message||e)); renderModelManager(); }
 }
 
 async function desinstalarModeloIA(id){
@@ -3508,17 +3358,17 @@ document.addEventListener('visibilitychange', ()=>{
   } else {
     monEvento('Primeira sessao registrada neste aparelho.','info');
   }
-  if(modeloInstalado(modeloSelecionado) && await runtimeOfflinePronto()) setAIStatus('ready','Pacote offline pronto ✓',`${configModelo().nome} está instalado e o runtime local foi preparado. A IA não depende de API nem de servidor.`);
-  else if(modeloInstalado(modeloSelecionado)) setAIStatus('loading','Finalize a preparação offline',`${configModelo().nome} está instalado, mas o runtime offline ainda não foi preparado. Abra IA / Modelos.`);
-  else setAIStatus('idle','Escolha um modelo de IA','Abra IA / Modelos para baixar um modelo gratuito e deixá-lo pronto para uso.');
+  if(groqApiKey) setAIStatus('ready','IA por API pronta ✓',`${configModelo().nome} via ${API_PROVIDER}. O celular não baixa nem executa modelo local.`);
+  else setAIStatus('idle','Configure a IA por API','Abra IA / Modelos, informe sua chave Groq e teste a conexão.');
+  renderGroqQuota();
   setInterval(tickCards, 350);
   setInterval(vigiaMotor, 12000);
   setInterval(()=>{ if(document.getElementById('view-motor')?.classList.contains('active')) renderMonitor(); }, 900);
   requestAnimationFrame(loop);
 
   // O motor NÃO sobe automaticamente. Download, ativacao e execucao sao etapas separadas.
-  if(empresaAtual() && modeloInstalado(modeloSelecionado)){
-    monEvento('Modelo baixado, mas motor desligado. Abra IA / Modelos e toque em “Ativar e executar”.','info');
+  if(empresaAtual() && groqApiKey){
+    monEvento('IA por API configurada. A empresa pode iniciar as decisões automaticamente.','info');
   }
 })();
 </script>
