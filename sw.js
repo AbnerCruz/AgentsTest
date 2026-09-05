@@ -1,43 +1,44 @@
-/* Service Worker do simulador de empresa — shell do app somente.
-   A IA desta versão é remota pela API Groq; nenhuma biblioteca, WASM ou peso
-   de modelo é baixado/cacheado pelo service worker. */
-const CACHE_APP = 'app-api-v1';
+/* Service worker do Estúdio.
+   Só o shell é cacheado. A IA é remota (Groq) e nunca passa por aqui:
+   requisições para outras origens são ignoradas de propósito. */
+const CACHE = 'estudio-v2';
+const SHELL = [
+  './', './index.html', './manifest.webmanifest',
+  './app.css',
+  './core.js', './ai.js', './market.js',
+  './factory.js', './studio.js', './ui.js'
+];
 
-self.addEventListener('install', event => {
-  event.waitUntil(
-    caches.open(CACHE_APP)
-      .then(cache => cache.addAll(['./', './index.html']))
-      .catch(() => null)
-      .then(() => self.skipWaiting())
+self.addEventListener('install', ev => {
+  ev.waitUntil(
+    caches.open(CACHE).then(c => c.addAll(SHELL)).catch(() => null).then(() => self.skipWaiting())
   );
 });
 
-self.addEventListener('activate', event => {
-  event.waitUntil(
+self.addEventListener('activate', ev => {
+  ev.waitUntil(
     caches.keys()
-      .then(names => Promise.all(
-        names.filter(name => name !== CACHE_APP).map(name => caches.delete(name))
-      ))
+      .then(ns => Promise.all(ns.filter(n => n !== CACHE).map(n => caches.delete(n))))
       .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', event => {
-  const req = event.request;
+/* Rede primeiro, cache como rede de segurança: assim uma atualização do
+   app aparece na hora, mas o estúdio continua abrindo sem internet. */
+self.addEventListener('fetch', ev => {
+  const req = ev.request;
   if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
-
-  event.respondWith((async () => {
+  if (new URL(req.url).origin !== self.location.origin) return;
+  ev.respondWith((async () => {
     try {
-      const response = await fetch(req);
-      const cache = await caches.open(CACHE_APP);
-      cache.put(req, response.clone()).catch(() => {});
-      return response;
-    } catch (error) {
+      const resp = await fetch(req);
+      const cache = await caches.open(CACHE);
+      cache.put(req, resp.clone()).catch(() => {});
+      return resp;
+    } catch (e) {
       const cached = await caches.match(req);
       if (cached) return cached;
-      throw error;
+      throw e;
     }
   })());
 });
