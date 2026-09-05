@@ -1,0 +1,3697 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0E1113">
+<meta name="description" content="Simulador de estúdio criativo: a equipe de IA trabalha sozinha e entrega arquivos reais que você baixa e vende.">
+<title>Estúdio — simulador com entregas reais</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<style>
+/* ============================================================
+   ESTÚDIO — sistema visual
+   Base grafite + acento brasa. Sem sombras pesadas, sem gradiente
+   decorativo: hierarquia feita com espaçamento, fio de 1px e peso
+   tipográfico. Números sempre em tabular para não "dançar".
+   ============================================================ */
+
+:root{
+  /* superfícies */
+  --bg:#0E1113;
+  --bg-2:#13171A;
+  --surf:#171C1F;
+  --surf-2:#1D2327;
+  --line:#252C31;
+  --line-soft:#1E2429;
+
+  /* tinta */
+  --ink:#E9E7E2;
+  --ink-2:#A8B0B3;
+  --ink-3:#6F797D;
+
+  /* acentos */
+  --ember:#E4703E;
+  --ember-soft:rgba(228,112,62,.14);
+  --sage:#6FA98A;
+  --sage-soft:rgba(111,169,138,.14);
+  --gold:#D9A441;
+  --gold-soft:rgba(217,164,65,.14);
+  --rust:#C9553F;
+  --rust-soft:rgba(201,85,63,.14);
+
+  /* medidas */
+  --r-sm:6px; --r:10px; --r-lg:14px; --r-xl:20px;
+  --gap:12px;
+  --pad:14px;
+  --safe-b:env(safe-area-inset-bottom,0px);
+
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+}
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:var(--sans); font-size:15px; line-height:1.5;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  overscroll-behavior-y:none;
+}
+button,input,select,textarea{font:inherit;color:inherit;}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.015em;}
+p{margin:0;}
+[hidden]{display:none !important;}
+::selection{background:var(--ember-soft);}
+
+/* rolagem discreta */
+*::-webkit-scrollbar{width:6px;height:6px;}
+*::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px;}
+
+/* ─────────── esqueleto ─────────── */
+.shell{
+  display:grid;
+  grid-template-rows:auto 1fr auto;
+  min-height:100dvh;
+}
+.content{
+  grid-area:content;
+  padding:var(--pad) var(--pad) calc(var(--pad) + 4px);
+  display:flex; flex-direction:column; gap:var(--gap);
+  max-width:820px; width:100%; margin:0 auto;
+}
+.view{display:none;flex-direction:column;gap:var(--gap);}
+.view.is-on{display:flex;animation:fadeUp .22s ease both;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important;}}
+
+/* ─────────── topo ─────────── */
+.topbar{
+  grid-area:top;
+  position:sticky; top:0; z-index:30;
+  display:flex; align-items:center; gap:10px;
+  padding:10px var(--pad); min-height:56px;
+  background:rgba(14,17,19,.82); backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line-soft);
+}
+.brand{
+  display:flex; align-items:center; gap:9px; min-width:0;
+  background:none; border:0; padding:4px 6px 4px 2px; margin:0;
+  border-radius:var(--r); cursor:pointer; text-align:left;
+}
+.brand:active{background:var(--surf);}
+.brand-mark{
+  width:30px;height:30px;flex:none;display:grid;place-items:center;
+  border-radius:9px; background:var(--surf-2); color:var(--ember);
+  border:1px solid var(--line);
+}
+.brand-txt{min-width:0;display:block;}
+.brand-txt b{display:block;font-size:14.5px;font-weight:650;letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}
+.brand-txt small{display:block;font-size:11px;color:var(--ink-3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}
+.brand-caret{color:var(--ink-3);flex:none;}
+
+.top-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
+.clock{
+  display:flex;flex-direction:column;align-items:flex-end;line-height:1.15;
+  font-family:var(--mono);font-variant-numeric:tabular-nums;
+}
+.clock-day{font-size:9.5px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;}
+.clock-hour{font-size:13px;color:var(--ink-2);}
+.pulse{
+  display:flex;align-items:center;gap:6px;
+  background:var(--surf); border:1px solid var(--line); border-radius:99px;
+  padding:5px 10px 5px 8px; cursor:pointer;
+}
+.pulse-dot{width:7px;height:7px;border-radius:99px;background:var(--ink-3);flex:none;}
+.pulse-dot.on{background:var(--sage);}
+.pulse-dot.busy{background:var(--gold);animation:blink 1.1s ease-in-out infinite;}
+.pulse-dot.err{background:var(--rust);}
+.pulse-txt{font-size:11px;color:var(--ink-2);white-space:nowrap;}
+@keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
+
+/* ─────────── navegação ─────────── */
+.nav{
+  grid-area:nav;
+  position:sticky; bottom:0; z-index:30;
+  display:flex; justify-content:space-around; gap:2px;
+  padding:6px 6px calc(6px + var(--safe-b));
+  background:rgba(14,17,19,.9); backdrop-filter:blur(14px);
+  border-top:1px solid var(--line-soft);
+}
+.nav-item{
+  position:relative;
+  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
+  background:none;border:0;padding:7px 2px 5px;border-radius:var(--r);
+  color:var(--ink-3); cursor:pointer; transition:color .16s;
+}
+.nav-item svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;}
+.nav-item span{font-size:10px;letter-spacing:.01em;}
+.nav-item.is-on{color:var(--ember);}
+.nav-badge{
+  position:absolute;top:5px;right:calc(50% - 18px);
+  width:6px;height:6px;border-radius:99px;background:var(--ember);
+}
+
+@media (min-width:900px){
+  .shell{
+    grid-template-columns:212px 1fr;
+    grid-template-rows:auto 1fr;
+    grid-template-areas:"top top" "nav content";
+  }
+  .topbar{padding:12px 20px;}
+  .brand-txt b,.brand-txt small{max-width:none;}
+  .nav{
+    position:sticky; top:57px; align-self:start;
+    flex-direction:column; justify-content:flex-start; gap:2px;
+    padding:16px 12px; border-top:0; border-right:1px solid var(--line-soft);
+    background:transparent; height:calc(100dvh - 57px);
+  }
+  .nav-item{flex:none;flex-direction:row;justify-content:flex-start;gap:11px;padding:9px 11px;}
+  .nav-item span{font-size:13px;}
+  .nav-item.is-on{background:var(--surf);}
+  .nav-badge{position:static;margin-left:auto;}
+  .content{padding:20px 24px 40px;max-width:760px;margin:0;}
+}
+
+/* ─────────── painéis ─────────── */
+.panel{
+  background:var(--surf); border:1px solid var(--line-soft);
+  border-radius:var(--r-lg); padding:var(--pad);
+}
+.panel-head{
+  display:flex;align-items:center;gap:8px;margin-bottom:11px;min-height:24px;
+}
+.panel-label{
+  font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);
+}
+.panel-head .btn,.panel-head .chip,.panel-head .tag{margin-left:auto;}
+.panel-head .btn + .btn,.panel-head .chip + .btn{margin-left:6px;}
+.panel-foot{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:10px;}
+.hint{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:6px;}
+
+.chip{
+  font-size:10.5px;padding:3px 8px;border-radius:99px;
+  background:var(--surf-2);border:1px solid var(--line);color:var(--ink-2);
+  white-space:nowrap;
+}
+.tag{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
+  padding:2px 6px;border-radius:4px;background:var(--surf-2);color:var(--ink-3);
+  text-transform:uppercase;white-space:nowrap;
+}
+.tag-real{background:var(--sage-soft);color:var(--sage);}
+.tag-sim{background:var(--gold-soft);color:var(--gold);}
+.tag-ember{background:var(--ember-soft);color:var(--ember);}
+.tag-rust{background:var(--rust-soft);color:var(--rust);}
+
+/* ─────────── botões ─────────── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;
+  background:var(--surf-2);border:1px solid var(--line);color:var(--ink);
+  border-radius:var(--r); padding:8px 13px; font-size:13px; font-weight:550;
+  cursor:pointer; transition:background .14s,border-color .14s,opacity .14s;
+  white-space:nowrap;
+}
+.btn:active{transform:translateY(1px);}
+.btn:hover{border-color:#333C42;}
+.btn:disabled{opacity:.4;cursor:default;transform:none;}
+.btn-primary{background:var(--ember);border-color:var(--ember);color:#15100D;font-weight:650;}
+.btn-primary:hover{background:#EE7C48;border-color:#EE7C48;}
+.btn-ghost{background:transparent;}
+.btn-danger{background:transparent;border-color:rgba(201,85,63,.5);color:#E08573;}
+.btn-danger:hover{border-color:var(--rust);}
+.btn-mini{padding:5px 9px;font-size:11.5px;border-radius:var(--r-sm);}
+.btn-lg{padding:12px 20px;font-size:14.5px;}
+.row-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
+
+/* ─────────── campos ─────────── */
+.field{margin-top:12px;}
+.field:first-of-type{margin-top:0;}
+.field label{
+  display:flex;align-items:center;gap:7px;
+  font-size:11.5px;color:var(--ink-2);margin-bottom:6px;font-weight:550;
+}
+input[type=text],input[type=password],select,textarea{
+  width:100%;background:var(--bg-2);border:1px solid var(--line);
+  border-radius:var(--r);padding:10px 12px;font-size:14px;color:var(--ink);
+  transition:border-color .14s;
+}
+textarea{resize:vertical;min-height:74px;line-height:1.5;}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--ember);}
+input::placeholder,textarea::placeholder{color:var(--ink-3);}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236F797D' stroke-width='2'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:34px;}
+
+.composer{display:flex;gap:8px;}
+.composer input{flex:1;min-width:0;}
+
+.segmented{
+  display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;margin-bottom:10px;
+  scrollbar-width:none;
+}
+.segmented::-webkit-scrollbar{display:none;}
+.segmented button{
+  background:var(--bg-2);border:1px solid var(--line);color:var(--ink-3);
+  border-radius:99px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;
+}
+.segmented button.is-on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600;}
+
+/* ─────────── hero / estado vazio ─────────── */
+.hero{padding:26px 4px 10px;text-align:left;}
+.hero-mark{
+  width:52px;height:52px;border-radius:16px;display:grid;place-items:center;
+  background:var(--surf);border:1px solid var(--line);color:var(--ember);margin-bottom:18px;
+}
+.hero h1{font-size:25px;line-height:1.2;margin-bottom:10px;letter-spacing:-.02em;}
+.hero p{color:var(--ink-2);font-size:14.5px;line-height:1.58;max-width:52ch;}
+.steps{display:flex;flex-direction:column;gap:9px;margin:22px 0;}
+.step{display:flex;gap:11px;align-items:baseline;}
+.step b{
+  font-family:var(--mono);font-size:11px;color:var(--ember);
+  width:20px;height:20px;flex:none;display:grid;place-items:center;
+  border:1px solid var(--line);border-radius:6px;background:var(--surf);
+}
+.step span{font-size:13.5px;color:var(--ink-2);}
+.hero-actions{display:flex;gap:9px;flex-wrap:wrap;}
+.empty{
+  font-size:13px;color:var(--ink-3);line-height:1.55;
+  padding:18px 2px;text-align:left;
+}
+
+/* ─────────── chão do estúdio ─────────── */
+.floor-wrap{padding:var(--pad) var(--pad) 12px;}
+#floor{
+  display:block;width:100%;height:auto;border-radius:var(--r);
+  background:var(--bg-2);border:1px solid var(--line-soft);cursor:pointer;
+  touch-action:manipulation;
+}
+
+/* ─────────── equipe ─────────── */
+.team{display:flex;flex-direction:column;gap:7px;}
+.member{
+  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
+  background:var(--bg-2);border:1px solid var(--line-soft);border-radius:var(--r);
+  padding:10px 11px;cursor:pointer;transition:border-color .14s;
+}
+.member:hover{border-color:var(--line);}
+.avatar{
+  width:32px;height:32px;border-radius:99px;flex:none;display:grid;place-items:center;
+  font-size:12px;font-weight:700;color:#12100E;letter-spacing:-.02em;
+}
+.member-body{min-width:0;flex:1;}
+.member-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;}
+.member-role{font-size:11px;color:var(--ink-3);}
+.member-status{font-size:11.5px;color:var(--ink-2);margin-top:2px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.bars{display:flex;flex-direction:column;gap:3px;width:44px;flex:none;}
+.bar{height:3px;border-radius:99px;background:var(--line);overflow:hidden;}
+.bar i{display:block;height:100%;border-radius:99px;background:var(--ink-3);}
+.bar.energia i{background:var(--sage);}
+.bar.humor i{background:var(--gold);}
+.thinking{
+  font-size:9.5px;padding:1px 6px;border-radius:99px;
+  background:var(--ember-soft);color:var(--ember);
+  animation:blink 1.2s ease-in-out infinite;
+}
+
+/* ─────────── listas de tarefas / contratos ─────────── */
+.item{
+  display:flex;gap:11px;align-items:flex-start;
+  padding:11px 0;border-top:1px solid var(--line-soft);
+}
+.item:first-child{border-top:0;padding-top:2px;}
+.item-body{min-width:0;flex:1;}
+.item-title{font-size:13.5px;font-weight:550;line-height:1.4;}
+.item-meta{font-size:11px;color:var(--ink-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
+.item-actions{display:flex;gap:6px;flex:none;align-items:center;}
+.dot-state{width:7px;height:7px;border-radius:99px;flex:none;margin-top:6px;background:var(--ink-3);}
+.dot-state.fazendo{background:var(--gold);animation:blink 1.2s ease-in-out infinite;}
+.dot-state.feita{background:var(--sage);}
+.dot-state.falhou{background:var(--rust);}
+
+/* ─────────── kits ─────────── */
+.kits{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
+.kit{
+  text-align:left;background:var(--bg-2);border:1px solid var(--line-soft);
+  border-radius:var(--r);padding:11px;cursor:pointer;transition:border-color .14s;
+  display:flex;flex-direction:column;gap:4px;
+}
+.kit:hover{border-color:var(--ember);}
+.kit[disabled]{opacity:.42;cursor:default;}
+.kit-top{display:flex;align-items:center;gap:7px;}
+.kit-ext{font-family:var(--mono);font-size:9.5px;color:var(--ember);
+  background:var(--ember-soft);padding:2px 5px;border-radius:4px;text-transform:uppercase;}
+.kit-nome{font-size:13px;font-weight:600;line-height:1.3;}
+.kit-desc{font-size:11px;color:var(--ink-3);line-height:1.45;}
+
+/* ─────────── arquivos ─────────── */
+.file{
+  border:1px solid var(--line-soft);border-radius:var(--r);
+  background:var(--bg-2);margin-bottom:8px;overflow:hidden;
+}
+.file-head{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;}
+.file-info{min-width:0;flex:1;}
+.file-name{font-size:13.5px;font-weight:600;word-break:break-word;line-height:1.35;}
+.file-meta{font-size:10.5px;color:var(--ink-3);font-family:var(--mono);margin-top:4px;
+  display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
+.file-tools{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 11px;}
+.file-view{
+  border-top:1px solid var(--line-soft);background:#0B0E10;
+  font-family:var(--mono);font-size:11px;line-height:1.62;color:#C6CCCF;
+  padding:12px;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;
+}
+.file-frame{width:100%;height:340px;border:0;border-top:1px solid var(--line-soft);background:#fff;display:block;}
+.quality{display:inline-flex;align-items:center;gap:5px;}
+.quality-bar{width:34px;height:3px;border-radius:99px;background:var(--line);overflow:hidden;}
+.quality-bar i{display:block;height:100%;background:var(--sage);}
+
+/* ─────────── KPIs e negócio ─────────── */
+.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
+@media(min-width:560px){.kpis{grid-template-columns:repeat(4,1fr);}}
+.kpi{
+  background:var(--surf);border:1px solid var(--line-soft);border-radius:var(--r-lg);
+  padding:12px;display:flex;flex-direction:column;gap:2px;
+}
+.kpi-v{font-size:21px;font-weight:680;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;line-height:1.15;}
+.kpi-l{font-size:10.5px;color:var(--ink-3);line-height:1.35;}
+.kpi-d{font-size:10px;font-family:var(--mono);}
+.up{color:var(--sage);} .down{color:var(--rust);}
+
+.stats{display:flex;flex-direction:column;}
+.stat{
+  display:flex;align-items:baseline;gap:10px;padding:8px 0;
+  border-top:1px solid var(--line-soft);font-size:12.5px;
+}
+.stat:first-child{border-top:0;}
+.stat span{color:var(--ink-2);}
+.stat b{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;
+  font-weight:550;font-size:12.5px;}
+.spark{display:block;width:100%;height:54px;margin:2px 0 8px;}
+
+.meter{height:5px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0 4px;}
+.meter i{display:block;height:100%;background:var(--ember);border-radius:99px;transition:width .3s;}
+.meter.ok i{background:var(--sage);}
+.meter.warn i{background:var(--gold);}
+.meter.bad i{background:var(--rust);}
+
+/* ─────────── diário / chamadas ─────────── */
+.logbox{max-height:280px;overflow-y:auto;margin:0 -4px;}
+.log-line{
+  display:flex;gap:9px;padding:6px 4px;font-size:12px;line-height:1.45;
+  border-top:1px solid var(--line-soft);
+}
+.log-line:first-child{border-top:0;}
+.log-ts{font-family:var(--mono);font-size:10px;color:var(--ink-3);flex:none;padding-top:2px;}
+.log-txt{min-width:0;color:var(--ink-2);}
+.log-line.ok .log-txt{color:var(--ink);}
+.log-line.alerta .log-txt{color:#E3B972;}
+.log-line.erro .log-txt{color:#E08573;}
+
+.calls{max-height:260px;overflow-y:auto;}
+.call{padding:8px 0;border-top:1px solid var(--line-soft);font-size:12px;}
+.call:first-child{border-top:0;}
+.call-head{display:flex;gap:8px;align-items:center;}
+.call-head b{font-weight:600;font-size:12.5px;}
+.call-head .tag{margin-left:auto;}
+.call-meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px;}
+
+/* ─────────── folha inferior / modal ─────────── */
+.sheet-backdrop{
+  position:fixed;inset:0;z-index:60;background:rgba(6,8,9,.66);
+  backdrop-filter:blur(3px);display:flex;align-items:flex-end;justify-content:center;
+  animation:fade .18s ease both;
+}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.sheet{
+  width:100%;max-width:520px;max-height:88dvh;overflow-y:auto;
+  background:var(--bg-2);border:1px solid var(--line);
+  border-radius:var(--r-xl) var(--r-xl) 0 0;
+  padding:8px 16px calc(20px + var(--safe-b));
+  animation:slideUp .24s cubic-bezier(.2,.8,.3,1) both;
+}
+@keyframes slideUp{from{transform:translateY(22px);opacity:.4}to{transform:none;opacity:1}}
+@media(min-width:600px){
+  .sheet-backdrop{align-items:center;}
+  .sheet{border-radius:var(--r-xl);padding-bottom:20px;}
+}
+.sheet-grip{
+  display:block;width:38px;height:4px;border-radius:99px;background:var(--line);
+  border:0;margin:6px auto 14px;cursor:pointer;padding:0;
+}
+.sheet h2{font-size:18px;margin-bottom:5px;letter-spacing:-.02em;}
+.sheet .sub{font-size:12.5px;color:var(--ink-3);line-height:1.5;margin-bottom:14px;}
+.sheet-actions{display:flex;gap:8px;margin-top:16px;}
+.sheet-actions .btn{flex:1;}
+.pick{
+  display:flex;gap:10px;align-items:center;width:100%;text-align:left;
+  background:var(--surf);border:1px solid var(--line-soft);border-radius:var(--r);
+  padding:11px 12px;margin-bottom:6px;cursor:pointer;
+}
+.pick.is-on{border-color:var(--ember);}
+.pick b{font-size:13.5px;font-weight:600;display:block;}
+.pick small{font-size:11px;color:var(--ink-3);display:block;line-height:1.4;}
+.pick .tag{margin-left:auto;flex:none;}
+
+/* ─────────── avisos ─────────── */
+.toasts{
+  position:fixed;left:0;right:0;bottom:calc(76px + var(--safe-b));z-index:70;
+  display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;padding:0 12px;
+}
+@media(min-width:900px){.toasts{bottom:20px;align-items:flex-end;padding-right:20px;}}
+.toast{
+  background:var(--surf-2);border:1px solid var(--line);color:var(--ink);
+  border-radius:99px;padding:9px 15px;font-size:12.5px;max-width:min(440px,92vw);
+  box-shadow:0 8px 26px rgba(0,0,0,.4);
+  animation:toastIn .22s ease both;
+}
+.toast.ok{border-color:rgba(111,169,138,.5);}
+.toast.erro{border-color:rgba(201,85,63,.5);}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+.callout{
+  border:1px solid var(--line);border-left:2px solid var(--ember);
+  background:var(--bg-2);border-radius:var(--r-sm);
+  padding:10px 12px;font-size:12px;color:var(--ink-2);line-height:1.55;
+}
+.callout.warn{border-left-color:var(--gold);}
+.callout.bad{border-left-color:var(--rust);}
+.danger-zone{border-color:rgba(201,85,63,.28);}
+
+</style>
+<script>
+/* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
+(function(){
+  function mostra(txt){
+    var d=document.getElementById('erroFatal');
+    if(!d){ d=document.createElement('pre'); d.id='erroFatal';
+      d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;margin:0;padding:12px;max-height:45vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;border-top:2px solid #E4703E';
+      (document.body||document.documentElement).appendChild(d); }
+    d.textContent += txt + '\n';
+  }
+  window.addEventListener('error', function(e){
+    if (e.target && e.target.tagName === 'SCRIPT') mostra('Não carregou o arquivo: ' + (e.target.src||'?'));
+    else if (e.target && e.target.tagName === 'LINK') mostra('Não carregou o estilo: ' + (e.target.href||'?'));
+    else mostra((e.message||'erro') + '\n  em ' + (e.filename||'?') + ':' + (e.lineno||0));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){ mostra('Promessa rejeitada: ' + (e.reason && e.reason.message || e.reason)); });
+})();
+</script>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ══ topo ══ -->
+  <header class="topbar">
+    <button class="brand" id="brandBtn" type="button">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 18V6h5.5a3.5 3.5 0 0 1 0 7H8.5l4.5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="brand-txt">
+        <b id="brandName">Estúdio</b>
+        <small id="brandSub">nenhum estúdio fundado</small>
+      </span>
+      <svg class="brand-caret" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+
+    <div class="top-right">
+      <div class="clock" id="topClock" hidden>
+        <span class="clock-day" id="clockDay">Dia 1</span>
+        <span class="clock-hour" id="clockHour">08:00</span>
+      </div>
+      <button class="pulse" id="pulseBtn" type="button" title="Estado do motor de IA">
+        <span class="pulse-dot" id="pulseDot"></span>
+        <span class="pulse-txt" id="pulseTxt">IA desligada</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══ navegação (barra inferior no celular, trilho lateral no desktop) ══ -->
+  <nav class="nav" id="nav" aria-label="Seções">
+    <button class="nav-item is-on" data-view="estudio" type="button">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+      <span>Estúdio</span>
+    </button>
+    <button class="nav-item" data-view="trabalho" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 7h11M4 12h16M4 17h8"/><path d="m17 15 2 2 3-4"/></svg>
+      <span>Trabalho</span>
+      <i class="nav-badge" id="badgeTrabalho" hidden></i>
+    </button>
+    <button class="nav-item" data-view="entregas" type="button">
+      <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+      <span>Entregas</span>
+      <i class="nav-badge" id="badgeEntregas" hidden></i>
+    </button>
+    <button class="nav-item" data-view="negocio" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="m7 15 4-5 3 3 5-7"/></svg>
+      <span>Negócio</span>
+    </button>
+    <button class="nav-item" data-view="motor" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 4v2m0 12v2M4 12h2m12 0h2M6.5 6.5 8 8m8 8 1.5 1.5m0-11L16 8M8 16l-1.5 1.5"/></svg>
+      <span>Motor</span>
+    </button>
+  </nav>
+
+  <!-- ══ conteúdo ══ -->
+  <main class="content" id="content">
+
+    <!-- estado inicial -->
+    <section class="view is-on" id="v-vazio">
+      <div class="hero">
+        <div class="hero-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30"><path d="M6 18V6h5.5a3.5 3.5 0 0 1 0 7H8.5l4.5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h1>Um estúdio que entrega arquivos de verdade</h1>
+        <p>É um jogo de gerenciamento: você funda o estúdio, contrata, dá ordens e acompanha o caixa. Mas o que a equipe produz não é cenário — são páginas, textos, planilhas e marcas prontas para baixar, usar e vender.</p>
+        <div class="steps">
+          <div class="step"><b>1</b><span>Funde o estúdio e escolha o ramo.</span></div>
+          <div class="step"><b>2</b><span>Conecte uma chave Groq gratuita no Motor.</span></div>
+          <div class="step"><b>3</b><span>Aceite contratos e baixe as entregas.</span></div>
+        </div>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" id="fundarBtn" type="button">Fundar estúdio</button>
+          <button class="btn btn-ghost btn-lg" id="irMotorBtn" type="button">Conectar IA</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ESTÚDIO -->
+    <section class="view" id="v-estudio">
+      <div class="floor-wrap panel">
+        <div class="panel-head">
+          <span class="panel-label">Chão do estúdio</span>
+          <span class="chip" id="floorStatus">parado</span>
+        </div>
+        <canvas id="floor" aria-label="Planta do estúdio com a equipe"></canvas>
+        <p class="panel-foot" id="floorFoot">Toque em alguém para ver o painel da pessoa.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Equipe</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
+        <div class="team" id="teamList"></div>
+      </div>
+      <div class="panel" id="xpPanel"></div>
+    </section>
+
+    <!-- TRABALHO -->
+    <section class="view" id="v-trabalho">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Ordem para a equipe</span></div>
+        <div class="composer">
+          <input id="ordemInput" type="text" placeholder="ex: preparar o lançamento da coleção de inverno" autocomplete="off">
+          <button class="btn btn-primary" id="ordemBtn" type="button">Enviar</button>
+        </div>
+        <p class="panel-foot">A gerente quebra a ordem em tarefas concretas e distribui para quem tem a especialidade certa.</p>
+      </div>
+      <div class="panel" id="aprovacoesPanel" hidden></div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Contratos</span><button class="btn btn-mini" id="buscarContratoBtn" type="button">Prospectar</button></div>
+        <div id="contratosList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Plano de trabalho</span><span class="chip" id="backlogChip">0 abertas</span></div>
+        <div id="backlogList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Diário do estúdio</span><button class="btn btn-mini" id="limparLogBtn" type="button">Limpar</button></div>
+        <div class="logbox" id="logList"></div>
+      </div>
+    </section>
+
+    <!-- ENTREGAS -->
+    <section class="view" id="v-entregas">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Encomendar entrega</span></div>
+        <div class="kits" id="kitsList"></div>
+        <p class="panel-foot"><span class="tag tag-real">REAL</span> Tudo aqui vira arquivo de verdade no seu aparelho: HTML que abre no navegador, CSV que importa na planilha, SVG vetorial, Markdown. É seu para usar, editar e vender. <span class="tag tag-sim">SIMULADO</span> Caixa, clientes e reputação são o placar do jogo.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-label">Arquivos</span>
+          <button class="btn btn-mini" id="exportarTudoBtn" type="button">Exportar .zip</button>
+        </div>
+        <div class="segmented" id="filtroArquivos">
+          <button class="is-on" data-classe="todos" type="button">Todos</button>
+          <button data-classe="esboco" type="button">Esboços</button>
+          <button data-classe="prototipo" type="button">Protótipos</button>
+          <button data-classe="candidato" type="button">Candidatos</button>
+          <button data-classe="produto" type="button">Produtos</button>
+        </div>
+        <p class="panel-foot" id="pipelineNota"></p>
+        <div id="filesList"></div>
+      </div>
+    </section>
+
+    <!-- NEGÓCIO -->
+    <section class="view" id="v-negocio">
+      <div class="kpis" id="kpiGrid"></div>
+      <div class="panel" id="caixaPanel"></div>
+      <div class="panel" id="funilPanel"></div>
+      <div class="panel" id="drePanel"></div>
+      <div class="panel" id="decisoesPanel"></div>
+    </section>
+
+    <!-- MOTOR -->
+    <section class="view" id="v-motor">
+      <div class="panel" id="conexaoPanel">
+        <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
+        <div class="field">
+          <label for="apiKeyInput">Chave da Groq</label>
+          <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+          <p class="hint">A chave fica só neste aparelho, no armazenamento do navegador. Pegue uma gratuita em console.groq.com.</p>
+        </div>
+        <div class="field">
+          <label for="modeloDecisaoSel">Modelo de decisão <span class="tag tag-real">barato</span></label>
+          <select id="modeloDecisaoSel"></select>
+        </div>
+        <div class="field">
+          <label for="modeloProducaoSel">Modelo de produção <span class="tag">forte</span></label>
+          <select id="modeloProducaoSel"></select>
+        </div>
+        <div class="field">
+          <label for="ritmoSel">Ritmo do estúdio</label>
+          <select id="ritmoSel">
+            <option value="economico">Econômico — 1 chamada a cada 10 min</option>
+            <option value="normal">Normal — 1 chamada a cada 5 min</option>
+            <option value="intenso">Intenso — 1 chamada a cada 2 min</option>
+          </select>
+          <p class="hint">Define quanta autonomia a equipe tem por hora. Entregas pedidas por você furam a fila e acontecem na hora.</p>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>
+          <button class="btn" id="testarIABtn" type="button">Testar</button>
+          <button class="btn btn-ghost" id="pausarBtn" type="button">Pausar equipe</button>
+        </div>
+        <p class="hint" id="conexaoMsg"></p>
+      </div>
+
+      <div class="panel" id="consumoPanel"></div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Chamadas recentes</span><span class="tag tag-real">REAL</span></div>
+        <div class="calls" id="callsList"></div>
+      </div>
+      <div class="panel" id="empresaCfgPanel"></div>
+      <div class="panel danger-zone">
+        <div class="panel-head"><span class="panel-label">Zona de risco</span></div>
+        <div class="row-actions">
+          <button class="btn btn-danger" id="fecharEstudioBtn" type="button">Fechar este estúdio</button>
+          <button class="btn btn-danger" id="zerarTudoBtn" type="button">Apagar tudo</button>
+        </div>
+        <p class="hint">Fechar apaga um estúdio e seus arquivos. Apagar tudo limpa a base inteira. A chave da API não é removida.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ══ camadas ══ -->
+<div class="sheet-backdrop" id="sheetBackdrop" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <button class="sheet-grip" id="sheetClose" type="button" aria-label="Fechar"></button>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script>
+/* ============================================================
+   CORE — utilidades, estado e persistência.
+   Carregado primeiro; todos os módulos penduram-se em window.S.
+   ============================================================ */
+window.S = window.S || {};
+(function (S) {
+  'use strict';
+
+  /* ---------- DOM ---------- */
+  const $ = (sel, root) => (root || document).querySelector(sel);
+  const $$ = (sel, root) => Array.from((root || document).querySelectorAll(sel));
+  const esc = s => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const uid = p => (p || 'x') + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, Number(v) || 0));
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const slug = s => String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 48) || 'arquivo';
+  const pick = arr => arr[Math.floor(Math.random() * arr.length)];
+
+  S.util = { $, $$, esc, uid, clamp, sleep, slug, pick };
+
+  /* ---------- formatação ---------- */
+  const brl = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 2 });
+  const num = v => Number(v || 0).toLocaleString('pt-BR');
+  const compact = v => {
+    const n = Number(v) || 0;
+    if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(1).replace('.', ',') + 'M';
+    if (Math.abs(n) >= 1000) return (n / 1000).toFixed(1).replace('.', ',') + 'k';
+    return String(Math.round(n));
+  };
+  const pct = (v, casas) => (Number(v) || 0).toFixed(casas == null ? 1 : casas).replace('.', ',') + '%';
+  const dur = ms => {
+    const s = (Number(ms) || 0) / 1000;
+    if (s < 60) return s.toFixed(s < 10 ? 1 : 0) + 's';
+    const m = Math.floor(s / 60);
+    return m < 60 ? m + 'min' : Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+  };
+  const hora = ts => new Date(ts || Date.now()).toTimeString().slice(0, 5);
+  const dataHora = ts => new Date(ts || Date.now())
+    .toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  S.fmt = { brl, num, compact, pct, dur, hora, dataHora };
+
+  /* ---------- barramento de eventos ----------
+     A UI não é redesenhada inteira a cada mudança: cada módulo emite o
+     escopo que mexeu e só os painéis daquele escopo são redesenhados. */
+  const ouvintes = {};
+  S.bus = {
+    on(evt, fn) { (ouvintes[evt] = ouvintes[evt] || []).push(fn); },
+    emit(evt, dado) { (ouvintes[evt] || []).forEach(fn => { try { fn(dado); } catch (e) { console.error(e); } }); }
+  };
+
+  /* ---------- armazenamento ---------- */
+  const CHAVE = 'estudio-db-v2';
+  const CHAVE_ANTIGA = 'empresas-all';
+  let armazenamentoOK = true;
+
+  function lerLocal(k, padrao) {
+    try { const v = localStorage.getItem(k); return v == null ? padrao : JSON.parse(v); }
+    catch (e) { return padrao; }
+  }
+  function gravarLocal(k, v) {
+    try { localStorage.setItem(k, JSON.stringify(v)); return true; }
+    catch (e) { armazenamentoOK = false; return false; }
+  }
+  S.local = {
+    get: (k, p) => { try { return localStorage.getItem(k) ?? p; } catch (e) { return p; } },
+    set: (k, v) => { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } },
+    del: k => { try { localStorage.removeItem(k); } catch (e) {} },
+    json: lerLocal, setJson: gravarLocal,
+    ok: () => armazenamentoOK
+  };
+
+  /* ---------- modelo de dados ---------- */
+  const PALETA = ['#E4703E', '#6FA98A', '#D9A441', '#8FA9C9', '#C08BB0', '#B0876B', '#7FA8A3', '#C9553F'];
+
+  const NIVEIS = [0, 120, 320, 700, 1300, 2200, 3600];
+  function nivelDe(xp) {
+    let n = 1;
+    for (let i = 0; i < NIVEIS.length; i++) if ((xp || 0) >= NIVEIS[i]) n = i + 1;
+    return n;
+  }
+  function progressoNivel(xp) {
+    const n = nivelDe(xp);
+    const base = NIVEIS[n - 1] || 0;
+    const topo = NIVEIS[n] != null ? NIVEIS[n] : base + 1600;
+    return { nivel: n, base, topo, pct: clamp(((xp - base) / (topo - base)) * 100, 0, 100), falta: Math.max(0, topo - xp) };
+  }
+
+  const DB = { estudios: [], atual: null, versao: 2 };
+  S.DB = DB;
+
+  function normalizarEstudio(e) {
+    if (!e || typeof e !== 'object') return null;
+    e.id = e.id || uid('e');
+    e.nome = String(e.nome || 'Estúdio');
+    e.ramo = String(e.ramo || 'serviços criativos');
+    e.missao = String(e.missao || 'Entregar material útil e bem-feito.');
+    e.tom = String(e.tom || 'direto e caloroso');
+    e.publico = String(e.publico || 'pequenos negócios');
+    e.criadoEm = e.criadoEm || Date.now();
+    e.xp = Number(e.xp) || 0;
+    e.equipe = Array.isArray(e.equipe) ? e.equipe : [];
+    e.equipe.forEach((f, i) => {
+      f.id = f.id || 'a' + i;
+      f.nome = String(f.nome || 'Alguém');
+      f.papel = f.papel === 'gerente' ? 'gerente' : 'func';
+      f.cargo = String(f.cargo || 'Generalista');
+      f.especialidade = f.especialidade || 'geral';
+      f.cor = f.cor || PALETA[i % PALETA.length];
+      f.energia = Number.isFinite(f.energia) ? f.energia : 80;
+      f.humor = Number.isFinite(f.humor) ? f.humor : 68;
+      f.entregas = Number(f.entregas) || 0;
+      f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-5) : [];
+      f.uso = f.uso || { chamadas: 0, tokens: 0 };
+    });
+    e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
+    e.contratos = Array.isArray(e.contratos) ? e.contratos : [];
+    e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
+    e.arquivos.forEach(a => {
+      a.classe = ['esboco', 'prototipo', 'candidato', 'produto'].includes(a.classe) ? a.classe : 'esboco';
+      a.versao = Number(a.versao) || 1;
+      a.qualidade = Number.isFinite(a.qualidade) ? a.qualidade : 55;
+      a.linhagem = a.linhagem || slug(a.nome);
+    });
+    e.aprovacoes = Array.isArray(e.aprovacoes) ? e.aprovacoes : [];
+    e.decisoes = Array.isArray(e.decisoes) ? e.decisoes : [];
+    e.log = Array.isArray(e.log) ? e.log.slice(-160) : [];
+    e.uso = e.uso || { chamadas: 0, tokens: 0, entrada: 0, saida: 0, ms: 0 };
+    return e;
+  }
+
+  function carregar() {
+    const bruto = lerLocal(CHAVE, null);
+    if (bruto && Array.isArray(bruto.estudios)) {
+      DB.estudios = bruto.estudios.map(normalizarEstudio).filter(Boolean);
+      DB.atual = bruto.atual || (DB.estudios[0] && DB.estudios[0].id) || null;
+    } else {
+      migrarV1();
+    }
+    if (DB.atual && !DB.estudios.some(e => e.id === DB.atual)) DB.atual = DB.estudios[0] ? DB.estudios[0].id : null;
+    DB.estudios.forEach(e => S.market && S.market.normalizar(e));
+    return DB;
+  }
+
+  /* Migração da base antiga ("empresas-all"): ninguém perde o que já
+     construiu ao trocar de versão. Campos que não existiam ganham padrão. */
+  function migrarV1() {
+    const velho = lerLocal(CHAVE_ANTIGA, null);
+    if (!velho || !Array.isArray(velho.empresas) || !velho.empresas.length) return;
+    DB.estudios = velho.empresas.map(emp => normalizarEstudio({
+      id: emp.id, nome: emp.nome, ramo: emp.ramo, missao: emp.missao, tom: emp.tom,
+      criadoEm: Date.now(), xp: (emp.arquivos || []).length * 12,
+      equipe: (emp.equipe || []).map((f, i) => ({
+        id: f.id, nome: f.nome, papel: f.papel, cargo: f.cargo, cor: f.cor,
+        especialidade: mapearEspecialidade(f.cargo),
+        energia: (f.vitais && f.vitais.energia) || 80,
+        humor: (f.vitais && f.vitais.humor) || 65,
+        memoria: (f.memoria || []).map(m => (typeof m === 'string' ? m : m.texto)).filter(Boolean)
+      })),
+      arquivos: (emp.arquivos || []).map(a => ({
+        id: a.id, nome: a.nome, tipo: a.tipo, conteudo: a.conteudo,
+        classe: a.escopo === 'produto' ? 'produto' : (a.classe === 'candidato-final' ? 'candidato' : (a.classe || 'esboco')),
+        versao: a.versao || 1, autor: a.autor, quando: a.quando, criadoEm: Date.now(),
+        linhagem: a.linhagem, qualidade: 60, kit: 'legado'
+      })),
+      negocio: emp.negocio || null,
+      log: (emp.log || []).slice(-40).map(l => ({ t: Date.now(), texto: l.text || l.texto || '', tag: 'info' }))
+    })).filter(Boolean);
+    DB.atual = velho.atual || (DB.estudios[0] && DB.estudios[0].id) || null;
+    if (DB.estudios.length) {
+      gravar();
+      setTimeout(() => S.ui && S.ui.toast(`${DB.estudios.length} estúdio(s) da versão anterior foram importados.`, 'ok'), 900);
+    }
+  }
+  function mapearEspecialidade(cargo) {
+    const c = String(cargo || '').toLowerCase();
+    if (/cria|design|arte|marca/.test(c)) return 'criacao';
+    if (/opera|produ|tec/.test(c)) return 'producao';
+    if (/atend|vend|comerc|client/.test(c)) return 'comercial';
+    if (/dado|anal|financ/.test(c)) return 'dados';
+    return 'geral';
+  }
+
+  let timerGravacao = null;
+  function gravar() {
+    if (timerGravacao) return;
+    timerGravacao = setTimeout(() => { timerGravacao = null; gravarJa(); }, 700);
+  }
+  function gravarJa() {
+    const ok = gravarLocal(CHAVE, { versao: 2, atual: DB.atual, estudios: DB.estudios });
+    if (!ok) S.bus.emit('storage-falhou');
+    return ok;
+  }
+
+  const atual = () => DB.estudios.find(e => e.id === DB.atual) || null;
+
+  function registrar(texto, tag, agenteId) {
+    const e = atual(); if (!e) return;
+    e.log.push({ t: Date.now(), texto: String(texto), tag: tag || 'info', agente: agenteId || null });
+    if (e.log.length > 160) e.log.splice(0, e.log.length - 160);
+    S.bus.emit('log');
+    gravar();
+  }
+
+  function ganharXP(qtd, motivo) {
+    const e = atual(); if (!e) return;
+    const antes = nivelDe(e.xp);
+    e.xp = Math.max(0, (e.xp || 0) + (Number(qtd) || 0));
+    const depois = nivelDe(e.xp);
+    if (depois > antes) {
+      registrar(`O estúdio subiu para o nível ${depois}. Novos tipos de entrega foram liberados.`, 'ok');
+      S.bus.emit('nivel', depois);
+    }
+    S.bus.emit('estudio');
+    gravar();
+  }
+
+  S.state = {
+    PALETA, carregar, gravar, gravarJa, atual, registrar, ganharXP,
+    nivelDe, progressoNivel, normalizarEstudio, mapearEspecialidade,
+    trocar(id) { DB.atual = id; gravarJa(); S.bus.emit('trocou'); },
+    remover(id) {
+      DB.estudios = DB.estudios.filter(e => e.id !== id);
+      if (DB.atual === id) DB.atual = DB.estudios[0] ? DB.estudios[0].id : null;
+      gravarJa(); S.bus.emit('trocou');
+    },
+    apagarTudo() {
+      DB.estudios = []; DB.atual = null;
+      S.local.del(CHAVE); S.local.del(CHAVE_ANTIGA);
+      gravarJa(); S.bus.emit('trocou');
+    }
+  };
+
+  /* ---------- escritor de ZIP (método "store", sem dependência) ----------
+     Serve para exportar o pacote inteiro de um produto pronto para venda.
+     Sem compressão: o custo é ~0 e qualquer descompactador abre. */
+  const tabelaCRC = (() => {
+    const t = new Uint32Array(256);
+    for (let i = 0; i < 256; i++) {
+      let c = i;
+      for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;
+      t[i] = c >>> 0;
+    }
+    return t;
+  })();
+  function crc32(bytes) {
+    let c = 0xFFFFFFFF;
+    for (let i = 0; i < bytes.length; i++) c = tabelaCRC[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+    return (c ^ 0xFFFFFFFF) >>> 0;
+  }
+  function zip(arquivos) {
+    const cod = new TextEncoder();
+    const partes = [], central = [];
+    let deslocamento = 0;
+    arquivos.forEach(f => {
+      const nome = cod.encode(f.nome);
+      const dados = cod.encode(String(f.conteudo == null ? '' : f.conteudo));
+      const crc = crc32(dados);
+      const local = new DataView(new ArrayBuffer(30));
+      local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true);
+      local.setUint16(6, 0x0800, true); local.setUint16(8, 0, true);
+      local.setUint16(10, 0, true); local.setUint16(12, 0, true);
+      local.setUint32(14, crc, true); local.setUint32(18, dados.length, true);
+      local.setUint32(22, dados.length, true); local.setUint16(26, nome.length, true);
+      local.setUint16(28, 0, true);
+      partes.push(new Uint8Array(local.buffer), nome, dados);
+      const cen = new DataView(new ArrayBuffer(46));
+      cen.setUint32(0, 0x02014b50, true); cen.setUint16(4, 20, true); cen.setUint16(6, 20, true);
+      cen.setUint16(8, 0x0800, true); cen.setUint16(10, 0, true);
+      cen.setUint16(12, 0, true); cen.setUint16(14, 0, true);
+      cen.setUint32(16, crc, true); cen.setUint32(20, dados.length, true);
+      cen.setUint32(24, dados.length, true); cen.setUint16(28, nome.length, true);
+      cen.setUint16(30, 0, true); cen.setUint16(32, 0, true); cen.setUint16(34, 0, true);
+      cen.setUint16(36, 0, true); cen.setUint32(38, 0, true);
+      cen.setUint32(42, deslocamento, true);
+      central.push(new Uint8Array(cen.buffer), nome);
+      deslocamento += 30 + nome.length + dados.length;
+    });
+    const tamCentral = central.reduce((s, p) => s + p.length, 0);
+    const fim = new DataView(new ArrayBuffer(22));
+    fim.setUint32(0, 0x06054b50, true); fim.setUint16(4, 0, true); fim.setUint16(6, 0, true);
+    fim.setUint16(8, arquivos.length, true); fim.setUint16(10, arquivos.length, true);
+    fim.setUint32(12, tamCentral, true); fim.setUint32(16, deslocamento, true);
+    fim.setUint16(20, 0, true);
+    return new Blob([...partes, ...central, new Uint8Array(fim.buffer)], { type: 'application/zip' });
+  }
+  function baixarBlob(blob, nome) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = nome;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 3000);
+  }
+  S.arquivo = { zip, baixarBlob, crc32 };
+
+})(window.S);
+
+</script>
+<script>
+/* ============================================================
+   IA — única porta de saída para a Groq.
+   Princípio do projeto: economia de tokens. Toda chamada tem teto,
+   contexto enxuto e formato de resposta fixo em linhas CHAVE: valor,
+   que modelos pequenos acertam muito mais que JSON.
+   ============================================================ */
+(function (S) {
+  'use strict';
+  const { clamp, sleep } = S.util;
+
+  const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+  const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
+  const K_CFG = 'estudio-ia-cfg';
+  const K_USO = 'groq-usage-v1';
+
+  const MODELOS = [
+    { id: 'llama-3.1-8b-instant', nome: 'Llama 3.1 8B · instantâneo', nota: 'O mais barato. Bom para decisões curtas.' },
+    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · rápido', nota: 'Equilíbrio entre custo e texto decente.' },
+    { id: 'llama-3.3-70b-versatile', nome: 'Llama 3.3 70B · versátil', nota: 'Escreve bem, custa mais por chamada.' },
+    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · forte', nota: 'Melhor redação. Reserve para produção.' }
+  ];
+
+  const RITMOS = {
+    economico: { intervalo: 10 * 60 * 1000, rotulo: 'econômico' },
+    normal:    { intervalo: 5 * 60 * 1000,  rotulo: 'normal' },
+    intenso:   { intervalo: 2 * 60 * 1000,  rotulo: 'intenso' }
+  };
+
+  const REF_DIARIA = { requisicoes: 1000, tokens: 200000 };
+
+  const cfg = Object.assign(
+    { decisao: 'llama-3.1-8b-instant', producao: 'openai/gpt-oss-20b', ritmo: 'normal' },
+    S.local.json(K_CFG, {})
+  );
+  let chave = S.local.get(K_CHAVE, '') || '';
+
+  let uso = Object.assign(
+    { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} },
+    S.local.json(K_USO, {})
+  );
+  function usoHoje() {
+    const d = new Date().toISOString().slice(0, 10);
+    if (uso.dia !== d) {
+      uso = { dia: d, requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} };
+      salvarUso();
+    }
+    return uso;
+  }
+  function salvarUso() { S.local.setJson(K_USO, uso); }
+
+  /* ---------- estado do motor ---------- */
+  const estado = {
+    situacao: 'off',      // off | pronta | ocupada | erro
+    mensagem: 'IA desligada',
+    detalhe: '',
+    pausado: false,
+    emVoo: 0,
+    bloqueadaAte: 0,
+    falhas: 0,
+    ultimaAutonoma: 0,
+    chamadas: []          // histórico curto para a aba Motor
+  };
+
+  function situar(situacao, mensagem, detalhe) {
+    estado.situacao = situacao;
+    estado.mensagem = mensagem;
+    if (detalhe !== undefined) estado.detalhe = detalhe;
+    S.bus.emit('ia');
+  }
+
+  function pronta() { return Boolean(chave) && !estado.pausado; }
+  function disponivel() {
+    return pronta() && Date.now() >= estado.bloqueadaAte && estado.emVoo === 0;
+  }
+  /* A autonomia da equipe é limitada pelo ritmo escolhido. Pedidos feitos
+     pelo usuário não passam por aqui — eles têm prioridade. */
+  function reservarAutonomia() {
+    const intervalo = (RITMOS[cfg.ritmo] || RITMOS.normal).intervalo;
+    if (Date.now() - estado.ultimaAutonoma < intervalo) return false;
+    estado.ultimaAutonoma = Date.now();
+    return true;
+  }
+  function faltaParaAutonomia() {
+    const intervalo = (RITMOS[cfg.ritmo] || RITMOS.normal).intervalo;
+    return Math.max(0, intervalo - (Date.now() - estado.ultimaAutonoma));
+  }
+
+  /* ---------- cota real, lida dos headers da resposta ---------- */
+  function msDeHeader(v) {
+    const s = String(v || '').trim(); if (!s) return null;
+    let total = 0, achou = false;
+    const re = /(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/gi; let m;
+    while ((m = re.exec(s))) {
+      achou = true;
+      const n = Number(m[1]), u = m[2].toLowerCase();
+      total += u === 'ms' ? n : u === 's' ? n * 1e3 : u === 'm' ? n * 6e4 : u === 'h' ? n * 36e5 : n * 864e5;
+    }
+    if (achou) return Math.max(0, total);
+    const n = Number(s.replace(',', '.'));
+    return Number.isFinite(n) ? n * 1000 : null;
+  }
+  function lerHeaders(resp) {
+    const h = n => resp.headers.get(n);
+    const q = usoHoje();
+    q.headers = {
+      limiteReq: Number(h('x-ratelimit-limit-requests')) || null,
+      restaReq: Number(h('x-ratelimit-remaining-requests')),
+      resetReq: msDeHeader(h('x-ratelimit-reset-requests')),
+      limiteTok: Number(h('x-ratelimit-limit-tokens')) || null,
+      restaTok: Number(h('x-ratelimit-remaining-tokens')),
+      resetTok: msDeHeader(h('x-ratelimit-reset-tokens')),
+      retryAfter: h('retry-after') || null,
+      em: Date.now()
+    };
+    if (!Number.isFinite(q.headers.restaReq)) q.headers.restaReq = null;
+    if (!Number.isFinite(q.headers.restaTok)) q.headers.restaTok = null;
+    salvarUso();
+  }
+  function contabilizar(modelo, dados, ms) {
+    const q = usoHoje();
+    const u = (dados && dados.usage) || {};
+    q.requisicoes += 1;
+    q.entrada += Number(u.prompt_tokens || 0);
+    q.saida += Number(u.completion_tokens || 0);
+    q.tokens += Number(u.total_tokens || (u.prompt_tokens || 0) + (u.completion_tokens || 0));
+    const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0 };
+    m.requisicoes += 1; m.tokens += Number(u.total_tokens || 0);
+    q.ultimoModelo = modelo;
+    salvarUso();
+
+    const e = S.state.atual();
+    if (e) {
+      e.uso.chamadas += 1;
+      e.uso.ms += ms || 0;
+      e.uso.tokens += Number(u.total_tokens || 0);
+      e.uso.entrada += Number(u.prompt_tokens || 0);
+      e.uso.saida += Number(u.completion_tokens || 0);
+      S.state.gravar();
+    }
+  }
+
+  function registrarChamada(reg) {
+    estado.chamadas.unshift(reg);
+    if (estado.chamadas.length > 24) estado.chamadas.pop();
+    S.bus.emit('ia');
+  }
+
+  /* ---------- chamada ---------- */
+  async function chamar(op) {
+    const { sistema, pedido, agente, motivo } = op;
+    const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
+    if (!chave) throw new Error('Nenhuma chave da Groq configurada.');
+    if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
+    if (Date.now() < estado.bloqueadaAte && !op.forcar) {
+      throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
+    }
+    const q = usoHoje();
+    if (q.requisicoes >= REF_DIARIA.requisicoes) throw new Error('Referência diária local de requisições atingida.');
+
+    const modelo = tipo === 'conteudo' ? cfg.producao : cfg.decisao;
+    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1400 : 320), 120, tipo === 'conteudo' ? 3000 : 900);
+    // GPT-OSS na Groq responde melhor com tudo no papel "user".
+    const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
+
+    estado.emVoo++;
+    situar('ocupada', 'IA trabalhando', `${modelo} · ${motivo || 'chamada'}`);
+    const inicio = Date.now();
+    try {
+      const resp = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave },
+        body: JSON.stringify({
+          model: modelo, messages: mensagens,
+          max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.6 : 0.3,
+          stream: false, reasoning_effort: 'low'
+        })
+      });
+      let dados = null;
+      try { dados = await resp.json(); } catch (e) {}
+      lerHeaders(resp);
+      const ms = Date.now() - inicio;
+      if (dados && dados.usage) contabilizar(modelo, dados, ms);
+
+      if (!resp.ok) {
+        const msg = (dados && dados.error && dados.error.message) || `A Groq respondeu HTTP ${resp.status}.`;
+        if (resp.status === 401) throw new Error('Chave da Groq inválida ou expirada.');
+        if (resp.status === 429) throw new Error('Limite da Groq atingido. Aguarde alguns instantes.');
+        throw new Error(msg);
+      }
+      const escolha = (dados.choices || [])[0] || {};
+      const texto = String((escolha.message && escolha.message.content) || escolha.text || '').trim();
+      if (!texto) throw new Error(`A Groq não devolveu texto (finish_reason=${escolha.finish_reason || '?'}).`);
+
+      estado.falhas = 0; estado.bloqueadaAte = 0;
+      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms, ok: true, tokens: (dados.usage || {}).total_tokens || 0, em: Date.now() });
+      situar('pronta', 'IA pronta', `respondeu em ${(ms / 1000).toFixed(1)}s`);
+      return { texto, usage: dados.usage || {}, ms, modelo };
+    } catch (err) {
+      const msg = String(err && err.message || err);
+      estado.falhas++;
+      estado.bloqueadaAte = Date.now() + (/429|Limite/i.test(msg) ? 45000 : /401|inválida/i.test(msg) ? 90000 : Math.min(40000, 6000 * estado.falhas));
+      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms: Date.now() - inicio, ok: false, erro: msg, em: Date.now() });
+      situar('erro', 'Falha na IA', msg);
+      throw err;
+    } finally {
+      estado.emVoo = Math.max(0, estado.emVoo - 1);
+      S.bus.emit('ia');
+    }
+  }
+
+  /* ---------- leitura de resposta em linhas CHAVE: valor ---------- */
+  function campos(texto) {
+    const saida = {};
+    String(texto || '').replace(/```[a-z]*|```/gi, '').split(/\n+/).forEach(linha => {
+      const m = linha.match(/^\s*[-*]?\s*([A-Za-zÀ-ú0-9_ ]{2,28}?)\s*[:=]\s*([\s\S]+)$/);
+      if (!m) return;
+      const k = m[1].trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_');
+      let v = m[2].trim().replace(/^["'<]+|["'>]+$/g, '').trim();
+      const b = v.toLowerCase();
+      if (b === 'sim' || b === 'true') v = true;
+      else if (b === 'nao' || b === 'não' || b === 'false') v = false;
+      saida[k] = v;
+    });
+    return saida;
+  }
+  /* Conteúdo longo não vem em campos: vem depois de uma linha "---". */
+  function corpo(texto) {
+    const t = String(texto || '').replace(/```[a-z]*|```/gi, '');
+    const corte = t.indexOf('\n---');
+    return corte >= 0 ? t.slice(corte + 4).replace(/^\n+/, '').trim() : '';
+  }
+
+  async function perguntar(op) {
+    try {
+      const r = await chamar(op);
+      return { campos: campos(r.texto), corpo: corpo(r.texto), texto: r.texto };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function testar() {
+    if (!chave) throw new Error('Informe a chave antes de testar.');
+    const r = await chamar({
+      sistema: 'Responda exatamente com a linha abaixo, sem mais nada.',
+      pedido: 'STATUS: ok', tokens: 60, motivo: 'teste de conexão', forcar: true, agente: 'você'
+    });
+    return r.texto.slice(0, 80);
+  }
+
+  /* novaChave === undefined significa "mantenha a que já está salva".
+     String vazia significa "remova". Sem essa distinção, salvar só para
+     trocar o ritmo apagaria a chave do usuário. */
+  function salvarCfg(novaChave, decisao, producao, ritmo) {
+    if (novaChave !== undefined) {
+      const k = String(novaChave).trim();
+      if (k && !/^gsk_[A-Za-z0-9_-]{10,}$/.test(k)) throw new Error('A chave da Groq começa com gsk_ e é bem mais longa. Confira o que foi colado.');
+      chave = k;
+    }
+    if (MODELOS.some(m => m.id === decisao)) cfg.decisao = decisao;
+    if (MODELOS.some(m => m.id === producao)) cfg.producao = producao;
+    if (RITMOS[ritmo]) cfg.ritmo = ritmo;
+    if (chave) S.local.set(K_CHAVE, chave); else S.local.del(K_CHAVE);
+    S.local.setJson(K_CFG, cfg);
+    estado.bloqueadaAte = 0; estado.falhas = 0;
+    situar(chave ? 'pronta' : 'off', chave ? 'IA pronta' : 'IA desligada', chave ? 'configuração salva' : 'sem chave');
+  }
+
+  function orcamento() {
+    const q = usoHoje();
+    return {
+      requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
+      pctTokens: clamp((q.tokens / REF_DIARIA.tokens) * 100, 0, 100),
+      pctReq: clamp((q.requisicoes / REF_DIARIA.requisicoes) * 100, 0, 100),
+      ref: REF_DIARIA, headers: q.headers, porModelo: q.porModelo
+    };
+  }
+
+  S.ai = {
+    MODELOS, RITMOS, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
+    orcamento, pronta, disponivel, reservarAutonomia, faltaParaAutonomia, msDeHeader,
+    temChave: () => Boolean(chave),
+    chaveMascarada: () => (chave ? chave.slice(0, 7) + '••••••' + chave.slice(-4) : ''),
+    pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave ? 'IA pronta' : 'IA desligada')); },
+    iniciar() { if (chave) situar('pronta', 'IA pronta', 'chave carregada deste aparelho'); }
+  };
+  void sleep;
+})(window.S);
+
+</script>
+<script>
+/* ============================================================
+   MERCADO — economia causal.
+   Nenhuma venda, visita ou seguidor é sorteado nem inventado pela IA.
+   Tudo sai de causas verificáveis: tempo de operação, composição real
+   do portfólio publicado, qualidade aferida dos arquivos, capacidade
+   da equipe e custos. Os parâmetros abaixo são hipóteses explícitas.
+   ============================================================ */
+(function (S) {
+  'use strict';
+  const { clamp } = S.util;
+
+  const ECON = {
+    capitalInicial: 8000,
+    minutosPorSegundo: 1,          // 1 s real = 1 min de negócio → 1 dia = 24 min
+    custoFixoHora: 2.2,
+    salarioHora: { gerente: 16, criacao: 14, producao: 13, comercial: 12, dados: 14, geral: 11 },
+    expediente: [8, 18],
+    perfis: {
+      software:  { preco: 59,  custo: 7,  capacidadeDia: 18 },
+      ecommerce: { preco: 149, custo: 68, capacidadeDia: 7 },
+      servico:   { preco: 380, custo: 78, capacidadeDia: 2.5 },
+      conteudo:  { preco: 89,  custo: 16, capacidadeDia: 11 },
+      produto:   { preco: 120, custo: 51, capacidadeDia: 8 },
+      padrao:    { preco: 150, custo: 62, capacidadeDia: 5 }
+    }
+  };
+
+  /* Cada tipo de entrega publicado mexe em um fator diferente do funil.
+     É por isso que o portfólio importa: só páginas não vendem, só anúncios
+     não convertem. A composição é lida dos arquivos, não de palavras soltas. */
+  const EFEITO_KIT = {
+    landing:    { alcance: 1.4, conversao: 0.30, reputacao: 0.6 },
+    anuncios:   { alcance: 2.2, conversao: 0.10, reputacao: 0.2 },
+    artigo:     { alcance: 1.6, conversao: 0.08, reputacao: 0.5 },
+    emails:     { alcance: 0.5, conversao: 0.34, reputacao: 0.3 },
+    catalogo:   { alcance: 0.4, conversao: 0.40, reputacao: 0.3 },
+    marca:      { alcance: 0.6, conversao: 0.14, reputacao: 1.2 },
+    proposta:   { alcance: 0.2, conversao: 0.44, reputacao: 0.4 },
+    calendario: { alcance: 1.1, conversao: 0.06, reputacao: 0.2 },
+    legado:     { alcance: 0.6, conversao: 0.10, reputacao: 0.2 }
+  };
+
+  function perfil(e) {
+    const t = `${e && e.ramo || ''} ${e && e.missao || ''}`.toLowerCase();
+    if (/software|saas|app|aplicativo|sistema|plataforma|tecnolog|automa/.test(t)) return Object.assign({ tipo: 'software' }, ECON.perfis.software);
+    if (/loja|roupa|moda|comérc|comerc|e-?commerce|artesan|acess[óo]rio|joalh/.test(t)) return Object.assign({ tipo: 'ecommerce' }, ECON.perfis.ecommerce);
+    if (/consult|ag[êe]ncia|marketing|design|advoc|contab|arquitet|serviç|servic|manuten/.test(t)) return Object.assign({ tipo: 'servico' }, ECON.perfis.servico);
+    if (/curso|livro|conte[úu]do|m[íi]dia|newsletter|edit|jornal/.test(t)) return Object.assign({ tipo: 'conteudo' }, ECON.perfis.conteudo);
+    if (/f[áa]brica|produ[çc][ãa]o|aliment|comida|cosm[ée]t|m[óo]vel|marcenaria|fundi/.test(t)) return Object.assign({ tipo: 'produto' }, ECON.perfis.produto);
+    return Object.assign({ tipo: 'padrao' }, ECON.perfis.padrao);
+  }
+
+  function normalizar(e) {
+    if (!e) return null;
+    const p = perfil(e);
+    if (!e.negocio || typeof e.negocio !== 'object') {
+      e.negocio = {
+        inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
+        capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
+        receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+        pedidos: 0, clientes: 0, visitas: 0, leads: 0,
+        preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
+        reputacao: 46, qualidade: 0, historico: []
+      };
+    }
+    const n = e.negocio;
+    const padroes = {
+      inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
+      capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
+      receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+      pedidos: 0, clientes: 0, visitas: 0, leads: 0,
+      preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
+      reputacao: 46, qualidade: 0
+    };
+    Object.keys(padroes).forEach(k => { if (!Number.isFinite(n[k])) n[k] = padroes[k]; });
+    if (!Array.isArray(n.historico)) n.historico = [];
+    // compatibilidade com a base antiga, que só tinha "receita" e "custos"
+    if (Number.isFinite(e.negocio.receita) && !n.receitaMercado) n.receitaMercado = e.negocio.receita;
+    return n;
+  }
+
+  /* Presença de mercado: lida do portfólio publicado + qualidade aferida. */
+  function presenca(e) {
+    const publicados = (e.arquivos || []).filter(a => a.classe === 'produto');
+    if (!publicados.length) return { oferta: false, alcance: 0, conversao: 0, reputacao: 0, qualidade: 0, kits: [] };
+    let alcance = 0, conversao = 0, reput = 0;
+    const kits = [];
+    const jaContado = {};
+    publicados.forEach(a => {
+      const ef = EFEITO_KIT[a.kit] || EFEITO_KIT.legado;
+      // O segundo arquivo do mesmo tipo rende metade; o terceiro, um quarto.
+      const rep = jaContado[a.kit] = (jaContado[a.kit] || 0) + 1;
+      const decaimento = 1 / rep;
+      const fq = clamp(a.qualidade, 20, 100) / 100;
+      alcance += ef.alcance * decaimento * fq;
+      conversao += ef.conversao * decaimento * fq;
+      reput += ef.reputacao * decaimento * fq;
+      if (kits.indexOf(a.kit) < 0) kits.push(a.kit);
+    });
+    const media = publicados.reduce((s, a) => s + clamp(a.qualidade, 0, 100), 0) / publicados.length;
+    return { oferta: true, alcance, conversao, reputacao: reput, qualidade: media, kits, itens: publicados.length };
+  }
+
+  function folhaPorHora(e) {
+    return (e.equipe || []).reduce((soma, f) => {
+      const chave = f.papel === 'gerente' ? 'gerente' : (f.especialidade || 'geral');
+      return soma + (ECON.salarioHora[chave] || ECON.salarioHora.geral);
+    }, 0);
+  }
+
+  /* Avança o relógio do negócio e apura o período. Retorna true se mudou algo. */
+  function tick(e) {
+    const n = normalizar(e); if (!n) return false;
+    const agora = Date.now();
+    const dt = clamp(agora - (n.ultimaApuracao || agora), 0, 5 * 60 * 1000);
+    if (dt < 900) return false;
+    n.ultimaApuracao = agora;
+
+    const minutosAntes = n.minutos;
+    const horasNegocio = dt / 1000 / 60;         // 60 s reais = 1 h de negócio
+    n.minutos = minutosAntes + horasNegocio * 60;
+
+    const p = presenca(e);
+    n.qualidade = p.qualidade;
+    let mudou = false;
+
+    if (p.oferta) {
+      const fatorReputacao = 0.7 + n.reputacao / 200;
+      const visitasHora = p.alcance * 1.8 * fatorReputacao;
+      const visitasNovas = Math.floor(horasNegocio * visitasHora);
+      if (visitasNovas > 0) { n.visitas += visitasNovas; mudou = true; }
+
+      const taxaLead = clamp(0.010 + p.conversao * 0.045, 0.004, 0.09);
+      const leadsNovos = Math.floor(visitasNovas * taxaLead);
+      n.leads += leadsNovos;
+
+      const fechamento = clamp(0.10 + p.conversao * 0.14 + (n.qualidade / 100) * 0.08, 0.05, 0.38);
+      const demanda = Math.floor(leadsNovos * fechamento);
+      const capacidade = Math.floor(horasNegocio * (n.capacidadeDia / 24));
+      const pedidos = Math.max(0, Math.min(capacidade, demanda));
+      if (pedidos > 0) {
+        n.pedidos += pedidos; n.clientes += pedidos;
+        const receita = pedidos * n.preco;
+        const custo = pedidos * n.custoUnitario;
+        n.receitaMercado += receita; n.custoDireto += custo;
+        n.caixa += receita - custo;
+        n.reputacao = clamp(n.reputacao + pedidos * 0.09, 0, 92);
+        S.state.registrar(`Mercado: ${pedidos} pedido(s) fechado(s) a partir de ${leadsNovos} lead(s) novo(s).`, 'ok');
+        mudou = true;
+      }
+    }
+
+    /* Folha e custo fixo só correm dentro do expediente simulado. */
+    let horasExpediente = 0;
+    const passos = Math.max(1, Math.min(720, Math.ceil(horasNegocio * 4)));
+    for (let i = 0; i < passos; i++) {
+      const minuto = minutosAntes + (i * horasNegocio * 60) / passos;
+      const h = ((minuto / 60) % 24 + 24) % 24;
+      if (h >= ECON.expediente[0] && h < ECON.expediente[1]) horasExpediente += horasNegocio / passos;
+    }
+    const opex = (ECON.custoFixoHora + folhaPorHora(e)) * horasExpediente;
+    if (opex > 0) { n.despesaOperacional += opex; n.caixa -= opex; mudou = true; }
+
+    /* Amostra do caixa para o gráfico — no máximo uma a cada 30 s. */
+    const ultima = n.historico[n.historico.length - 1];
+    if (!ultima || agora - ultima.t > 30000) {
+      n.historico.push({ t: agora, caixa: Math.round(n.caixa), receita: Math.round(n.receitaMercado + n.receitaContratos) });
+      if (n.historico.length > 60) n.historico.shift();
+    }
+    return mudou;
+  }
+
+  function relogio(e) {
+    const n = normalizar(e); if (!n) return { dia: 1, hora: '08:00' };
+    const min = Math.floor(n.minutos);
+    return {
+      dia: Math.floor(min / 1440) + 1,
+      hora: String(Math.floor((min % 1440) / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0'),
+      expediente: (() => { const h = Math.floor((min % 1440) / 60); return h >= ECON.expediente[0] && h < ECON.expediente[1]; })()
+    };
+  }
+
+  function creditar(e, valor, motivo) {
+    const n = normalizar(e); if (!n) return;
+    n.receitaContratos += Number(valor) || 0;
+    n.caixa += Number(valor) || 0;
+    S.state.registrar(`Recebido ${S.fmt.brl(valor)} — ${motivo}.`, 'ok');
+    S.bus.emit('negocio');
+  }
+  function debitar(e, valor, motivo) {
+    const n = normalizar(e); if (!n) return false;
+    if (n.caixa < valor) return false;
+    n.despesaOperacional += Number(valor) || 0;
+    n.caixa -= Number(valor) || 0;
+    S.state.registrar(`Pago ${S.fmt.brl(valor)} — ${motivo}.`, 'info');
+    S.bus.emit('negocio');
+    return true;
+  }
+
+  function indicadores(e) {
+    const n = normalizar(e); if (!n) return null;
+    const receita = n.receitaMercado + n.receitaContratos;
+    const lucroBruto = receita - n.custoDireto;
+    const lucroOperacional = lucroBruto - n.despesaOperacional;
+    const horas = Math.max(1, (n.minutos - 8 * 60) / 60);
+    const burnMes = (n.despesaOperacional / horas) * 730;
+    const p = presenca(e);
+    return {
+      caixa: n.caixa, receita, receitaMercado: n.receitaMercado, receitaContratos: n.receitaContratos,
+      custoDireto: n.custoDireto, opex: n.despesaOperacional,
+      lucroBruto, lucroOperacional,
+      margemBruta: receita > 0 ? (lucroBruto / receita) * 100 : 0,
+      margemOperacional: receita > 0 ? (lucroOperacional / receita) * 100 : 0,
+      ticket: n.pedidos > 0 ? n.receitaMercado / n.pedidos : 0,
+      pedidos: Math.floor(n.pedidos), clientes: Math.floor(n.clientes),
+      visitas: Math.floor(n.visitas), leads: Math.floor(n.leads),
+      convVisitaLead: n.visitas > 0 ? (n.leads / n.visitas) * 100 : 0,
+      convLeadPedido: n.leads > 0 ? (n.pedidos / n.leads) * 100 : 0,
+      convTotal: n.visitas > 0 ? (n.pedidos / n.visitas) * 100 : 0,
+      reputacao: n.reputacao, qualidade: n.qualidade,
+      burnMes, runway: burnMes > 0 ? n.caixa / burnMes : Infinity,
+      folhaHora: folhaPorHora(e), presenca: p,
+      historico: n.historico
+    };
+  }
+
+  S.market = { ECON, EFEITO_KIT, perfil, normalizar, presenca, tick, relogio, creditar, debitar, indicadores, folhaPorHora };
+})(window.S);
+
+</script>
+<script>
+/* ============================================================
+   FÁBRICA — onde nasce o produto de verdade.
+
+   Decisão central do projeto: o modelo NÃO escreve o arquivo inteiro.
+   Ele escreve só o miolo (títulos, benefícios, textos curtos) em linhas
+   CHAVE: valor, e o navegador monta o arquivo final com um gabarito
+   determinístico. Ganhos: 5x menos tokens, nada de resposta truncada,
+   HTML/CSV sempre válidos e um padrão visual estável entre entregas.
+   ============================================================ */
+(function (S) {
+  'use strict';
+  const { esc, slug, clamp, pick } = S.util;
+
+  /* ---------- cor: utilidades para o kit de marca ---------- */
+  const CORES_NOMEADAS = {
+    vermelho: '#C9412F', laranja: '#E4703E', amarelo: '#D9A441', dourado: '#C9A227',
+    verde: '#5C9C74', esmeralda: '#3F8F6E', azul: '#3A6EA5', 'azul-marinho': '#25405E',
+    roxo: '#7A5AA8', violeta: '#8A63B5', rosa: '#C4667F', vinho: '#7E2B3A',
+    preto: '#1A1D1F', cinza: '#5C6467', bege: '#C7B299', marrom: '#7A5B44', terracota: '#B45B3E'
+  };
+  function corDeTexto(txt, alternativa) {
+    const t = String(txt || '').toLowerCase().trim();
+    const hex = t.match(/#([0-9a-f]{6}|[0-9a-f]{3})\b/i);
+    if (hex) return normalizarHex(hex[0]);
+    for (const nome in CORES_NOMEADAS) if (t.indexOf(nome) >= 0) return CORES_NOMEADAS[nome];
+    return alternativa || '#3A6EA5';
+  }
+  function normalizarHex(h) {
+    let s = String(h).replace('#', '');
+    if (s.length === 3) s = s.split('').map(c => c + c).join('');
+    return '#' + s.slice(0, 6).toUpperCase();
+  }
+  function paraHSL(hex) {
+    const n = parseInt(normalizarHex(hex).slice(1), 16);
+    const r = ((n >> 16) & 255) / 255, g = ((n >> 8) & 255) / 255, b = (n & 255) / 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0; const l = (max + min) / 2, d = max - min;
+    const s = d === 0 ? 0 : d / (1 - Math.abs(2 * l - 1));
+    if (d !== 0) {
+      if (max === r) h = ((g - b) / d) % 6;
+      else if (max === g) h = (b - r) / d + 2;
+      else h = (r - g) / d + 4;
+      h *= 60; if (h < 0) h += 360;
+    }
+    return { h, s, l };
+  }
+  function deHSL(h, s, l) {
+    h = ((h % 360) + 360) % 360; s = clamp(s, 0, 1); l = clamp(l, 0, 1);
+    const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+    let r = 0, g = 0, b = 0;
+    if (h < 60) { r = c; g = x; } else if (h < 120) { r = x; g = c; }
+    else if (h < 180) { g = c; b = x; } else if (h < 240) { g = x; b = c; }
+    else if (h < 300) { r = x; b = c; } else { r = c; b = x; }
+    const hx = v => Math.round((v + m) * 255).toString(16).padStart(2, '0');
+    return ('#' + hx(r) + hx(g) + hx(b)).toUpperCase();
+  }
+  function paleta(base) {
+    const { h, s, l } = paraHSL(base);
+    return {
+      primaria: normalizarHex(base),
+      escura: deHSL(h, Math.min(1, s * 1.05), Math.max(0.14, l - 0.24)),
+      clara: deHSL(h, Math.max(0.12, s * 0.5), Math.min(0.95, l + 0.34)),
+      acento: deHSL(h + 152, Math.min(1, s * 0.92), clamp(l + 0.04, 0.32, 0.62)),
+      tinta: '#16191B',
+      papel: deHSL(h, 0.16, 0.975)
+    };
+  }
+
+  /* ---------- helpers de texto ---------- */
+  const limpa = v => String(v == null ? '' : v).replace(/\s+/g, ' ').replace(/^["'\s]+|["'\s]+$/g, '').trim();
+  const temPlaceholder = v => /<[^>]{2,}>|lorem ipsum|xxx+|\[.*?\]|preencher|exemplo de texto/i.test(String(v || ''));
+  const linhasDe = txt => String(txt || '').split(/\n/).map(l => l.trim()).filter(l => l && !/^-{3,}$/.test(l));
+  const csvCampo = v => {
+    const s = String(v == null ? '' : v).replace(/"/g, '""');
+    return /[",;\n]/.test(s) ? `"${s}"` : s;
+  };
+  const csv = linhas => linhas.map(l => l.map(csvCampo).join(',')).join('\r\n') + '\r\n';
+  const iniciais = nome => String(nome || 'E').replace(/[^\p{L}\s]/gu, ' ').trim().split(/\s+/)
+    .filter(p => p.length > 2 || /^[A-ZÀ-Ú]/.test(p)).slice(0, 2).map(p => p[0].toUpperCase()).join('') || 'E';
+
+  /* ============================================================
+     Gabarito da página HTML — usado por landing e proposta.
+     Um só lugar cuida do CSS, então toda página sai com o mesmo padrão.
+     ============================================================ */
+  function paginaHTML(o) {
+    const p = o.paleta;
+    return `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(o.tituloAba)}</title>
+<meta name="description" content="${esc(o.descricao)}">
+<style>
+*{box-sizing:border-box}
+:root{--p:${p.primaria};--pd:${p.escura};--pl:${p.clara};--ac:${p.acento};--ink:${p.tinta};--paper:${p.papel}}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--ink);background:var(--paper);line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:940px;margin:0 auto;padding:0 22px}
+header.top{padding:22px 0;display:flex;align-items:center;gap:12px}
+.logo{width:38px;height:38px;border-radius:11px;background:var(--p);color:#fff;display:grid;place-items:center;
+  font-weight:800;letter-spacing:-.02em;font-size:15px}
+.marca{font-weight:700;letter-spacing:-.01em}
+.hero{padding:56px 0 60px;border-bottom:1px solid rgba(0,0,0,.07)}
+.eyebrow{display:inline-block;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--pd);background:var(--pl);padding:6px 12px;border-radius:99px;font-weight:700}
+h1{font-size:clamp(30px,6vw,50px);line-height:1.08;letter-spacing:-.03em;margin:20px 0 14px;max-width:16ch}
+.lead{font-size:clamp(17px,2.4vw,21px);color:#4a5257;max-width:56ch;margin:0}
+.cta{display:inline-block;margin-top:28px;background:var(--p);color:#fff;text-decoration:none;
+  padding:15px 28px;border-radius:12px;font-weight:700;font-size:16px}
+.cta:hover{background:var(--pd)}
+.cta-nota{font-size:13px;color:#6b7378;margin-top:10px}
+section{padding:52px 0;border-bottom:1px solid rgba(0,0,0,.07)}
+h2{font-size:clamp(21px,3.4vw,29px);letter-spacing:-.02em;margin:0 0 26px}
+.cards{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+.card{background:#fff;border:1px solid rgba(0,0,0,.08);border-radius:16px;padding:22px}
+.card h3{margin:0 0 8px;font-size:17px;letter-spacing:-.01em}
+.card p{margin:0;color:#4a5257;font-size:15px}
+.num{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;
+  background:var(--pl);color:var(--pd);font-weight:800;font-size:13px;margin-bottom:12px}
+.oferta{background:var(--ink);color:#fff;border-radius:20px;padding:38px 30px;text-align:center}
+.oferta h2{color:#fff;margin-bottom:12px}
+.oferta p{color:#c9cfd2;max-width:52ch;margin:0 auto}
+.oferta .cta{background:var(--ac);color:var(--ink)}
+.faq dt{font-weight:700;margin-top:22px}
+.faq dd{margin:6px 0 0;color:#4a5257}
+table.escopo{width:100%;border-collapse:collapse;font-size:15px}
+table.escopo th,table.escopo td{text-align:left;padding:12px 10px;border-bottom:1px solid rgba(0,0,0,.08)}
+table.escopo th{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:#6b7378}
+table.escopo td.v{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+footer{padding:34px 0 56px;color:#6b7378;font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top"><div class="logo">${esc(o.iniciais)}</div><div class="marca">${esc(o.marca)}</div></header>
+</div>
+${o.corpo}
+<div class="wrap"><footer>© ${new Date().getFullYear()} ${esc(o.marca)}. ${esc(o.rodape || '')}</footer></div>
+</body>
+</html>`;
+  }
+
+  /* ============================================================
+     CATÁLOGO DE ENTREGAS
+     ============================================================ */
+  const KITS = [
+    /* ---------------- página de vendas ---------------- */
+    {
+      id: 'landing', nome: 'Página de vendas', ext: 'html', nivel: 1, especialidade: 'criacao',
+      desc: 'Página única, responsiva e pronta para subir em qualquer hospedagem.',
+      vende: 'É um site completo em um arquivo. Dá para hospedar, entregar ao cliente ou vender como template.',
+      tokens: 620,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva o texto de uma página de vendas em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+Responda SOMENTE nestas linhas, sem markdown, sem comentários, uma linha por campo:
+CHAPEU: <2 a 4 palavras>
+TITULO: <promessa principal, até 10 palavras>
+SUBTITULO: <1 frase de até 25 palavras>
+CTA: <texto do botão, até 4 palavras>
+B1T: <benefício 1, até 4 palavras>
+B1D: <explicação do benefício 1, até 20 palavras>
+B2T: <benefício 2, até 4 palavras>
+B2D: <explicação do benefício 2, até 20 palavras>
+B3T: <benefício 3, até 4 palavras>
+B3D: <explicação do benefício 3, até 20 palavras>
+OFERTA: <frase de fechamento, até 25 palavras>
+FAQ1P: <pergunta comum do cliente>
+FAQ1R: <resposta, até 25 palavras>
+FAQ2P: <outra pergunta comum>
+FAQ2R: <resposta, até 25 palavras>
+COR: <uma cor que combine com a marca, em hexadecimal>`;
+      },
+      obrigatorios: ['titulo', 'subtitulo', 'cta', 'b1t', 'b1d', 'b2t', 'b2d', 'b3t', 'b3d', 'oferta'],
+      montar(c, ctx) {
+        const pal = paleta(corDeTexto(c.cor, '#3A6EA5'));
+        const benef = [1, 2, 3].map(i => ({ t: limpa(c['b' + i + 't']) || `Vantagem ${i}`, d: limpa(c['b' + i + 'd']) || '' }));
+        const faqs = [1, 2].map(i => ({ p: limpa(c['faq' + i + 'p']), r: limpa(c['faq' + i + 'r']) })).filter(f => f.p && f.r);
+        const corpo = `
+<div class="wrap">
+  <div class="hero">
+    ${c.chapeu ? `<span class="eyebrow">${esc(limpa(c.chapeu))}</span>` : ''}
+    <h1>${esc(limpa(c.titulo))}</h1>
+    <p class="lead">${esc(limpa(c.subtitulo))}</p>
+    <a class="cta" href="#contato">${esc(limpa(c.cta) || 'Quero começar')}</a>
+    <p class="cta-nota">Resposta em até 1 dia útil.</p>
+  </div>
+  <section>
+    <h2>Por que ${esc(ctx.estudio)}</h2>
+    <div class="cards">
+      ${benef.map((b, i) => `<div class="card"><span class="num">${i + 1}</span><h3>${esc(b.t)}</h3><p>${esc(b.d)}</p></div>`).join('\n      ')}
+    </div>
+  </section>
+  ${faqs.length ? `<section><h2>Perguntas frequentes</h2><dl class="faq">${faqs.map(f => `<dt>${esc(f.p)}</dt><dd>${esc(f.r)}</dd>`).join('')}</dl></section>` : ''}
+  <section id="contato" style="border-bottom:0">
+    <div class="oferta">
+      <h2>${esc(limpa(c.chapeu) || 'Vamos conversar')}</h2>
+      <p>${esc(limpa(c.oferta))}</p>
+      <a class="cta" href="mailto:contato@exemplo.com">${esc(limpa(c.cta) || 'Falar agora')}</a>
+    </div>
+  </section>
+</div>`;
+        return [{
+          nome: slug(limpa(c.titulo) || ctx.estudio) + '.html', tipo: 'html',
+          conteudo: paginaHTML({
+            tituloAba: limpa(c.titulo) || ctx.estudio, descricao: limpa(c.subtitulo),
+            marca: ctx.estudio, iniciais: iniciais(ctx.estudio), paleta: pal, corpo,
+            rodape: 'Página gerada pelo estúdio.'
+          })
+        }];
+      }
+    },
+
+    /* ---------------- pacote de anúncios ---------------- */
+    {
+      id: 'anuncios', nome: 'Pacote de anúncios', ext: 'csv', nivel: 1, especialidade: 'comercial',
+      desc: 'Seis variações de anúncio em CSV, no formato que as plataformas importam.',
+      vende: 'Planilha pronta para subir em campanha ou entregar como pacote de copy.',
+      tokens: 560,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva 6 anúncios em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+Responda com estas duas linhas e depois a lista:
+ANGULO: <ângulo principal da campanha, até 12 palavras>
+PUBLICO: <segmento a mirar, até 10 palavras>
+---
+Depois escreva exatamente 6 linhas, uma por anúncio, no formato:
+titulo | descrição de até 20 palavras | chamada do botão
+Sem numeração, sem markdown, sem aspas.`;
+      },
+      obrigatorios: ['angulo'],
+      montar(c, ctx, bruto) {
+        const linhas = linhasDe(bruto).filter(l => l.indexOf('|') > 0).slice(0, 8);
+        const ads = linhas.map(l => l.split('|').map(x => limpa(x)));
+        while (ads.length < 3) ads.push([`${ctx.estudio} para ${ctx.publico}`, limpa(c.angulo) || ctx.missao, 'Saiba mais']);
+        const cab = ['campanha', 'grupo', 'titulo', 'descricao', 'chamada', 'publico', 'observacao'];
+        const corpo = ads.map((a, i) => [
+          `${ctx.estudio} — ${limpa(c.angulo) || 'campanha'}`, `variação ${i + 1}`,
+          a[0] || '', a[1] || '', a[2] || 'Saiba mais',
+          limpa(c.publico) || ctx.publico, ''
+        ]);
+        return [{ nome: 'anuncios-' + slug(ctx.estudio) + '.csv', tipo: 'csv', conteudo: csv([cab].concat(corpo)) }];
+      },
+      checarExtra(c, arquivos) {
+        const linhas = (arquivos[0].conteudo.match(/\n/g) || []).length;
+        return linhas >= 6 ? 12 : linhas >= 4 ? 6 : 0;
+      }
+    },
+
+    /* ---------------- artigo ---------------- */
+    {
+      id: 'artigo', nome: 'Artigo otimizado', ext: 'md', nivel: 1, especialidade: 'criacao',
+      desc: 'Artigo em Markdown com título, resumo e seções — pronto para blog.',
+      vende: 'Texto original que pode ser publicado, vendido como conteúdo ou virar newsletter.',
+      tokens: 1500,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva um artigo em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Assunto pedido: ${ctx.briefing}
+Comece com estas linhas:
+TITULO: <título do artigo, até 12 palavras>
+RESUMO: <resumo de até 30 palavras>
+PALAVRA_CHAVE: <termo principal de busca>
+---
+Depois escreva o artigo em Markdown, com 4 a 6 subtítulos "## " e parágrafos de verdade.
+Entre 450 e 700 palavras. Sem inventar dados, estatísticas ou nomes de clientes.`;
+      },
+      obrigatorios: ['titulo', 'resumo'],
+      montar(c, ctx, bruto) {
+        const texto = String(bruto || '').trim();
+        const md = `---
+titulo: "${limpa(c.titulo).replace(/"/g, "'")}"
+resumo: "${limpa(c.resumo).replace(/"/g, "'")}"
+palavra_chave: "${limpa(c.palavra_chave)}"
+autor: "${ctx.autor} — ${ctx.estudio}"
+data: ${new Date().toISOString().slice(0, 10)}
+---
+
+# ${limpa(c.titulo)}
+
+_${limpa(c.resumo)}_
+
+${texto || '## Introdução\n\nConteúdo em elaboração.'}
+`;
+        return [{ nome: slug(limpa(c.titulo)) + '.md', tipo: 'md', conteudo: md }];
+      },
+      checarExtra(c, arquivos) {
+        const palavras = arquivos[0].conteudo.split(/\s+/).length;
+        const titulos = (arquivos[0].conteudo.match(/^## /gm) || []).length;
+        return (palavras > 380 ? 10 : palavras > 200 ? 5 : 0) + (titulos >= 3 ? 8 : titulos >= 1 ? 4 : 0);
+      }
+    },
+
+    /* ---------------- sequência de e-mails ---------------- */
+    {
+      id: 'emails', nome: 'Sequência de e-mails', ext: 'md', nivel: 2, especialidade: 'comercial',
+      desc: 'Quatro e-mails encadeados, com assunto e corpo, prontos para agendar.',
+      vende: 'Pode ser colado em qualquer ferramenta de e-mail marketing e revendido como fluxo pronto.',
+      tokens: 1100,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva uma sequência de 4 e-mails em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Objetivo: ${ctx.briefing}
+Responda com:
+OBJETIVO: <o que a sequência quer conseguir, até 15 palavras>
+CADENCIA: <ex: dia 0, dia 2, dia 5, dia 9>
+---
+Depois 4 blocos exatamente assim, sem markdown:
+ASSUNTO: <assunto do e-mail 1>
+CORPO: <3 a 5 frases>
+ASSUNTO: <assunto do e-mail 2>
+CORPO: <3 a 5 frases>
+ASSUNTO: <assunto do e-mail 3>
+CORPO: <3 a 5 frases>
+ASSUNTO: <assunto do e-mail 4>
+CORPO: <3 a 5 frases>`;
+      },
+      obrigatorios: ['objetivo'],
+      montar(c, ctx, bruto) {
+        const ls = linhasDe(bruto);
+        const emails = [];
+        let atual = null;
+        ls.forEach(l => {
+          const a = l.match(/^ASSUNTO\s*:\s*(.+)$/i);
+          const b = l.match(/^CORPO\s*:\s*(.+)$/i);
+          if (a) { atual = { assunto: limpa(a[1]), corpo: '' }; emails.push(atual); }
+          else if (b && atual) atual.corpo = limpa(b[1]);
+          else if (atual && atual.corpo) atual.corpo += ' ' + limpa(l);
+        });
+        const cad = (limpa(c.cadencia) || 'dia 0, dia 2, dia 5, dia 9').split(/[,;]/).map(x => limpa(x));
+        const usar = emails.length ? emails : [{ assunto: 'Um convite', corpo: limpa(c.objetivo) || ctx.missao }];
+        const md = `# Sequência de e-mails — ${ctx.estudio}
+
+**Objetivo:** ${limpa(c.objetivo)}  
+**Cadência:** ${cad.join(' · ')}  
+**Público:** ${ctx.publico}
+
+${usar.map((e, i) => `---
+
+## E-mail ${i + 1} — ${cad[i] || 'a definir'}
+
+**Assunto:** ${e.assunto}
+
+${String(e.corpo).replace(/\.\s+/g, '.\n\n')}
+`).join('\n')}`;
+        return [{ nome: 'sequencia-emails-' + slug(ctx.estudio) + '.md', tipo: 'md', conteudo: md }];
+      },
+      checarExtra(c, arquivos) {
+        const n = (arquivos[0].conteudo.match(/## E-mail/g) || []).length;
+        return n >= 4 ? 14 : n >= 2 ? 7 : 0;
+      }
+    },
+
+    /* ---------------- catálogo ---------------- */
+    {
+      id: 'catalogo', nome: 'Catálogo de produtos', ext: 'csv', nivel: 2, especialidade: 'dados',
+      desc: 'Planilha com itens, categorias, preços e descrições de venda.',
+      vende: 'Importa direto em loja virtual, marketplace ou sistema de estoque.',
+      tokens: 1000,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Monte um catálogo em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}.
+Pedido: ${ctx.briefing}
+Responda com:
+COLECAO: <nome da coleção ou linha>
+MOEDA: BRL
+---
+Depois exatamente 8 linhas, uma por item, no formato:
+nome do item | categoria | preço em número | descrição de venda de até 18 palavras
+Sem numeração, sem cabeçalho, sem markdown.`;
+      },
+      obrigatorios: ['colecao'],
+      montar(c, ctx, bruto) {
+        const itens = linhasDe(bruto).filter(l => l.indexOf('|') > 0).slice(0, 12)
+          .map((l, i) => {
+            const p = l.split('|').map(x => limpa(x));
+            const preco = (String(p[2] || '').match(/[\d.,]+/) || ['0'])[0].replace(/\./g, '').replace(',', '.');
+            return [
+              `SKU-${String(i + 1).padStart(3, '0')}`, p[0] || `Item ${i + 1}`, p[1] || 'geral',
+              (Number(preco) || 0).toFixed(2), 'BRL', p[3] || '', limpa(c.colecao) || ''
+            ];
+          });
+        if (!itens.length) itens.push(['SKU-001', 'Item inicial', 'geral', '0.00', 'BRL', ctx.missao, limpa(c.colecao)]);
+        const cab = ['sku', 'nome', 'categoria', 'preco', 'moeda', 'descricao', 'colecao'];
+        return [{ nome: 'catalogo-' + slug(limpa(c.colecao) || ctx.estudio) + '.csv', tipo: 'csv', conteudo: csv([cab].concat(itens)) }];
+      },
+      checarExtra(c, arquivos) {
+        const n = (arquivos[0].conteudo.match(/\nSKU-/g) || []).length;
+        return n >= 8 ? 14 : n >= 4 ? 7 : 0;
+      }
+    },
+
+    /* ---------------- kit de marca ---------------- */
+    {
+      id: 'marca', nome: 'Kit de marca', ext: 'svg', nivel: 2, especialidade: 'criacao',
+      desc: 'Logo em SVG vetorial, paleta em CSS e guia de uso. Três arquivos.',
+      vende: 'Identidade visual completa — o pacote que agências cobram caro para entregar.',
+      tokens: 520,
+      multiplo: true,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Defina a identidade da marca em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+Responda SOMENTE nestas linhas:
+ESSENCIA: <o que a marca é, em 1 frase de até 20 palavras>
+TAGLINE: <assinatura de até 6 palavras>
+COR: <cor principal em hexadecimal>
+ADJETIVOS: <3 adjetivos separados por vírgula>
+VOZ: <como a marca fala, até 15 palavras>
+EVITAR: <o que a marca nunca faz, até 15 palavras>`;
+      },
+      obrigatorios: ['essencia', 'tagline', 'adjetivos'],
+      montar(c, ctx) {
+        const pal = paleta(corDeTexto(c.cor, '#3A6EA5'));
+        const ini = iniciais(ctx.estudio);
+        const nomeBase = slug(ctx.estudio);
+        const logo = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 96" width="320" height="96" role="img" aria-label="${esc(ctx.estudio)}">
+  <title>${esc(ctx.estudio)}</title>
+  <rect x="8" y="16" width="64" height="64" rx="18" fill="${pal.primaria}"/>
+  <text x="40" y="57" font-family="Helvetica,Arial,sans-serif" font-size="27" font-weight="700"
+        fill="#FFFFFF" text-anchor="middle" letter-spacing="-1">${esc(ini)}</text>
+  <text x="88" y="49" font-family="Helvetica,Arial,sans-serif" font-size="25" font-weight="700"
+        fill="${pal.tinta}" letter-spacing="-0.6">${esc(ctx.estudio)}</text>
+  <text x="89" y="69" font-family="Helvetica,Arial,sans-serif" font-size="12"
+        fill="${pal.escura}" letter-spacing="1.6">${esc(limpa(c.tagline).toUpperCase())}</text>
+</svg>`;
+        const css = `/* Paleta — ${ctx.estudio} */
+:root{
+  --marca-primaria:${pal.primaria};
+  --marca-escura:${pal.escura};
+  --marca-clara:${pal.clara};
+  --marca-acento:${pal.acento};
+  --marca-tinta:${pal.tinta};
+  --marca-papel:${pal.papel};
+}
+.btn-marca{background:var(--marca-primaria);color:#fff;border:0;border-radius:12px;padding:14px 24px;font-weight:700}
+.btn-marca:hover{background:var(--marca-escura)}
+.tag-marca{background:var(--marca-clara);color:var(--marca-escura);border-radius:99px;padding:5px 12px;font-size:13px}
+`;
+        const guia = `# Guia de marca — ${ctx.estudio}
+
+## Essência
+${limpa(c.essencia)}
+
+## Assinatura
+**${limpa(c.tagline)}**
+
+## Personalidade
+${limpa(c.adjetivos)}
+
+## Como a marca fala
+${limpa(c.voz) || 'Tom ' + ctx.tom + ', frases curtas, sem jargão.'}
+
+## O que a marca nunca faz
+${limpa(c.evitar) || 'Prometer resultado que não pode entregar.'}
+
+## Cores
+- Primária ${pal.primaria} — botões, links e destaques
+- Escura ${pal.escura} — títulos e estados de foco
+- Clara ${pal.clara} — fundos de apoio e etiquetas
+- Acento ${pal.acento} — usar com parcimônia, só para chamar atenção
+- Tinta ${pal.tinta} — texto corrido
+- Papel ${pal.papel} — fundo das páginas
+
+## Uso do logo
+- Espaço livre mínimo ao redor: a altura da letra do monograma.
+- Tamanho mínimo: 24 px de altura do símbolo.
+- Nunca distorcer, girar, aplicar sombra ou trocar as cores.
+- Sobre fundo escuro, usar a versão do monograma em branco.
+
+_Gerado por ${ctx.autor} — ${new Date().toLocaleDateString('pt-BR')}._
+`;
+        return [
+          { nome: `logo-${nomeBase}.svg`, tipo: 'svg', conteudo: logo },
+          { nome: `paleta-${nomeBase}.css`, tipo: 'css', conteudo: css },
+          { nome: `guia-de-marca-${nomeBase}.md`, tipo: 'md', conteudo: guia }
+        ];
+      }
+    },
+
+    /* ---------------- proposta comercial ---------------- */
+    {
+      id: 'proposta', nome: 'Proposta comercial', ext: 'html', nivel: 2, especialidade: 'comercial',
+      desc: 'Uma página com escopo, prazos, valores e condições.',
+      vende: 'É o documento que fecha negócio — pode ser enviado ao cliente como está.',
+      tokens: 700,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva uma proposta comercial em português do Brasil.
+Negócio: ${ctx.ramo}. Cliente/público: ${ctx.publico}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+Responda SOMENTE nestas linhas:
+CLIENTE: <para quem é a proposta>
+PROBLEMA: <o problema do cliente, até 25 palavras>
+SOLUCAO: <o que será feito, até 30 palavras>
+ITEM1: <entregável 1> | <prazo> | <valor em reais>
+ITEM2: <entregável 2> | <prazo> | <valor em reais>
+ITEM3: <entregável 3> | <prazo> | <valor em reais>
+CONDICOES: <forma de pagamento e validade, até 25 palavras>
+COR: <cor da marca em hexadecimal>`;
+      },
+      obrigatorios: ['cliente', 'problema', 'solucao', 'item1'],
+      montar(c, ctx) {
+        const pal = paleta(corDeTexto(c.cor, '#25405E'));
+        const itens = ['item1', 'item2', 'item3'].map(k => limpa(c[k])).filter(Boolean)
+          .map(l => l.split('|').map(x => limpa(x)));
+        const total = itens.reduce((s, i) => {
+          const v = (String(i[2] || '').match(/[\d.,]+/) || ['0'])[0].replace(/\./g, '').replace(',', '.');
+          return s + (Number(v) || 0);
+        }, 0);
+        const corpo = `
+<div class="wrap">
+  <div class="hero">
+    <span class="eyebrow">Proposta comercial</span>
+    <h1>${esc(limpa(c.cliente))}</h1>
+    <p class="lead">${esc(limpa(c.problema))}</p>
+  </div>
+  <section>
+    <h2>O que propomos</h2>
+    <p class="lead">${esc(limpa(c.solucao))}</p>
+  </section>
+  <section>
+    <h2>Escopo e investimento</h2>
+    <table class="escopo">
+      <tr><th>Entregável</th><th>Prazo</th><th class="v">Valor</th></tr>
+      ${itens.map(i => `<tr><td>${esc(i[0] || '')}</td><td>${esc(i[1] || 'a combinar')}</td><td class="v">${esc(i[2] || '—')}</td></tr>`).join('\n      ')}
+      ${total > 0 ? `<tr><td><b>Total</b></td><td></td><td class="v"><b>${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</b></td></tr>` : ''}
+    </table>
+  </section>
+  <section style="border-bottom:0">
+    <div class="oferta">
+      <h2>Condições</h2>
+      <p>${esc(limpa(c.condicoes) || 'Pagamento em duas parcelas. Proposta válida por 15 dias.')}</p>
+      <a class="cta" href="mailto:contato@exemplo.com">Aprovar proposta</a>
+    </div>
+  </section>
+</div>`;
+        return [{
+          nome: 'proposta-' + slug(limpa(c.cliente) || ctx.estudio) + '.html', tipo: 'html',
+          conteudo: paginaHTML({
+            tituloAba: 'Proposta — ' + limpa(c.cliente), descricao: limpa(c.solucao),
+            marca: ctx.estudio, iniciais: iniciais(ctx.estudio), paleta: pal, corpo,
+            rodape: 'Documento comercial.'
+          })
+        }];
+      }
+    },
+
+    /* ---------------- calendário de conteúdo ---------------- */
+    {
+      id: 'calendario', nome: 'Calendário de conteúdo', ext: 'csv', nivel: 3, especialidade: 'criacao',
+      desc: '30 dias de pauta com data real, canal, formato e legenda.',
+      vende: 'Planejamento mensal completo — entrega recorrente e fácil de vender por assinatura.',
+      tokens: 1200,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Planeje conteúdo em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+Responda com:
+TEMA_DO_MES: <tema central, até 8 palavras>
+CANAIS: <canais separados por vírgula>
+---
+Depois exatamente 12 linhas, uma por pauta, no formato:
+tema da pauta | formato | legenda curta de até 18 palavras
+Sem numeração, sem markdown.`;
+      },
+      obrigatorios: ['tema_do_mes'],
+      montar(c, ctx, bruto) {
+        const pautas = linhasDe(bruto).filter(l => l.indexOf('|') > 0).map(l => l.split('|').map(x => limpa(x)));
+        const canais = (limpa(c.canais) || 'Instagram, Blog, E-mail').split(/[,;]/).map(x => limpa(x)).filter(Boolean);
+        const base = pautas.length ? pautas : [[limpa(c.tema_do_mes) || 'Apresentação', 'post', ctx.missao]];
+        const hoje = new Date();
+        const linhas = [];
+        for (let d = 0; d < 30; d++) {
+          const data = new Date(hoje.getTime() + d * 86400000);
+          const diaSemana = data.getDay();
+          if (diaSemana === 0) continue;                 // domingo folga
+          if (d % 2 === 1 && diaSemana !== 6) continue;   // ritmo realista
+          const p = base[linhas.length % base.length];
+          linhas.push([
+            data.toISOString().slice(0, 10),
+            canais[linhas.length % canais.length] || 'Instagram',
+            p[1] || 'post', p[0] || '', p[2] || '', 'a produzir'
+          ]);
+        }
+        const cab = ['data', 'canal', 'formato', 'tema', 'legenda', 'status'];
+        return [{ nome: 'calendario-' + slug(limpa(c.tema_do_mes) || ctx.estudio) + '.csv', tipo: 'csv', conteudo: csv([cab].concat(linhas)) }];
+      },
+      checarExtra(c, arquivos) {
+        const n = (arquivos[0].conteudo.match(/\n\d{4}-/g) || []).length;
+        return n >= 10 ? 14 : n >= 5 ? 7 : 0;
+      }
+    }
+  ];
+
+  const porId = id => KITS.find(k => k.id === id) || null;
+  const disponiveis = nivel => KITS.filter(k => k.nivel <= (nivel || 1));
+
+  /* ============================================================
+     Aferição de qualidade — checagem estrutural, não opinião da IA.
+     ============================================================ */
+  function aferir(kit, campos, arquivos, agente) {
+    let nota = 34;
+    const obrig = kit.obrigatorios || [];
+    if (obrig.length) {
+      const presentes = obrig.filter(k => String(campos[k] || '').trim().length > 2).length;
+      nota += (presentes / obrig.length) * 26;
+    } else nota += 20;
+
+    const total = arquivos.reduce((s, a) => s + a.conteudo.length, 0);
+    nota += clamp(total / 220, 0, 16);
+
+    const suspeito = obrig.some(k => temPlaceholder(campos[k]));
+    if (suspeito) nota -= 16;
+
+    if (typeof kit.checarExtra === 'function') {
+      try { nota += kit.checarExtra(campos, arquivos) || 0; } catch (e) {}
+    } else nota += 8;
+
+    if (agente) {
+      if (agente.especialidade === kit.especialidade) nota += 8;
+      else if (agente.papel === 'gerente') nota += 2;
+      else nota -= 4;
+      nota += ((agente.humor || 60) - 55) / 8;
+      if ((agente.energia || 80) < 25) nota -= 8;
+    }
+    return Math.round(clamp(nota, 8, 100));
+  }
+
+  /* ============================================================
+     Produção — uma chamada de IA por entrega. Se a IA não estiver
+     disponível, o gabarito ainda produz um arquivo real e utilizável,
+     só que genérico; ele nasce como esboço.
+     ============================================================ */
+  async function produzir(op) {
+    const e = S.state.atual();
+    const kit = porId(op.kit); if (!e || !kit) return null;
+    const agente = op.agente || null;
+    const ctx = {
+      estudio: e.nome, ramo: e.ramo, missao: e.missao, tom: e.tom, publico: e.publico,
+      autor: agente ? agente.nome : 'a equipe',
+      cargo: agente ? agente.cargo : 'produção',
+      briefing: String(op.briefing || kit.desc).slice(0, 420)
+    };
+
+    let campos = null, bruto = '', viaIA = false;
+    if (S.ai.pronta()) {
+      try {
+        const r = await S.ai.chamar({
+          sistema: kit.instrucao(ctx),
+          pedido: contextoCurto(e),
+          tipo: 'conteudo', tokens: kit.tokens,
+          agente: ctx.autor, motivo: 'produzir ' + kit.nome
+        });
+        campos = S.ai.campos(r.texto);
+        bruto = S.ai.corpo(r.texto);
+        viaIA = Object.keys(campos).length > 0 || bruto.length > 40;
+      } catch (err) { /* cai no gabarito local */ }
+    }
+    if (!campos || !Object.keys(campos).length) campos = camposDeContingencia(kit, ctx);
+
+    let arquivos;
+    try { arquivos = kit.montar(campos, ctx, bruto) || []; }
+    catch (err) { console.error('Falha ao montar', kit.id, err); return null; }
+    if (!arquivos.length) return null;
+
+    /* Sem IA o arquivo é real, mas genérico: nasce como esboço e com teto
+       de qualidade, para não pagar contrato cheio por um gabarito vazio. */
+    const bruta = aferir(kit, campos, arquivos, agente);
+    const qualidade = viaIA ? bruta : Math.min(36, bruta);
+    const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
+    return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
+  }
+
+  /* Contexto curto de propósito: quanto menor, mais barata a chamada. */
+  function contextoCurto(e) {
+    const publicados = (e.arquivos || []).filter(a => a.classe === 'produto').slice(0, 4).map(a => a.nome);
+    const ultimos = (e.log || []).slice(-3).map(l => l.texto).join(' | ');
+    return `Contexto do estúdio: já publicamos ${publicados.length ? publicados.join(', ') : 'nada ainda'}. Últimos eventos: ${ultimos || 'nenhum'}. Não repita material já publicado.`;
+  }
+
+  function camposDeContingencia(kit, ctx) {
+    const base = {
+      titulo: `${ctx.estudio} — ${ctx.ramo}`,
+      subtitulo: ctx.missao,
+      chapeu: ctx.ramo,
+      cta: 'Falar com a equipe',
+      oferta: `${ctx.estudio} atende ${ctx.publico} com ${ctx.ramo}.`,
+      b1t: 'Feito à mão', b1d: 'Cada entrega é montada para o seu caso, não em série.',
+      b2t: 'Prazo curto', b2d: 'Você recebe a primeira versão em poucos dias.',
+      b3t: 'Sem enrolação', b3d: 'Escopo claro, preço claro, entrega no formato que você usa.',
+      angulo: `${ctx.ramo} para ${ctx.publico}`,
+      publico: ctx.publico,
+      resumo: ctx.missao,
+      palavra_chave: ctx.ramo,
+      objetivo: `Apresentar ${ctx.estudio} para ${ctx.publico}.`,
+      cadencia: 'dia 0, dia 2, dia 5, dia 9',
+      colecao: 'Linha inicial',
+      essencia: ctx.missao, tagline: ctx.ramo, adjetivos: 'direta, cuidadosa, prática',
+      voz: `Tom ${ctx.tom}, frases curtas.`, evitar: 'Prometer o que não pode cumprir.',
+      cliente: ctx.publico, problema: `Precisa de ${ctx.ramo} sem complicação.`,
+      solucao: ctx.missao, item1: 'Diagnóstico inicial | 3 dias | 480',
+      condicoes: 'Metade na aprovação, metade na entrega. Válida por 15 dias.',
+      tema_do_mes: ctx.ramo, canais: 'Instagram, Blog, E-mail'
+    };
+    void kit;
+    return base;
+  }
+
+  /* ============================================================
+     Contratos — o lado "jogo". O valor é simulado; o arquivo entregue
+     ao aceitar o contrato é real e fica com você de qualquer forma.
+     ============================================================ */
+  const CLIENTES = [
+    'Padaria Serra Azul', 'Oficina Barreto', 'Ateliê Nogueira', 'Clínica Vida Plena',
+    'Mercearia do Cais', 'Studio Ferrolho', 'Casa Marfim', 'Transportes Ipê',
+    'Escola Girassol', 'Cerâmica Rio Claro', 'Pousada Alvorada', 'Marcenaria Tonini',
+    'Consultoria Bandeira', 'Sorveteria Rebimboca', 'Academia Passo Firme'
+  ];
+  const PEDIDOS = {
+    landing: ['precisa de uma página para lançar {tema}', 'quer trocar o site antigo por uma página que venda {tema}'],
+    anuncios: ['vai anunciar {tema} e não tem copy', 'quer testar seis abordagens de anúncio para {tema}'],
+    artigo: ['quer aparecer no Google falando sobre {tema}', 'precisa de um texto de autoridade sobre {tema}'],
+    emails: ['tem uma lista parada e quer reativar com {tema}', 'quer uma sequência de boas-vindas sobre {tema}'],
+    catalogo: ['vai subir {tema} para a loja e não tem planilha', 'precisa organizar {tema} com preço e descrição'],
+    marca: ['vai relançar a marca em torno de {tema}', 'não tem logo nem paleta para {tema}'],
+    proposta: ['precisa enviar uma proposta de {tema} até sexta', 'perdeu negócio por falta de proposta formal de {tema}'],
+    calendario: ['quer um mês inteiro de conteúdo sobre {tema}', 'não sabe o que postar sobre {tema}']
+  };
+  const TEMAS = ['a linha nova', 'o serviço principal', 'a promoção de temporada', 'o público que nunca comprou',
+    'a reabertura', 'o plano de assinatura', 'o atendimento premium', 'a versão econômica'];
+
+  function gerarContrato(e) {
+    const nivel = S.state.nivelDe(e.xp);
+    const kits = disponiveis(nivel);
+    const kit = pick(kits);
+    const cliente = pick(CLIENTES);
+    const tema = pick(TEMAS);
+    const frase = pick(PEDIDOS[kit.id] || ['precisa de {tema}']).replace('{tema}', tema);
+    const ind = S.market.indicadores(e);
+    const reput = ind ? ind.reputacao : 46;
+    const base = { landing: 1400, anuncios: 700, artigo: 550, emails: 900, catalogo: 800, marca: 2200, proposta: 950, calendario: 1200 }[kit.id] || 800;
+    const valor = Math.round(base * (0.75 + reput / 140) * (0.9 + nivel * 0.12));
+    return {
+      id: S.util.uid('c'), cliente, kit: kit.id, tema,
+      titulo: `${kit.nome} para ${cliente}`,
+      briefing: `${cliente} ${frase}. Público: ${e.publico}.`,
+      valor, prazoHoras: 6 + Math.round(Math.random() * 10),
+      status: 'oferta', criadoEm: Date.now()
+    };
+  }
+
+  function prospectar(e, quantos) {
+    const abertos = e.contratos.filter(c => c.status === 'oferta').length;
+    const alvo = Math.min(4, (quantos || 2) + abertos) - abertos;
+    for (let i = 0; i < alvo; i++) e.contratos.unshift(gerarContrato(e));
+    if (e.contratos.length > 24) e.contratos.length = 24;
+    S.state.gravar(); S.bus.emit('trabalho');
+    return alvo;
+  }
+
+  S.factory = {
+    KITS, porId, disponiveis, produzir, aferir, paleta, corDeTexto, iniciais,
+    gerarContrato, prospectar, csv, paginaHTML
+  };
+})(window.S);
+
+</script>
+<script>
+/* ============================================================
+   ESTÚDIO — o simulador propriamente dito.
+   Um único motor assíncrono decide, no máximo, UMA ação de IA por
+   ciclo. Isso mantém o consumo previsível e evita várias pessoas
+   chamando a API ao mesmo tempo.
+   ============================================================ */
+(function (S) {
+  'use strict';
+  const { clamp, sleep, uid, slug, pick } = S.util;
+
+  const ESPECIALIDADES = [
+    { id: 'criacao', cargo: 'Criação', desc: 'Páginas, artigos, marca e calendário.' },
+    { id: 'comercial', cargo: 'Comercial', desc: 'Anúncios, e-mails e propostas.' },
+    { id: 'dados', cargo: 'Dados', desc: 'Catálogos, planilhas e organização.' },
+    { id: 'producao', cargo: 'Produção', desc: 'Ajustes, revisões e acabamento.' },
+    { id: 'geral', cargo: 'Generalista', desc: 'Pega o que aparecer, sem bônus.' }
+  ];
+  const NOMES = ['Lia', 'Rui', 'Bia', 'Téo', 'Vera', 'Caio', 'Ju', 'Nara', 'Íris', 'Davi', 'Cléo', 'Otto', 'Selma', 'Bento'];
+
+  let rt = [];              // pessoas vivas em memória
+  let token = 0;            // invalida ciclos de estúdios anteriores
+  let motorTimer = null;
+  let vitaisTimer = null;
+  let selecionado = null;
+  let animacao = null;
+
+  /* ---------- construção ---------- */
+  function mesa(i, total) {
+    const porLinha = total > 4 ? 3 : 2;
+    const col = i % porLinha, lin = Math.floor(i / porLinha);
+    const largura = 640, margem = 76;
+    const passo = (largura - margem * 2) / Math.max(1, porLinha - 1);
+    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 96 };
+  }
+  const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
+
+  const ESTACOES = {
+    cafe: { x: 90, y: 300, rotulo: 'café' },
+    descanso: { x: 320, y: 300, rotulo: 'descanso' },
+    quadro: { x: 550, y: 300, rotulo: 'quadro' }
+  };
+
+  function montar() {
+    const e = S.state.atual();
+    token++;
+    const meu = token;
+    rt = (e ? e.equipe : []).map((f, i) => {
+      const m = mesa(i, (e.equipe || []).length);
+      return {
+        id: f.id, nome: f.nome, papel: f.papel, cargo: f.cargo,
+        especialidade: f.especialidade || 'geral', cor: f.cor,
+        mesa: m, pos: { x: m.x, y: m.y + 40 }, alvo: null,
+        estado: 'sentado', balao: null, ocupado: false, progresso: 0,
+        tarefa: null, ref: f
+      };
+    });
+    selecionado = null;
+    iniciar(meu);
+    S.bus.emit('estudio');
+  }
+
+  function pessoa(id) { return rt.find(p => p.id === id) || null; }
+  const gerente = () => rt.find(p => p.papel === 'gerente') || null;
+
+  function irPara(p, alvo) {
+    p.estado = 'andando'; p.alvo = alvo;
+    return new Promise(res => { p._chegou = res; setTimeout(() => { if (p._chegou === res) { p._chegou = null; res(); } }, 6000); });
+  }
+  async function falar(p, texto, ms) {
+    p.balao = texto; p.estado = 'falando';
+    await sleep(ms || 1600);
+    p.balao = null; p.estado = 'sentado';
+  }
+
+  /* ---------- vitais ---------- */
+  function tickVitais() {
+    const e = S.state.atual(); if (!e) return;
+    const rel = S.market.relogio(e);
+    rt.forEach(p => {
+      const f = p.ref;
+      if (!f) return;
+      if (p.ocupado) f.energia = clamp(f.energia - 1.6, 0, 100);
+      else if (p.estado === 'pausa' || !rel.expediente) f.energia = clamp(f.energia + 2.4, 0, 100);
+      else f.energia = clamp(f.energia - 0.35, 0, 100);
+      // Humor volta devagar para o meio quando nada acontece.
+      f.humor = clamp(f.humor + (f.humor < 60 ? 0.35 : -0.12), 0, 100);
+      if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado) {
+        p.estado = 'pausa';
+        irPara(p, ESTACOES[pick(['cafe', 'descanso'])]).then(() => {
+          setTimeout(() => { if (p.estado === 'pausa') { irPara(p, assento(p)).then(() => { p.estado = 'sentado'; }); } }, 9000);
+        });
+        S.state.registrar(`${p.nome} parou para descansar — energia no fim.`, 'info', p.id);
+      }
+    });
+    S.bus.emit('equipe');
+    S.state.gravar();
+  }
+
+  function humor(p, delta, motivo) {
+    if (!p.ref) return;
+    p.ref.humor = clamp(p.ref.humor + delta, 0, 100);
+    if (motivo && Math.abs(delta) >= 6) lembrar(p, motivo);
+  }
+  function lembrar(p, texto) {
+    if (!p.ref) return;
+    p.ref.memoria = (p.ref.memoria || []).concat(String(texto).slice(0, 90)).slice(-5);
+  }
+
+  /* ---------- arquivos ---------- */
+  function salvarArquivos(lista, meta, p) {
+    const e = S.state.atual(); if (!e) return [];
+    const salvos = lista.map(a => {
+      const arq = {
+        id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
+        classe: meta.classe || 'esboco', kit: meta.kit || 'legado',
+        qualidade: meta.qualidade == null ? 50 : meta.qualidade,
+        viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '')),
+        autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora()
+      };
+      e.arquivos.unshift(arq);
+      return arq;
+    });
+    if (e.arquivos.length > 90) e.arquivos.length = 90;
+    if (p && p.ref) p.ref.entregas = (p.ref.entregas || 0) + 1;
+    S.state.registrar(
+      `${p ? p.nome : 'A equipe'} entregou ${salvos.map(a => a.nome).join(', ')} · qualidade ${meta.qualidade}.`,
+      'ok', p ? p.id : null);
+    S.state.ganharXP(8 * salvos.length);
+    S.state.gravar();
+    S.bus.emit('arquivos');
+    return salvos;
+  }
+
+  /* Publicar congela uma versão. Produto final nunca é reescrito:
+     correção vira versão nova, e o histórico permanece. */
+  function publicar(arqId, quem, motivo) {
+    const e = S.state.atual(); if (!e) return null;
+    const base = e.arquivos.find(a => a.id === arqId); if (!base) return null;
+    if (base.classe === 'produto') return null;
+    const anteriores = e.arquivos.filter(a => a.classe === 'produto' && a.linhagem === base.linhagem);
+    const versao = anteriores.reduce((m, a) => Math.max(m, a.versao || 1), 0) + 1;
+    const ext = (base.nome.match(/\.[a-z0-9]+$/i) || [''])[0];
+    const produto = Object.assign({}, base, {
+      id: uid('p'), classe: 'produto', versao,
+      nome: base.nome.replace(/\.[a-z0-9]+$/i, '') + '-v' + versao + ext,
+      publicadoPor: quem || 'você', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now()
+    });
+    e.arquivos.unshift(produto);
+    S.state.registrar(`${produto.publicadoPor} publicou ${produto.nome}${motivo ? ' — ' + motivo : ''}.`, 'ok');
+    S.state.ganharXP(25);
+    S.state.gravar();
+    S.bus.emit('arquivos'); S.bus.emit('negocio');
+    return produto;
+  }
+
+  /* ---------- tarefas ---------- */
+  function novaTarefa(dados) {
+    const e = S.state.atual(); if (!e) return null;
+    const titulo = String(dados.titulo || '').trim(); if (!titulo) return null;
+    if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
+    const t = {
+      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: dados.briefing || titulo,
+      para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
+      contrato: dados.contrato || null, criadaEm: Date.now()
+    };
+    e.tarefas.unshift(t);
+    if (e.tarefas.length > 60) e.tarefas.length = 60;
+    S.state.gravar(); S.bus.emit('trabalho');
+    return t;
+  }
+  function tarefasAbertas() {
+    const e = S.state.atual(); return e ? e.tarefas.filter(t => t.status === 'aberta') : [];
+  }
+  function proximaPara(p) {
+    const abertas = tarefasAbertas();
+    return abertas.find(t => t.para === p.id)
+      || abertas.find(t => !t.para && (S.factory.porId(t.kit) || {}).especialidade === p.especialidade)
+      || abertas.find(t => !t.para) || null;
+  }
+
+  /* Executa uma tarefa do começo ao fim: uma chamada de IA, um arquivo. */
+  async function executar(p, tarefa) {
+    const e = S.state.atual(); if (!e) return false;
+    p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
+    tarefa.status = 'fazendo'; tarefa.para = p.id;
+    S.bus.emit('trabalho'); S.bus.emit('equipe');
+    S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
+
+    await irPara(p, assento(p));
+    p.estado = 'trabalhando';
+    const relogio = setInterval(() => { p.progresso = Math.min(0.97, p.progresso + 0.03); }, 400);
+
+    let ok = false;
+    try {
+      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref });
+      if (saida && saida.arquivos.length) {
+        const salvos = salvarArquivos(saida.arquivos, saida, p);
+        tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
+        tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
+        ok = true;
+        humor(p, 8, `entreguei ${salvos[0].nome}`);
+        if (tarefa.contrato) fecharContrato(tarefa.contrato, salvos[0], saida.qualidade);
+        if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
+      } else {
+        tarefa.status = 'aberta';
+        humor(p, -7, `empaquei em ${tarefa.titulo}`);
+        S.state.registrar(`${p.nome} não conseguiu concluir "${tarefa.titulo}".`, 'erro', p.id);
+      }
+    } catch (err) {
+      tarefa.status = 'aberta';
+      S.state.registrar(`${p.nome} travou em "${tarefa.titulo}": ${err && err.message || 'erro'}`, 'erro', p.id);
+    } finally {
+      clearInterval(relogio);
+      p.progresso = 1;
+      p.ocupado = false; p.tarefa = null;
+      await falar(p, ok ? 'Pronto ✓' : 'Travei aqui', 1400);
+      p.progresso = 0;
+      S.state.gravar(); S.bus.emit('trabalho'); S.bus.emit('equipe');
+    }
+    return ok;
+  }
+
+  /* ---------- contratos ---------- */
+  function aceitarContrato(id) {
+    const e = S.state.atual(); if (!e) return;
+    const c = e.contratos.find(x => x.id === id); if (!c || c.status !== 'oferta') return;
+    c.status = 'aceito'; c.aceitoEm = Date.now();
+    novaTarefa({
+      titulo: c.titulo, kit: c.kit, briefing: c.briefing,
+      origem: 'contrato', contrato: c.id
+    });
+    S.state.registrar(`Contrato aceito: ${c.titulo} · ${S.fmt.brl(c.valor)}.`, 'ok');
+    S.state.gravar(); S.bus.emit('trabalho');
+  }
+  function recusarContrato(id) {
+    const e = S.state.atual(); if (!e) return;
+    const c = e.contratos.find(x => x.id === id); if (!c) return;
+    c.status = 'recusado';
+    S.state.gravar(); S.bus.emit('trabalho');
+  }
+  /* O pagamento é proporcional à qualidade aferida. Entrega fraca não
+     recebe cheio — é o que dá peso à decisão de quem faz o quê. */
+  function fecharContrato(contratoId, arquivo, qualidade) {
+    const e = S.state.atual(); if (!e) return;
+    const c = e.contratos.find(x => x.id === contratoId); if (!c || c.status !== 'aceito') return;
+    const fator = clamp(0.45 + (qualidade - 45) / 70, 0.35, 1.15);
+    const pago = Math.round(c.valor * fator);
+    c.status = 'entregue'; c.pago = pago; c.qualidade = qualidade; c.arquivo = arquivo.id; c.entregueEm = Date.now();
+    S.market.creditar(e, pago, `contrato ${c.cliente}`);
+    S.state.ganharXP(Math.round(pago / 40));
+    S.bus.emit('trabalho');
+  }
+
+  /* ---------- decisões da gerência (custam 1 chamada barata) ---------- */
+  function kitsDisponiveis() {
+    const e = S.state.atual();
+    return S.factory.disponiveis(S.state.nivelDe(e ? e.xp : 0));
+  }
+  function kitPorPalavra(texto) {
+    const t = String(texto || '').toLowerCase();
+    const mapa = [
+      ['marca|logo|identidade|paleta', 'marca'],
+      ['an[úu]ncio|campanha|tr[áa]fego|ads', 'anuncios'],
+      ['e-?mail|newsletter|disparo|fluxo', 'emails'],
+      ['cat[áa]logo|planilha|estoque|pre[çc]o', 'catalogo'],
+      ['proposta|or[çc]amento|contrato comercial', 'proposta'],
+      ['calend[áa]rio|pauta|postagem|conte[úu]do do m[êe]s', 'calendario'],
+      ['artigo|blog|texto|seo|seo|autoridade', 'artigo'],
+      ['p[áa]gina|site|landing|lan[çc]amento|vender', 'landing']
+    ];
+    for (const [re, kit] of mapa) if (new RegExp(re).test(t)) return kit;
+    return null;
+  }
+
+  async function planejar(g) {
+    const e = S.state.atual(); if (!e) return;
+    const kits = kitsDisponiveis();
+    const equipe = rt.filter(p => p.papel === 'func').map(p => `${p.id}=${p.nome}(${p.especialidade})`).join('; ') || 'só a gerente';
+    const feitos = e.arquivos.slice(0, 5).map(a => a.nome).join(', ') || 'nada ainda';
+    g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'planejando';
+    const r = await S.ai.perguntar({
+      sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome} (${e.ramo}). Defina as próximas 3 entregas.
+Tipos possíveis (use exatamente o código): ${kits.map(k => k.id).join(', ')}.
+Equipe: ${equipe}.
+Responda SOMENTE nestas linhas:
+KIT1: <código>
+PARA1: <id da pessoa>
+BRIEF1: <o que entregar, até 14 palavras>
+KIT2: <código>
+PARA2: <id>
+BRIEF2: <até 14 palavras>
+KIT3: <código>
+PARA3: <id>
+BRIEF3: <até 14 palavras>`,
+      pedido: `Missão: ${e.missao}. Público: ${e.publico}. Já existe: ${feitos}. Não repita o que já existe.`,
+      tokens: 260, agente: g.nome, motivo: 'planejar trabalho'
+    });
+    g.ocupado = false; g.balao = null; g.estado = 'sentado';
+    if (!r) { S.state.registrar(`${g.nome} não conseguiu montar o plano agora.`, 'alerta', g.id); return; }
+    let criadas = 0;
+    ['1', '2', '3'].forEach(n => {
+      const kitId = String(r.campos['kit' + n] || '').trim();
+      const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief' + n]));
+      if (!kit || kit.nivel > S.state.nivelDe(e.xp)) return;
+      const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para' + n] || '').trim());
+      const brief = String(r.campos['brief' + n] || kit.desc);
+      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null })) criadas++;
+    });
+    S.state.registrar(criadas ? `${g.nome} colocou ${criadas} entrega(s) no plano.` : `${g.nome} revisou o plano e não viu necessidade de tarefa nova.`, criadas ? 'ok' : 'info', g.id);
+  }
+
+  async function avaliar(g) {
+    const e = S.state.atual(); if (!e) return;
+    const cand = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
+    if (!cand) return;
+    cand.avaliado = true;
+    g.ocupado = true; g.balao = 'revisando';
+    const r = await S.ai.perguntar({
+      sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Decida se este material já pode ser publicado como produto final, aquele que o cliente recebe. Publicar congela a versão.
+Responda SOMENTE nestas linhas:
+PUBLICAR: sim ou não
+MOTIVO: <até 14 palavras>
+CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
+      pedido: `Arquivo ${cand.nome} (${cand.tipo}), qualidade aferida ${cand.qualidade}/100, autor ${cand.autor}.\nTrecho: ${String(cand.conteudo).slice(0, 900)}`,
+      tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
+    });
+    g.ocupado = false; g.balao = null;
+    if (!r) return;
+    if (r.campos.publicar === true && cand.qualidade >= 45) {
+      publicar(cand.id, g.nome, String(r.campos.motivo || ''));
+      e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
+    } else {
+      const correcao = String(r.campos.correcao || r.campos.motivo || '').trim();
+      S.state.registrar(`${g.nome} segurou ${cand.nome}: ${correcao || 'ainda não está pronto'}.`, 'alerta', g.id);
+      e.decisoes.unshift({ t: Date.now(), tipo: 'segurou', quem: g.nome, texto: `${cand.nome}: ${correcao}` });
+      if (correcao) novaTarefa({ titulo: `Refazer ${cand.nome}: ${correcao}`, kit: cand.kit, briefing: `${correcao}. Base: ${cand.nome}` });
+    }
+    if (e.decisoes.length > 20) e.decisoes.length = 20;
+    S.state.gravar(); S.bus.emit('negocio');
+  }
+
+  /* ---------- ordem do usuário ---------- */
+  async function darOrdem(texto) {
+    const e = S.state.atual(); if (!e || !texto.trim()) return;
+    S.state.registrar(`Você: "${texto}"`, 'info');
+    const g = gerente();
+    const kits = kitsDisponiveis();
+    let criadas = 0;
+    if (g && S.ai.pronta()) {
+      g.ocupado = true; g.balao = 'anotando';
+      const r = await S.ai.perguntar({
+        sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome} (${e.ramo}). Traduza a ordem do sócio em até 3 entregas concretas.
+Tipos possíveis (use o código exato): ${kits.map(k => k.id).join(', ')}.
+Responda SOMENTE nestas linhas:
+KIT1: <código>
+BRIEF1: <até 14 palavras>
+KIT2: <código ou vazio>
+BRIEF2: <até 14 palavras ou vazio>
+KIT3: <código ou vazio>
+BRIEF3: <até 14 palavras ou vazio>
+RESPOSTA: <o que você responde ao sócio, até 18 palavras>`,
+        pedido: `Ordem: ${texto}\nMissão: ${e.missao}. Público: ${e.publico}.`,
+        tokens: 240, agente: g.nome, motivo: 'interpretar ordem'
+      });
+      g.ocupado = false; g.balao = null;
+      if (r) {
+        ['1', '2', '3'].forEach(n => {
+          const kit = S.factory.porId(String(r.campos['kit' + n] || '').trim());
+          const brief = String(r.campos['brief' + n] || '').trim();
+          if (!kit || !brief || kit.nivel > S.state.nivelDe(e.xp)) return;
+          if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, origem: 'você' })) criadas++;
+        });
+        if (r.campos.resposta) await falar(g, String(r.campos.resposta).slice(0, 90), 2600);
+      }
+    }
+    if (!criadas) {
+      const kitId = kitPorPalavra(texto) || 'landing';
+      const kit = S.factory.porId(kitId);
+      if (novaTarefa({ titulo: `${kit.nome}: ${texto.slice(0, 60)}`, kit: kit.id, briefing: texto, origem: 'você' })) criadas = 1;
+    }
+    S.state.registrar(criadas ? `${criadas} entrega(s) entraram no plano.` : 'Nenhuma tarefa nova foi criada.', criadas ? 'ok' : 'alerta');
+    S.bus.emit('trabalho');
+  }
+
+  /* Encomenda direta: fura a fila da autonomia e produz agora. */
+  async function encomendar(kitId, briefing) {
+    const e = S.state.atual(); if (!e) return null;
+    const kit = S.factory.porId(kitId); if (!kit) return null;
+    const candidatos = rt.filter(p => p.papel === 'func' && !p.ocupado);
+    const p = candidatos.find(x => x.especialidade === kit.especialidade) || candidatos[0] || gerente();
+    if (!p) return null;
+    const t = novaTarefa({ titulo: `${kit.nome}: ${String(briefing).slice(0, 50)}`, kit: kit.id, briefing, para: p.id, origem: 'você' });
+    if (!t) return null;
+    await executar(p, t);
+    return t;
+  }
+
+  /* ---------- contratação ---------- */
+  function custoContratacao(e) { return 600 + (e.equipe.length - 1) * 350; }
+  function contratar(nome, especialidade) {
+    const e = S.state.atual(); if (!e) return false;
+    const custo = custoContratacao(e);
+    if (!S.market.debitar(e, custo, 'contratação')) return 'sem-caixa';
+    const esp = ESPECIALIDADES.find(x => x.id === especialidade) || ESPECIALIDADES[4];
+    e.equipe.push({
+      id: uid('a'), nome: nome || pick(NOMES), papel: 'func', cargo: esp.cargo,
+      especialidade: esp.id, cor: S.state.PALETA[e.equipe.length % S.state.PALETA.length],
+      energia: 85, humor: 72, entregas: 0, memoria: [], uso: { chamadas: 0, tokens: 0 }
+    });
+    S.state.registrar(`${e.equipe[e.equipe.length - 1].nome} entrou na equipe como ${esp.cargo}.`, 'ok');
+    S.state.gravar(); montar();
+    return true;
+  }
+  function demitir(id) {
+    const e = S.state.atual(); if (!e) return;
+    const f = e.equipe.find(x => x.id === id); if (!f || f.papel === 'gerente') return;
+    e.equipe = e.equipe.filter(x => x.id !== id);
+    e.tarefas.forEach(t => { if (t.para === id) t.para = null; });
+    S.state.registrar(`${f.nome} deixou a equipe.`, 'alerta');
+    S.state.gravar(); montar();
+  }
+
+  /* ---------- fundação ---------- */
+  function fundar(dados) {
+    const nome = String(dados.nome || '').trim() || 'Estúdio Novo';
+    const e = S.state.normalizarEstudio({
+      id: uid('e'), nome, ramo: dados.ramo, missao: dados.missao, tom: dados.tom, publico: dados.publico,
+      criadoEm: Date.now(), xp: 0,
+      equipe: [
+        { id: 'a0', nome: dados.gerente || 'Ana', papel: 'gerente', cargo: 'Sócia-gerente', especialidade: 'geral', cor: S.state.PALETA[0], energia: 88, humor: 74 },
+        { id: 'a1', nome: pick(NOMES), papel: 'func', cargo: 'Criação', especialidade: 'criacao', cor: S.state.PALETA[1], energia: 85, humor: 70 },
+        { id: 'a2', nome: pick(NOMES.filter(n => n !== 'Lia')), papel: 'func', cargo: 'Comercial', especialidade: 'comercial', cor: S.state.PALETA[2], energia: 85, humor: 70 }
+      ]
+    });
+    S.market.normalizar(e);
+    S.DB.estudios.unshift(e);
+    S.DB.atual = e.id;
+    S.state.gravarJa();
+    S.factory.prospectar(e, 3);
+    S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
+    S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
+    return e;
+  }
+
+  /* ---------- motor ---------- */
+  async function ciclo(meu) {
+    if (meu !== token) return;
+    const e = S.state.atual();
+    if (!e) return;
+    S.market.tick(e);
+    S.bus.emit('relogio');
+
+    if (!S.ai.disponivel()) return;
+
+    // Prioridade 1: alguém livre com tarefa aberta.
+    const livre = rt.find(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && (p.ref.energia > 20));
+    if (livre) {
+      const t = proximaPara(livre);
+      if (t && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
+    }
+    // Prioridade 2: gerência.
+    const g = gerente();
+    if (g && !g.ocupado && S.ai.reservarAutonomia()) {
+      if (tarefasAbertas().length < 2) await planejar(g);
+      else await avaliar(g);
+    }
+  }
+
+  function iniciar(meu) {
+    parar();
+    const alvo = meu == null ? token : meu;
+    motorTimer = setInterval(() => { ciclo(alvo).catch(err => console.error('ciclo', err)); }, 6000);
+    vitaisTimer = setInterval(tickVitais, 7000);
+    if (!animacao) laco();
+  }
+  function parar() {
+    if (motorTimer) clearInterval(motorTimer);
+    if (vitaisTimer) clearInterval(vitaisTimer);
+    motorTimer = vitaisTimer = null;
+  }
+
+  /* ============================================================
+     Desenho do chão. Redesenhado a 30 fps só quando há movimento,
+     para não gastar bateria à toa no celular.
+     ============================================================ */
+  let cv = null, cx = null, larguraLog = 640, alturaLog = 360, ultimo = 0;
+
+  function ajustarCanvas() {
+    cv = document.getElementById('floor'); if (!cv) return;
+    cx = cv.getContext('2d');
+    const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
+    alturaLog = 74 + linhas * 96 + 96;
+    const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
+    if (larguraCSS < 40) return;            // painel oculto: nada a redimensionar
+    const escala = larguraCSS / larguraLog;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(larguraLog * escala * dpr);
+    cv.height = Math.round(alturaLog * escala * dpr);
+    cv.style.height = Math.round(alturaLog * escala) + 'px';
+    cx.setTransform(escala * dpr, 0, 0, escala * dpr, 0, 0);
+  }
+
+  function rrect(x, y, w, h, r) {
+    cx.beginPath();
+    cx.moveTo(x + r, y); cx.lineTo(x + w - r, y); cx.quadraticCurveTo(x + w, y, x + w, y + r);
+    cx.lineTo(x + w, y + h - r); cx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    cx.lineTo(x + r, y + h); cx.quadraticCurveTo(x, y + h, x, y + h - r);
+    cx.lineTo(x, y + r); cx.quadraticCurveTo(x, y, x + r, y); cx.closePath();
+  }
+
+  function desenhar(agora) {
+    if (!cx) return;
+    cx.clearRect(0, 0, larguraLog, alturaLog);
+    // piso
+    cx.fillStyle = '#13171A'; cx.fillRect(0, 0, larguraLog, alturaLog);
+    cx.fillStyle = 'rgba(255,255,255,.035)';
+    for (let x = 24; x < larguraLog; x += 40) for (let y = 24; y < alturaLog; y += 40) cx.fillRect(x, y, 1.5, 1.5);
+
+    // estações
+    Object.keys(ESTACOES).forEach(k => {
+      const s = ESTACOES[k];
+      cx.fillStyle = '#181D21'; cx.strokeStyle = '#242B30'; cx.lineWidth = 1;
+      rrect(s.x - 40, s.y - 16, 80, 32, 9); cx.fill(); cx.stroke();
+      cx.fillStyle = '#5F686C'; cx.font = '500 10px -apple-system,system-ui,sans-serif';
+      cx.textAlign = 'center'; cx.fillText(s.rotulo, s.x, s.y + 4);
+    });
+
+    // mesas
+    rt.forEach(p => {
+      cx.fillStyle = '#1A2024'; cx.strokeStyle = '#252C31'; cx.lineWidth = 1;
+      rrect(p.mesa.x - 46, p.mesa.y - 16, 92, 34, 8); cx.fill(); cx.stroke();
+      cx.fillStyle = p.ocupado ? 'rgba(228,112,62,.32)' : '#20272B';
+      rrect(p.mesa.x - 16, p.mesa.y - 9, 32, 20, 4); cx.fill();
+    });
+
+    // pessoas
+    rt.forEach(p => {
+      const { x, y } = p.pos;
+      cx.fillStyle = 'rgba(0,0,0,.32)';
+      cx.beginPath(); cx.ellipse(x, y + 15, 13, 4.5, 0, 0, Math.PI * 2); cx.fill();
+
+      if (p.ocupado) {
+        cx.strokeStyle = 'rgba(228,112,62,.28)'; cx.lineWidth = 3;
+        cx.beginPath(); cx.arc(x, y, 18, 0, Math.PI * 2); cx.stroke();
+        cx.strokeStyle = '#E4703E'; cx.lineWidth = 3; cx.lineCap = 'round';
+        cx.beginPath(); cx.arc(x, y, 18, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p.progresso); cx.stroke();
+        cx.lineCap = 'butt';
+      } else if (p.id === selecionado) {
+        cx.strokeStyle = '#E9E7E2'; cx.lineWidth = 1.5;
+        cx.beginPath(); cx.arc(x, y, 18, 0, Math.PI * 2); cx.stroke();
+      }
+
+      cx.fillStyle = p.cor;
+      cx.beginPath(); cx.arc(x, y, 13, 0, Math.PI * 2); cx.fill();
+      if (p.estado === 'pausa') { cx.fillStyle = 'rgba(0,0,0,.35)'; cx.beginPath(); cx.arc(x, y, 13, 0, Math.PI * 2); cx.fill(); }
+
+      cx.fillStyle = '#14100D'; cx.font = '700 11px -apple-system,system-ui,sans-serif';
+      cx.textAlign = 'center'; cx.textBaseline = 'middle';
+      cx.fillText(p.nome.slice(0, 2).toUpperCase(), x, y + .5);
+      cx.textBaseline = 'alphabetic';
+
+      cx.fillStyle = '#8C9497'; cx.font = '500 10px -apple-system,system-ui,sans-serif';
+      cx.fillText(p.nome, x, y + 30);
+
+      if (p.papel === 'gerente') {
+        cx.fillStyle = '#D9A441';
+        cx.beginPath(); cx.arc(x + 11, y - 10, 3.4, 0, Math.PI * 2); cx.fill();
+      }
+
+      if (p.balao) {
+        const txt = String(p.balao).slice(0, 34);
+        cx.font = '500 11px -apple-system,system-ui,sans-serif';
+        const w = Math.min(200, cx.measureText(txt).width + 18);
+        const bx = clamp(x - w / 2, 6, larguraLog - w - 6), by = y - 46;
+        cx.fillStyle = '#EDEBE6'; rrect(bx, by, w, 24, 8); cx.fill();
+        cx.beginPath(); cx.moveTo(x - 5, by + 24); cx.lineTo(x + 5, by + 24); cx.lineTo(x, by + 31); cx.fill();
+        cx.fillStyle = '#16191B'; cx.textAlign = 'center';
+        cx.fillText(txt, bx + w / 2, by + 16);
+      }
+    });
+    void agora;
+  }
+
+  function fisica(dt) {
+    let mexeu = false;
+    rt.forEach(p => {
+      if (p.estado === 'andando' && p.alvo) {
+        const dx = p.alvo.x - p.pos.x, dy = p.alvo.y - p.pos.y;
+        const d = Math.hypot(dx, dy), passo = 78 * dt;
+        if (d <= passo) {
+          p.pos.x = p.alvo.x; p.pos.y = p.alvo.y; p.alvo = null;
+          p.estado = p.ocupado ? 'trabalhando' : 'sentado';
+          if (p._chegou) { const f = p._chegou; p._chegou = null; f(); }
+        } else { p.pos.x += (dx / d) * passo; p.pos.y += (dy / d) * passo; }
+        mexeu = true;
+      }
+      if (p.ocupado) mexeu = true;
+    });
+    return mexeu;
+  }
+
+  function laco() {
+    animacao = requestAnimationFrame(ts => {
+      const dt = Math.min(0.05, (ts - (ultimo || ts)) / 1000);
+      ultimo = ts;
+      const mexeu = fisica(dt);
+      if (mexeu || ts - (laco._ultimoDesenho || 0) > 900) { desenhar(ts); laco._ultimoDesenho = ts; }
+      laco();
+    });
+  }
+
+  function cliqueNoChao(ev) {
+    if (!cv) return null;
+    const r = cv.getBoundingClientRect();
+    const escala = larguraLog / r.width;
+    const x = (ev.clientX - r.left) * escala, y = (ev.clientY - r.top) * escala;
+    const alvo = rt.find(p => Math.hypot(p.pos.x - x, p.pos.y - y) < 24);
+    selecionado = alvo ? alvo.id : null;
+    return alvo;
+  }
+
+  S.studio = {
+    ESPECIALIDADES, NOMES,
+    montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
+    pessoas: () => rt, pessoa, gerente,
+    novaTarefa, tarefasAbertas, executar, darOrdem, encomendar,
+    salvarArquivos, publicar,
+    aceitarContrato, recusarContrato, contratar, demitir, custoContratacao, fundar,
+    selecionado: () => selecionado,
+    selecionar(id) { selecionado = id; }
+  };
+})(window.S);
+
+</script>
+<script>
+/* ============================================================
+   UI — desenho dos painéis e ligações de evento.
+   Cada painel se redesenha sozinho quando o escopo dele muda.
+   ============================================================ */
+(function (S) {
+  'use strict';
+  const { $, $$, esc, clamp } = S.util;
+  const F = S.fmt;
+
+  let viewAtual = 'estudio';
+  let filtroClasse = 'todos';
+  let abertos = {};   // arquivos com o corpo expandido
+
+  /* ---------- avisos ---------- */
+  function toast(texto, tipo) {
+    const t = document.createElement('div');
+    t.className = 'toast ' + (tipo || '');
+    t.textContent = texto;
+    $('#toasts').appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transform = 'translateY(6px)'; }, 3200);
+    setTimeout(() => t.remove(), 3600);
+  }
+
+  /* ---------- folha inferior ---------- */
+  function folha(html, aoAbrir) {
+    $('#sheetBody').innerHTML = html;
+    $('#sheetBackdrop').hidden = false;
+    if (aoAbrir) aoAbrir($('#sheetBody'));
+  }
+  function fecharFolha() { $('#sheetBackdrop').hidden = true; $('#sheetBody').innerHTML = ''; }
+
+  /* ---------- navegação ---------- */
+  function mostrar(view) {
+    const e = S.state.atual();
+    if (!e) view = 'vazio';
+    viewAtual = view;
+    $$('.view').forEach(v => v.classList.toggle('is-on', v.id === 'v-' + view));
+    $$('.nav-item').forEach(b => b.classList.toggle('is-on', b.dataset.view === view));
+    $('#nav').style.visibility = e ? 'visible' : 'hidden';
+    if (view === 'estudio') { S.studio.ajustarCanvas(); }
+    if (view === 'motor') pintarMotor();
+    if (view === 'negocio') pintarNegocio();
+    if (view === 'entregas') { pintarKits(); pintarArquivos(); }
+    if (view === 'trabalho') pintarTrabalho();
+  }
+
+  /* ============================================================
+     Topo
+     ============================================================ */
+  function pintarTopo() {
+    const e = S.state.atual();
+    $('#brandName').textContent = e ? e.nome : 'Estúdio';
+    $('#brandSub').textContent = e
+      ? `${e.ramo} · nível ${S.state.nivelDe(e.xp)}`
+      : 'nenhum estúdio fundado';
+    $('#topClock').hidden = !e;
+    pintarPulso();
+  }
+  function pintarPulso() {
+    const st = S.ai.estado;
+    const dot = $('#pulseDot'), txt = $('#pulseTxt');
+    dot.className = 'pulse-dot ' + ({ off: '', pronta: 'on', ocupada: 'busy', erro: 'err' }[st.situacao] || '');
+    txt.textContent = st.pausado ? 'pausado'
+      : st.situacao === 'ocupada' ? 'trabalhando'
+        : st.situacao === 'erro' ? 'falha'
+          : st.situacao === 'pronta' ? 'pronta' : 'sem IA';
+    const f = $('#floorStatus');
+    if (f) f.textContent = st.pausado ? 'equipe pausada' : st.situacao === 'ocupada' ? 'produzindo' : S.ai.temChave() ? 'em operação' : 'aguardando IA';
+  }
+  function pintarRelogio() {
+    const e = S.state.atual(); if (!e) return;
+    const r = S.market.relogio(e);
+    $('#clockDay').textContent = 'Dia ' + r.dia;
+    $('#clockHour').textContent = r.hora;
+  }
+
+  /* ============================================================
+     Estúdio
+     ============================================================ */
+  function barra(classe, v) {
+    return `<div class="bar ${classe}"><i style="width:${clamp(v, 0, 100)}%"></i></div>`;
+  }
+  function pintarEquipe() {
+    const e = S.state.atual(); if (!e) return;
+    const pessoas = S.studio.pessoas();
+    $('#teamList').innerHTML = pessoas.map(p => {
+      const f = p.ref || {};
+      const estado = p.ocupado ? (p.tarefa || 'trabalhando')
+        : p.estado === 'pausa' ? 'em pausa'
+          : p.estado === 'andando' ? 'andando pelo estúdio' : 'disponível';
+      return `<button class="member" data-pessoa="${p.id}" type="button">
+        <span class="avatar" style="background:${esc(p.cor)}">${esc(p.nome.slice(0, 2).toUpperCase())}</span>
+        <span class="member-body">
+          <span class="member-name">${esc(p.nome)} ${p.ocupado ? '<i class="thinking">trabalhando</i>' : ''}</span>
+          <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · decide o que publica' : ''}</span>
+          <span class="member-status">${esc(estado)}</span>
+        </span>
+        <span class="bars">
+          ${barra('energia', f.energia)}
+          ${barra('humor', f.humor)}
+        </span>
+      </button>`;
+    }).join('') || '<div class="empty">Sem equipe.</div>';
+    $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
+  }
+
+  function pintarXP() {
+    const e = S.state.atual(); if (!e) return;
+    const pr = S.state.progressoNivel(e.xp);
+    const kits = S.factory.KITS;
+    const liberados = kits.filter(k => k.nivel <= pr.nivel).length;
+    const proximo = kits.filter(k => k.nivel === pr.nivel + 1);
+    $('#xpPanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Progresso do estúdio</span><span class="chip">nível ${pr.nivel}</span></div>
+      <div class="meter"><i style="width:${pr.pct}%"></i></div>
+      <div class="stat"><span>${F.num(e.xp)} XP acumulado</span><b>${pr.falta > 0 ? 'faltam ' + F.num(pr.falta) : 'nível máximo'}</b></div>
+      <div class="stat"><span>Tipos de entrega liberados</span><b>${liberados}/${kits.length}</b></div>
+      <p class="panel-foot">XP vem de entrega concluída, contrato pago e publicação. ${proximo.length ? 'No próximo nível: ' + proximo.map(k => k.nome).join(', ') + '.' : 'Tudo liberado.'}</p>`;
+  }
+
+  function painelPessoa(id) {
+    const p = S.studio.pessoa(id); if (!p) return;
+    const f = p.ref || {};
+    const e = S.state.atual();
+    const feitas = e.tarefas.filter(t => t.para === id && t.status === 'feita').length;
+    const esp = S.studio.ESPECIALIDADES.find(x => x.id === p.especialidade);
+    folha(`
+      <h2>${esc(p.nome)}</h2>
+      <p class="sub">${esc(p.cargo)} · ${esc(esp ? esp.desc : '')}</p>
+      <div class="stats">
+        <div class="stat"><span>Energia</span><b>${Math.round(f.energia)}/100</b></div>
+        <div class="stat"><span>Humor</span><b>${Math.round(f.humor)}/100</b></div>
+        <div class="stat"><span>Entregas assinadas</span><b>${f.entregas || 0}</b></div>
+        <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
+        <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
+      </div>
+      ${(f.memoria || []).length ? `<p class="panel-foot">Últimas anotações: ${esc(f.memoria.slice(-3).join(' · '))}</p>` : ''}
+      <div class="sheet-actions">
+        ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
+        <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>
+      </div>`, box => {
+      const d = box.querySelector('#demitirBtn');
+      if (d) d.onclick = () => { S.studio.demitir(id); fecharFolha(); toast(p.nome + ' saiu da equipe.'); };
+      box.querySelector('#fecharPessoa').onclick = fecharFolha;
+    });
+  }
+
+  /* ============================================================
+     Trabalho
+     ============================================================ */
+  function pintarTrabalho() { pintarContratos(); pintarBacklog(); pintarLog(); pintarPendencias(); pintarBadges(); }
+
+  function pintarBadges() {
+    const e = S.state.atual(); if (!e) return;
+    const ofertas = e.contratos.filter(c => c.status === 'oferta').length;
+    const candidatos = e.arquivos.filter(a => a.classe === 'candidato').length;
+    $('#badgeTrabalho').hidden = ofertas === 0;
+    $('#badgeEntregas').hidden = candidatos === 0;
+  }
+
+  function pintarContratos() {
+    const e = S.state.atual(); if (!e) return;
+    const lista = e.contratos.filter(c => c.status === 'oferta' || c.status === 'aceito').slice(0, 6);
+    $('#contratosList').innerHTML = lista.length ? lista.map(c => {
+      const kit = S.factory.porId(c.kit);
+      return `<div class="item">
+        <span class="dot-state ${c.status === 'aceito' ? 'fazendo' : ''}"></span>
+        <div class="item-body">
+          <div class="item-title">${esc(c.cliente)} — ${esc(kit ? kit.nome : c.kit)}</div>
+          <div class="item-meta">
+            <span class="tag tag-sim">${esc(F.brl(c.valor))} simulado</span>
+            <span>${esc(c.briefing).slice(0, 90)}</span>
+          </div>
+        </div>
+        <div class="item-actions">
+          ${c.status === 'oferta'
+          ? `<button class="btn btn-mini btn-primary" data-aceitar="${c.id}" type="button">Aceitar</button>
+               <button class="btn btn-mini" data-recusar="${c.id}" type="button">Passar</button>`
+          : '<span class="chip">em produção</span>'}
+        </div>
+      </div>`;
+    }).join('') : '<div class="empty">Nenhum contrato na mesa. Toque em Prospectar para bater na porta de novos clientes.</div>';
+    $$('#contratosList [data-aceitar]').forEach(b => b.onclick = () => {
+      S.studio.aceitarContrato(b.dataset.aceitar); toast('Contrato aceito. Entrou no plano de trabalho.', 'ok');
+    });
+    $$('#contratosList [data-recusar]').forEach(b => b.onclick = () => S.studio.recusarContrato(b.dataset.recusar));
+  }
+
+  function pintarBacklog() {
+    const e = S.state.atual(); if (!e) return;
+    const lista = e.tarefas.slice(0, 14);
+    const abertas = e.tarefas.filter(t => t.status === 'aberta').length;
+    $('#backlogChip').textContent = abertas + (abertas === 1 ? ' aberta' : ' abertas');
+    $('#backlogList').innerHTML = lista.length ? lista.map(t => {
+      const quem = t.para ? (S.studio.pessoa(t.para) || {}).nome : null;
+      return `<div class="item">
+        <span class="dot-state ${esc(t.status)}"></span>
+        <div class="item-body">
+          <div class="item-title">${esc(t.titulo)}</div>
+          <div class="item-meta">
+            <span>${esc(t.status)}</span>
+            ${quem ? `<span>· ${esc(quem)}</span>` : '<span>· sem responsável</span>'}
+            ${t.qualidade ? `<span>· qualidade ${t.qualidade}</span>` : ''}
+            ${t.origem === 'contrato' ? '<span class="tag">contrato</span>' : ''}
+          </div>
+        </div>
+        ${t.status === 'aberta' ? `<div class="item-actions"><button class="btn btn-mini" data-agora="${t.id}" type="button">Fazer agora</button></div>` : ''}
+      </div>`;
+    }).join('') : '<div class="empty">O plano está vazio. Dê uma ordem, aceite um contrato ou espere a gerente montar o próximo passo.</div>';
+    $$('#backlogList [data-agora]').forEach(b => b.onclick = async () => {
+      const t = e.tarefas.find(x => x.id === b.dataset.agora); if (!t) return;
+      b.disabled = true; b.textContent = 'produzindo…';
+      const p = S.studio.pessoas().find(x => x.papel === 'func' && !x.ocupado) || S.studio.gerente();
+      if (!p) return;
+      await S.studio.executar(p, t);
+      toast(t.status === 'feita' ? 'Entrega pronta na aba Entregas.' : 'A tentativa falhou.', t.status === 'feita' ? 'ok' : 'erro');
+    });
+  }
+
+  function pintarPendencias() {
+    const e = S.state.atual(); if (!e) return;
+    const cands = e.arquivos.filter(a => a.classe === 'candidato').slice(0, 4);
+    const painel = $('#aprovacoesPanel');
+    painel.hidden = cands.length === 0;
+    if (!cands.length) return;
+    painel.innerHTML = `<div class="panel-head"><span class="panel-label">Aguardando sua decisão</span><span class="chip">${cands.length}</span></div>
+      ${cands.map(a => `<div class="item">
+        <span class="dot-state feita"></span>
+        <div class="item-body">
+          <div class="item-title">${esc(a.nome)}</div>
+          <div class="item-meta"><span>qualidade ${a.qualidade}</span><span>· por ${esc(a.autor)}</span></div>
+        </div>
+        <div class="item-actions"><button class="btn btn-mini btn-primary" data-pub="${a.id}" type="button">Publicar</button></div>
+      </div>`).join('')}
+      <p class="panel-foot">Publicar congela a versão e coloca o material no mercado — é o que faz o funil começar a girar.</p>`;
+    $$('#aprovacoesPanel [data-pub]').forEach(b => b.onclick = () => {
+      const p = S.studio.publicar(b.dataset.pub, 'você', 'publicação direta');
+      if (p) toast('Publicado: ' + p.nome, 'ok');
+    });
+  }
+
+  function pintarLog() {
+    const e = S.state.atual(); if (!e) return;
+    const linhas = e.log.slice(-40).reverse();
+    $('#logList').innerHTML = linhas.length ? linhas.map(l =>
+      `<div class="log-line ${esc(l.tag)}"><span class="log-ts">${F.hora(l.t)}</span><span class="log-txt">${esc(l.texto)}</span></div>`
+    ).join('') : '<div class="empty">Nada registrado ainda.</div>';
+  }
+
+  /* ============================================================
+     Entregas
+     ============================================================ */
+  function pintarKits() {
+    const e = S.state.atual(); if (!e) return;
+    const nivel = S.state.nivelDe(e.xp);
+    $('#kitsList').innerHTML = S.factory.KITS.map(k => {
+      const travado = k.nivel > nivel;
+      return `<button class="kit" data-kit="${k.id}" type="button" ${travado ? 'disabled' : ''}>
+        <span class="kit-top"><span class="kit-ext">.${k.ext}</span>${travado ? `<span class="tag">nível ${k.nivel}</span>` : ''}</span>
+        <span class="kit-nome">${esc(k.nome)}</span>
+        <span class="kit-desc">${esc(k.desc)}</span>
+      </button>`;
+    }).join('');
+    $$('#kitsList [data-kit]').forEach(b => b.onclick = () => painelEncomenda(b.dataset.kit));
+  }
+
+  function painelEncomenda(kitId) {
+    const kit = S.factory.porId(kitId); if (!kit) return;
+    const e = S.state.atual();
+    folha(`
+      <h2>${esc(kit.nome)}</h2>
+      <p class="sub">${esc(kit.vende)}</p>
+      <div class="field">
+        <label for="briefInput">O que essa entrega precisa cobrir</label>
+        <textarea id="briefInput" placeholder="ex: destacar a coleção de inverno para clientes que já compraram"></textarea>
+        <p class="hint">Gera ${kit.multiplo ? 'vários arquivos' : 'um arquivo .' + kit.ext} de verdade. Custa uma chamada de IA (~${kit.tokens} tokens de saída).</p>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn" id="cancelEnc" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="okEnc" type="button">Produzir agora</button>
+      </div>`, box => {
+      box.querySelector('#cancelEnc').onclick = fecharFolha;
+      box.querySelector('#okEnc').onclick = async ev => {
+        const brief = box.querySelector('#briefInput').value.trim() || `${kit.nome} para ${e.ramo}`;
+        ev.target.disabled = true; ev.target.textContent = 'produzindo…';
+        fecharFolha();
+        toast('Produzindo ' + kit.nome + '…');
+        const t = await S.studio.encomendar(kit.id, brief);
+        toast(t && t.status === 'feita' ? 'Arquivo pronto.' : 'Não deu certo dessa vez.', t && t.status === 'feita' ? 'ok' : 'erro');
+        mostrar('entregas');
+      };
+    });
+  }
+
+  const ROTULO_CLASSE = { esboco: 'esboço', prototipo: 'protótipo', candidato: 'candidato', produto: 'produto final' };
+  const EXPLICA_CLASSE = {
+    todos: 'A ordem é rígida: esboço → protótipo → candidato → produto final. Só o que vira produto final entra no mercado da simulação.',
+    esboco: 'Material incompleto ou feito sem IA. Serve de base, não de entrega.',
+    prototipo: 'Primeira versão utilizável. Ainda vale revisar antes de mandar para alguém.',
+    candidato: 'Passou na checagem estrutural e está esperando sua publicação.',
+    produto: 'Versão congelada. Não é reescrita: correção vira uma versão nova.'
+  };
+
+  function pintarArquivos() {
+    const e = S.state.atual(); if (!e) return;
+    const todos = e.arquivos;
+    const lista = filtroClasse === 'todos' ? todos : todos.filter(a => a.classe === filtroClasse);
+    $('#pipelineNota').textContent = EXPLICA_CLASSE[filtroClasse];
+    $('#filesList').innerHTML = lista.length ? lista.slice(0, 40).map(a => {
+      const aberto = abertos[a.id];
+      const previa = aberto === 'previa' && (a.tipo === 'html' || a.tipo === 'svg');
+      return `<div class="file">
+        <div class="file-head">
+          <div class="file-info">
+            <div class="file-name">${esc(a.nome)}</div>
+            <div class="file-meta">
+              <span class="tag ${a.classe === 'produto' ? 'tag-ember' : ''}">${esc(ROTULO_CLASSE[a.classe])}${a.classe === 'produto' ? ' v' + a.versao : ''}</span>
+              <span class="quality">q${a.qualidade}<span class="quality-bar"><i style="width:${a.qualidade}%"></i></span></span>
+              <span>${esc(a.autor)}</span><span>${esc(a.quando || '')}</span>
+              <span>${F.compact(a.conteudo.length)} car.</span>
+              ${a.viaIA === false ? '<span class="tag">gabarito local</span>' : ''}
+            </div>
+          </div>
+        </div>
+        <div class="file-tools">
+          ${(a.tipo === 'html' || a.tipo === 'svg') ? `<button class="btn btn-mini" data-previa="${a.id}" type="button">${previa ? 'Fechar prévia' : 'Ver prévia'}</button>` : ''}
+          <button class="btn btn-mini" data-codigo="${a.id}" type="button">${aberto === 'codigo' ? 'Fechar' : 'Ver conteúdo'}</button>
+          <button class="btn btn-mini btn-primary" data-baixar="${a.id}" type="button">Baixar</button>
+          ${a.classe !== 'produto' ? `<button class="btn btn-mini" data-publicar="${a.id}" type="button">Publicar</button>` : ''}
+          ${a.classe !== 'produto' ? `<button class="btn btn-mini btn-danger" data-apagar="${a.id}" type="button">Apagar</button>` : ''}
+        </div>
+        ${previa ? `<iframe class="file-frame" sandbox="allow-same-origin" srcdoc="${esc(a.conteudo)}"></iframe>` : ''}
+        ${aberto === 'codigo' ? `<div class="file-view">${esc(a.conteudo.slice(0, 9000))}</div>` : ''}
+      </div>`;
+    }).join('') : `<div class="empty">Nenhum arquivo ${filtroClasse === 'todos' ? '' : 'nesse estágio '}ainda. Encomende uma entrega acima ou aceite um contrato.</div>`;
+
+    $$('#filesList [data-previa]').forEach(b => b.onclick = () => {
+      abertos[b.dataset.previa] = abertos[b.dataset.previa] === 'previa' ? null : 'previa'; pintarArquivos();
+    });
+    $$('#filesList [data-codigo]').forEach(b => b.onclick = () => {
+      abertos[b.dataset.codigo] = abertos[b.dataset.codigo] === 'codigo' ? null : 'codigo'; pintarArquivos();
+    });
+    $$('#filesList [data-baixar]').forEach(b => b.onclick = () => {
+      const a = e.arquivos.find(x => x.id === b.dataset.baixar); if (!a) return;
+      const mime = { html: 'text/html', svg: 'image/svg+xml', md: 'text/markdown', csv: 'text/csv', css: 'text/css', json: 'application/json' }[a.tipo] || 'text/plain';
+      S.arquivo.baixarBlob(new Blob([a.conteudo], { type: mime + ';charset=utf-8' }), a.nome);
+    });
+    $$('#filesList [data-publicar]').forEach(b => b.onclick = () => {
+      const p = S.studio.publicar(b.dataset.publicar, 'você', 'publicação direta');
+      if (p) toast('Publicado: ' + p.nome, 'ok');
+    });
+    $$('#filesList [data-apagar]').forEach(b => b.onclick = () => {
+      e.arquivos = e.arquivos.filter(x => x.id !== b.dataset.apagar);
+      S.state.gravar(); pintarArquivos();
+    });
+    pintarBadges();
+  }
+
+  function exportarZip() {
+    const e = S.state.atual(); if (!e || !e.arquivos.length) return toast('Nada para exportar ainda.');
+    const pasta = S.util.slug(e.nome);
+    const arquivos = e.arquivos.map(a => ({
+      nome: `${pasta}/${a.classe}/${a.nome}`, conteudo: a.conteudo
+    }));
+    arquivos.push({
+      nome: `${pasta}/LEIA-ME.md`,
+      conteudo: `# ${e.nome}\n\n${e.missao}\n\nRamo: ${e.ramo}\nPúblico: ${e.publico}\nExportado em ${new Date().toLocaleString('pt-BR')}\n\n## Arquivos\n\n` +
+        e.arquivos.map(a => `- \`${a.classe}/${a.nome}\` — qualidade aferida ${a.qualidade}/100, por ${a.autor}`).join('\n') +
+        `\n\nOs arquivos deste pacote são reais e podem ser usados, editados e vendidos livremente. Os números de vendas, caixa e reputação vistos no aplicativo são simulação.\n`
+    });
+    S.arquivo.baixarBlob(S.arquivo.zip(arquivos), pasta + '.zip');
+    toast(`${arquivos.length} arquivos exportados.`, 'ok');
+  }
+
+  /* ============================================================
+     Negócio
+     ============================================================ */
+  function sparkline(pontos, chave) {
+    if (!pontos || pontos.length < 2) return '<p class="hint">O gráfico aparece depois de alguns minutos de operação.</p>';
+    const vs = pontos.map(p => p[chave]);
+    const min = Math.min.apply(null, vs), max = Math.max.apply(null, vs);
+    const amp = (max - min) || 1;
+    const L = 300, A = 54;
+    const d = vs.map((v, i) => {
+      const x = (i / (vs.length - 1)) * L;
+      const y = A - 4 - ((v - min) / amp) * (A - 10);
+      return (i ? 'L' : 'M') + x.toFixed(1) + ' ' + y.toFixed(1);
+    }).join(' ');
+    const sobe = vs[vs.length - 1] >= vs[0];
+    const cor = sobe ? '#6FA98A' : '#C9553F';
+    return `<svg class="spark" viewBox="0 0 ${L} ${A}" preserveAspectRatio="none" aria-hidden="true">
+      <path d="${d} L${L} ${A} L0 ${A} Z" fill="${cor}" opacity=".10"/>
+      <path d="${d}" fill="none" stroke="${cor}" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>
+    </svg>`;
+  }
+
+  function pintarNegocio() {
+    const e = S.state.atual(); if (!e) return;
+    S.market.tick(e);
+    const i = S.market.indicadores(e); if (!i) return;
+
+    $('#kpiGrid').innerHTML = [
+      { v: F.brl(i.caixa), l: 'caixa', d: i.lucroOperacional >= 0 ? 'operação positiva' : 'queimando caixa', up: i.lucroOperacional >= 0 },
+      { v: F.brl(i.receita), l: 'receita total', d: `${F.brl(i.receitaContratos)} de contratos`, up: true },
+      { v: F.num(i.clientes), l: 'clientes', d: `${F.num(i.leads)} leads no funil`, up: true },
+      { v: F.pct(i.convTotal, 2), l: 'visita → pedido', d: `${F.num(i.visitas)} visitas`, up: i.convTotal > 0 }
+    ].map(k => `<div class="kpi">
+      <div class="kpi-v">${k.v}</div>
+      <div class="kpi-l">${k.l}</div>
+      <div class="kpi-d ${k.up ? 'up' : 'down'}">${esc(k.d)}</div>
+    </div>`).join('');
+
+    $('#caixaPanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Caixa ao longo do tempo</span><span class="tag tag-sim">SIMULADO</span></div>
+      ${sparkline(i.historico, 'caixa')}
+      <div class="stats">
+        <div class="stat"><span>Runway</span><b>${Number.isFinite(i.runway) ? i.runway.toFixed(1) + ' meses' : '∞'}</b></div>
+        <div class="stat"><span>Queima mensal estimada</span><b>${F.brl(i.burnMes)}</b></div>
+        <div class="stat"><span>Folha por hora de expediente</span><b>${F.brl(i.folhaHora)}</b></div>
+      </div>`;
+
+    const p = i.presenca;
+    const kitsPublicados = p.kits.map(k => (S.factory.porId(k) || { nome: k }).nome);
+    $('#funilPanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Funil e presença</span></div>
+      <div class="stats">
+        <div class="stat"><span>Visitas</span><b>${F.num(i.visitas)}</b></div>
+        <div class="stat"><span>Leads</span><b>${F.num(i.leads)} · ${F.pct(i.convVisitaLead, 2)}</b></div>
+        <div class="stat"><span>Pedidos</span><b>${F.num(i.pedidos)} · ${F.pct(i.convLeadPedido, 2)}</b></div>
+        <div class="stat"><span>Ticket médio</span><b>${F.brl(i.ticket)}</b></div>
+        <div class="stat"><span>Reputação</span><b>${Math.round(i.reputacao)}/100</b></div>
+        <div class="stat"><span>Qualidade média publicada</span><b>${Math.round(i.qualidade)}/100</b></div>
+      </div>
+      <p class="panel-foot">${p.oferta
+        ? `O funil gira porque existem ${p.itens} produto(s) publicado(s): ${esc(kitsPublicados.join(', '))}. Cada tipo mexe num fator diferente — anúncio traz gente, catálogo e e-mail convertem, marca sustenta reputação.`
+        : 'Nada foi publicado ainda, então não há visitas nem vendas. Publique um material na aba Entregas para o mercado começar a existir.'}</p>`;
+
+    $('#drePanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Resultado</span></div>
+      <div class="stats">
+        <div class="stat"><span>Receita de mercado</span><b>${F.brl(i.receitaMercado)}</b></div>
+        <div class="stat"><span>Receita de contratos</span><b>${F.brl(i.receitaContratos)}</b></div>
+        <div class="stat"><span>Custo direto</span><b>−${F.brl(i.custoDireto)}</b></div>
+        <div class="stat"><span>Lucro bruto</span><b>${F.brl(i.lucroBruto)} · ${F.pct(i.margemBruta)}</b></div>
+        <div class="stat"><span>Despesas operacionais</span><b>−${F.brl(i.opex)}</b></div>
+        <div class="stat"><span>Lucro operacional</span><b>${F.brl(i.lucroOperacional)} · ${F.pct(i.margemOperacional)}</b></div>
+      </div>
+      <p class="panel-foot">Nenhum destes números é sorteado nem inventado pela IA. Eles saem do tempo de operação, do que está publicado, da qualidade aferida e do custo da equipe. O relógio anda 1 hora a cada minuto real.</p>`;
+
+    const decisoes = (e.decisoes || []).slice(0, 6);
+    $('#decisoesPanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Decisões da gerência</span></div>
+      ${decisoes.length ? decisoes.map(d => `<div class="item">
+        <span class="dot-state ${d.tipo === 'publicação' ? 'feita' : ''}"></span>
+        <div class="item-body"><div class="item-title">${esc(d.tipo)} — ${esc(d.quem)}</div>
+        <div class="item-meta"><span>${esc(d.texto)}</span></div></div>
+      </div>`).join('') : '<div class="empty">A gerente ainda não tomou decisões registradas.</div>'}`;
+  }
+
+  /* ============================================================
+     Motor
+     ============================================================ */
+  function pintarMotor() {
+    const e = S.state.atual();
+    const st = S.ai.estado;
+    $('#conexaoChip').textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
+    $('#pausarBtn').textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
+    if (!$('#apiKeyInput').value && S.ai.temChave()) $('#apiKeyInput').placeholder = S.ai.chaveMascarada();
+    $('#conexaoMsg').textContent = st.detalhe || '';
+
+    const opcoes = sel => S.ai.MODELOS.map(m =>
+      `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
+    $('#modeloDecisaoSel').innerHTML = opcoes('decisao');
+    $('#modeloProducaoSel').innerHTML = opcoes('producao');
+    $('#ritmoSel').value = S.ai.cfg.ritmo;
+
+    const o = S.ai.orcamento();
+    const h = o.headers;
+    const espera = S.ai.faltaParaAutonomia();
+    $('#consumoPanel').innerHTML = `
+      <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
+      <div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>
+      <div class="stats">
+        <div class="stat"><span>Tokens usados</span><b>${F.num(o.tokens)} / ${F.num(o.ref.tokens)}</b></div>
+        <div class="stat"><span>Chamadas</span><b>${F.num(o.requisicoes)} / ${F.num(o.ref.requisicoes)}</b></div>
+        <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
+        ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
+        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
+        <div class="stat"><span>Próxima ação autônoma</span><b>${espera > 0 ? 'em ' + F.dur(espera) : 'liberada'}</b></div>
+        ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
+      </div>
+      <p class="panel-foot">As linhas marcadas como restantes vêm dos cabeçalhos que a própria Groq devolve. O teto diário local é uma trava de segurança do app, não o limite oficial da sua conta.</p>`;
+
+    $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
+      <div class="call">
+        <div class="call-head"><b>${esc(c.quem)}</b><span>${esc(c.motivo)}</span>
+          <span class="tag ${c.ok ? 'tag-real' : 'tag-rust'}">${c.ok ? 'ok' : 'falhou'}</span></div>
+        <div class="call-meta">${esc(c.modelo)} · ${F.dur(c.ms)}${c.tokens ? ' · ' + F.num(c.tokens) + ' tokens' : ''} · ${F.hora(c.em)}</div>
+        ${c.erro ? `<div class="call-meta" style="color:#E08573">${esc(c.erro).slice(0, 160)}</div>` : ''}
+      </div>`).join('') : '<div class="empty">Nenhuma chamada ainda nesta sessão.</div>';
+
+    if (e) {
+      $('#empresaCfgPanel').innerHTML = `
+        <div class="panel-head"><span class="panel-label">Dados do estúdio</span></div>
+        <div class="field"><label for="cfgNome">Nome</label><input id="cfgNome" type="text" value="${esc(e.nome)}"></div>
+        <div class="field"><label for="cfgRamo">Ramo</label><input id="cfgRamo" type="text" value="${esc(e.ramo)}"></div>
+        <div class="field"><label for="cfgPublico">Público</label><input id="cfgPublico" type="text" value="${esc(e.publico)}"></div>
+        <div class="field"><label for="cfgMissao">Missão</label><input id="cfgMissao" type="text" value="${esc(e.missao)}"></div>
+        <div class="field"><label for="cfgTom">Tom da marca</label><input id="cfgTom" type="text" value="${esc(e.tom)}"></div>
+        <div class="row-actions"><button class="btn btn-primary" id="salvarCfgBtn" type="button">Salvar</button></div>
+        <p class="hint">Esses campos entram em toda instrução mandada para a IA. Quanto mais específicos, melhor a entrega — e sem custo extra de token.</p>`;
+      $('#salvarCfgBtn').onclick = () => {
+        e.nome = $('#cfgNome').value.trim() || e.nome;
+        e.ramo = $('#cfgRamo').value.trim() || e.ramo;
+        e.publico = $('#cfgPublico').value.trim() || e.publico;
+        e.missao = $('#cfgMissao').value.trim() || e.missao;
+        e.tom = $('#cfgTom').value.trim() || e.tom;
+        S.state.gravarJa(); pintarTopo(); toast('Dados atualizados.', 'ok');
+      };
+    } else {
+      $('#empresaCfgPanel').innerHTML = '<div class="empty">Nenhum estúdio selecionado.</div>';
+    }
+  }
+
+  /* ============================================================
+     Diálogos
+     ============================================================ */
+  function dialogoFundar() {
+    folha(`
+      <h2>Fundar estúdio</h2>
+      <p class="sub">A fundação é imediata e não gasta nenhuma chamada de IA. Você pode ajustar tudo depois no Motor.</p>
+      <div class="field"><label for="fNome">Nome do estúdio</label><input id="fNome" type="text" placeholder="ex: Ateliê Rebimboca"></div>
+      <div class="field"><label for="fRamo">Ramo</label><input id="fRamo" type="text" placeholder="ex: loja de roupas vintage online"></div>
+      <div class="field"><label for="fPublico">Público</label><input id="fPublico" type="text" placeholder="ex: mulheres de 25 a 40 que gostam de garimpo"></div>
+      <div class="field"><label for="fMissao">Missão em uma frase</label><input id="fMissao" type="text" placeholder="ex: achar peças únicas e entregar com capricho"></div>
+      <div class="sheet-actions">
+        <button class="btn" id="cancelFundar" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="okFundar" type="button">Fundar</button>
+      </div>`, box => {
+      box.querySelector('#cancelFundar').onclick = fecharFolha;
+      box.querySelector('#okFundar').onclick = () => {
+        const ramo = box.querySelector('#fRamo').value.trim() || 'serviços criativos';
+        const nome = box.querySelector('#fNome').value.trim()
+          || 'Estúdio ' + ramo.split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+        S.studio.fundar({
+          nome, ramo,
+          publico: box.querySelector('#fPublico').value.trim() || 'pequenos negócios',
+          missao: box.querySelector('#fMissao').value.trim() || `Entregar ${ramo} com capricho e prazo curto.`,
+          tom: 'direto e caloroso'
+        });
+        fecharFolha();
+        mostrar('estudio');
+        toast('Estúdio fundado. Três contratos já estão na mesa.', 'ok');
+      };
+    });
+  }
+
+  function dialogoContratar() {
+    const e = S.state.atual(); if (!e) return;
+    const custo = S.studio.custoContratacao(e);
+    folha(`
+      <h2>Contratar</h2>
+      <p class="sub">Custa ${F.brl(custo)} do caixa e aumenta a folha por hora. A especialidade dá bônus de qualidade nas entregas do tipo certo.</p>
+      <div class="field"><label for="cNome">Nome</label><input id="cNome" type="text" placeholder="deixe vazio para sortear"></div>
+      <div id="listaEsp">
+        ${S.studio.ESPECIALIDADES.map((x, i) => `<button class="pick ${i === 0 ? 'is-on' : ''}" data-esp="${x.id}" type="button">
+          <span><b>${esc(x.cargo)}</b><small>${esc(x.desc)}</small></span>
+        </button>`).join('')}
+      </div>
+      <div class="sheet-actions">
+        <button class="btn" id="cancelCont" type="button">Cancelar</button>
+        <button class="btn btn-primary" id="okCont" type="button">Contratar</button>
+      </div>`, box => {
+      let esp = S.studio.ESPECIALIDADES[0].id;
+      box.querySelectorAll('[data-esp]').forEach(b => b.onclick = () => {
+        esp = b.dataset.esp;
+        box.querySelectorAll('.pick').forEach(x => x.classList.toggle('is-on', x === b));
+      });
+      box.querySelector('#cancelCont').onclick = fecharFolha;
+      box.querySelector('#okCont').onclick = () => {
+        const r = S.studio.contratar(box.querySelector('#cNome').value.trim(), esp);
+        fecharFolha();
+        toast(r === 'sem-caixa' ? 'Caixa insuficiente para contratar agora.' : 'Contratação feita.', r === 'sem-caixa' ? 'erro' : 'ok');
+      };
+    });
+  }
+
+  function dialogoEstudios() {
+    const lista = S.DB.estudios;
+    folha(`
+      <h2>Seus estúdios</h2>
+      <p class="sub">Cada estúdio tem caixa, equipe e arquivos próprios.</p>
+      ${lista.map(e => `<button class="pick ${e.id === S.DB.atual ? 'is-on' : ''}" data-est="${e.id}" type="button">
+        <span><b>${esc(e.nome)}</b><small>${esc(e.ramo)} · nível ${S.state.nivelDe(e.xp)} · ${e.arquivos.length} arquivos</small></span>
+        ${e.id === S.DB.atual ? '<span class="tag tag-ember">atual</span>' : ''}
+      </button>`).join('') || '<div class="empty">Nenhum estúdio ainda.</div>'}
+      <div class="sheet-actions">
+        <button class="btn" id="fecharEst" type="button">Fechar</button>
+        <button class="btn btn-primary" id="novoEst" type="button">Novo estúdio</button>
+      </div>`, box => {
+      box.querySelectorAll('[data-est]').forEach(b => b.onclick = () => {
+        S.state.trocar(b.dataset.est); fecharFolha();
+      });
+      box.querySelector('#fecharEst').onclick = fecharFolha;
+      box.querySelector('#novoEst').onclick = () => { fecharFolha(); dialogoFundar(); };
+    });
+  }
+
+  function confirmar(titulo, texto, aoConfirmar) {
+    folha(`
+      <h2>${esc(titulo)}</h2>
+      <p class="sub">${esc(texto)}</p>
+      <div class="sheet-actions">
+        <button class="btn" id="naoBtn" type="button">Cancelar</button>
+        <button class="btn btn-danger" id="simBtn" type="button">Confirmar</button>
+      </div>`, box => {
+      box.querySelector('#naoBtn').onclick = fecharFolha;
+      box.querySelector('#simBtn').onclick = () => { fecharFolha(); aoConfirmar(); };
+    });
+  }
+
+  /* ============================================================
+     Ligações
+     ============================================================ */
+  function ligar() {
+    $$('.nav-item').forEach(b => b.onclick = () => mostrar(b.dataset.view));
+    $('#brandBtn').onclick = () => (S.DB.estudios.length ? dialogoEstudios() : dialogoFundar());
+    $('#fundarBtn').onclick = dialogoFundar;
+    $('#irMotorBtn').onclick = () => { if (!S.state.atual()) { toast('Funde um estúdio primeiro.'); return; } mostrar('motor'); };
+    $('#pulseBtn').onclick = () => mostrar('motor');
+    $('#sheetClose').onclick = fecharFolha;
+    $('#sheetBackdrop').onclick = ev => { if (ev.target === $('#sheetBackdrop')) fecharFolha(); };
+
+    $('#contratarBtn').onclick = dialogoContratar;
+    $('#floor').onclick = ev => {
+      const p = S.studio.cliqueNoChao(ev);
+      if (p) painelPessoa(p.id);
+    };
+
+    $('#ordemBtn').onclick = async () => {
+      const inp = $('#ordemInput');
+      const txt = inp.value.trim(); if (!txt) return;
+      inp.value = ''; $('#ordemBtn').disabled = true;
+      await S.studio.darOrdem(txt);
+      $('#ordemBtn').disabled = false;
+      pintarTrabalho();
+    };
+    $('#ordemInput').addEventListener('keydown', ev => { if (ev.key === 'Enter') $('#ordemBtn').click(); });
+
+    $('#buscarContratoBtn').onclick = () => {
+      const e = S.state.atual(); if (!e) return;
+      const n = S.factory.prospectar(e, 2);
+      toast(n > 0 ? n + ' contrato(s) na mesa.' : 'Já há contratos esperando decisão.');
+      pintarContratos();
+    };
+    $('#limparLogBtn').onclick = () => { const e = S.state.atual(); if (e) { e.log = []; S.state.gravarJa(); pintarLog(); } };
+
+    $$('#filtroArquivos button').forEach(b => b.onclick = () => {
+      filtroClasse = b.dataset.classe;
+      $$('#filtroArquivos button').forEach(x => x.classList.toggle('is-on', x === b));
+      pintarArquivos();
+    });
+    $('#exportarTudoBtn').onclick = exportarZip;
+
+    $('#salvarIABtn').onclick = () => {
+      try {
+        const digitada = $('#apiKeyInput').value.trim();
+        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value);
+        $('#apiKeyInput').value = '';
+        toast('Configuração salva.', 'ok');
+        pintarMotor();
+      } catch (err) { toast(err.message, 'erro'); }
+    };
+    $('#testarIABtn').onclick = async () => {
+      const b = $('#testarIABtn'); b.disabled = true; b.textContent = 'testando…';
+      try {
+        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value);
+        const r = await S.ai.testar();
+        toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
+      } catch (err) { toast(err.message, 'erro'); }
+      b.disabled = false; b.textContent = 'Testar'; pintarMotor();
+    };
+    $('#pausarBtn').onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
+
+    $('#fecharEstudioBtn').onclick = () => {
+      const e = S.state.atual(); if (!e) return;
+      confirmar('Fechar ' + e.nome + '?', 'Some com a equipe, os contratos e todos os arquivos deste estúdio. Exporte o .zip antes se quiser guardar as entregas.', () => {
+        S.state.remover(e.id); toast('Estúdio fechado.');
+      });
+    };
+    $('#zerarTudoBtn').onclick = () => {
+      confirmar('Apagar tudo?', 'Remove todos os estúdios e o histórico. A chave da API continua salva.', () => {
+        S.state.apagarTudo(); toast('Base limpa.');
+      });
+    };
+
+    window.addEventListener('resize', () => { if (viewAtual === 'estudio') S.studio.ajustarCanvas(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { pintarRelogio(); if (viewAtual === 'negocio') pintarNegocio(); } });
+  }
+
+  /* ---------- reações a eventos ---------- */
+  function assinar() {
+    S.bus.on('ia', () => { pintarPulso(); if (viewAtual === 'motor') pintarMotor(); });
+    S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
+    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); S.studio.ajustarCanvas(); } });
+    S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
+    S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
+    S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
+    S.bus.on('negocio', () => { if (viewAtual === 'negocio') pintarNegocio(); });
+    S.bus.on('relogio', () => { pintarRelogio(); });
+    S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
+    S.bus.on('trocou', () => { S.studio.montar(); pintarTopo(); mostrar(S.state.atual() ? (viewAtual === 'vazio' ? 'estudio' : viewAtual) : 'vazio'); pintarTudo(); });
+    S.bus.on('storage-falhou', () => toast('O navegador bloqueou o salvamento. O jogo roda, mas não guarda ao fechar.', 'erro'));
+  }
+
+  function pintarTudo() {
+    pintarTopo(); pintarRelogio();
+    if (!S.state.atual()) return;
+    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarKits(); pintarArquivos(); pintarNegocio(); pintarMotor();
+  }
+
+  /* ---------- início ---------- */
+  function iniciar() {
+    S.state.carregar();
+    S.ai.iniciar();
+    ligar(); assinar();
+    S.studio.montar();
+    mostrar(S.state.atual() ? 'estudio' : 'vazio');
+    pintarTudo();
+    setInterval(() => {
+      pintarRelogio();
+      if (viewAtual === 'negocio') pintarNegocio();
+      if (viewAtual === 'motor') pintarMotor();
+    }, 5000);
+    window.addEventListener('beforeunload', () => S.state.gravarJa());
+    if ('serviceWorker' in navigator) {
+      Promise.reject().catch(() => {});
+    }
+  }
+
+  S.ui = { toast, folha, fecharFolha, mostrar, pintarTudo };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
+  else iniciar();
+})(window.S);
+
+</script>
+</body>
+</html>

@@ -9,6 +9,24 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <link rel="stylesheet" href="app.css">
+<script>
+/* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
+(function(){
+  function mostra(txt){
+    var d=document.getElementById('erroFatal');
+    if(!d){ d=document.createElement('pre'); d.id='erroFatal';
+      d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;margin:0;padding:12px;max-height:45vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;border-top:2px solid #E4703E';
+      (document.body||document.documentElement).appendChild(d); }
+    d.textContent += txt + '\n';
+  }
+  window.addEventListener('error', function(e){
+    if (e.target && e.target.tagName === 'SCRIPT') mostra('Não carregou o arquivo: ' + (e.target.src||'?'));
+    else if (e.target && e.target.tagName === 'LINK') mostra('Não carregou o estilo: ' + (e.target.href||'?'));
+    else mostra((e.message||'erro') + '\n  em ' + (e.filename||'?') + ':' + (e.lineno||0));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){ mostra('Promessa rejeitada: ' + (e.reason && e.reason.message || e.reason)); });
+})();
+</script>
 </head>
 <body>
 
