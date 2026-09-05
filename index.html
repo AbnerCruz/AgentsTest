@@ -369,7 +369,7 @@ import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transfo
    IA LOCAL — tudo roda no navegador. O modelo é baixado uma vez
    e fica em cache do navegador; nenhuma chave/API paga é usada.
    ============================================================ */
-const MODEL_LOCAL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
+const MODEL_LOCAL = "onnx-community/SmolLM2-360M-ONNX";
 const MODEL_BARATO = MODEL_LOCAL;
 const MODEL_GERENTE = MODEL_LOCAL;
 const NOME_CURTO = { [MODEL_LOCAL]: 'SmolLM2 360M · local' };
@@ -400,7 +400,7 @@ async function carregarIA(){
       const webgpu = !!(navigator.gpu && env.IS_WEBGPU_AVAILABLE !== false);
       const device = webgpu ? 'webgpu' : 'wasm';
       const dtype = webgpu ? 'q4f16' : 'q4';
-      setAIStatus('Preparando IA local', webgpu ? 'Aceleração WebGPU disponível. Primeiro uso baixa o modelo (~273 MB).' : 'WebGPU não disponível; usando WASM. Pode ficar mais lento no celular.', 'loading', 0);
+      setAIStatus('Preparando IA local', webgpu ? 'WebGPU disponível. Primeiro uso baixa o modelo (~272 MB).' : 'WebGPU não disponível; usando WASM. Pode ficar mais lento no celular.', 'loading', 0);
       localPipeline = await pipeline('text-generation', MODEL_LOCAL, {
         device, dtype,
         progress_callback: p => {
@@ -413,7 +413,8 @@ async function carregarIA(){
       return localPipeline;
     }catch(err){
       localPipeline=null;
-      setAIStatus('Não foi possível carregar a IA local', 'Verifique a internet e recarregue a página. Nenhuma API paga foi chamada.', 'error', null);
+      const detalhe = err?.message ? String(err.message).slice(0, 220) : 'Falha desconhecida';
+      setAIStatus('Não foi possível carregar a IA local', 'Erro: '+detalhe+' · recarregue e tente novamente.', 'error', null);
       console.error('Falha ao carregar IA local:',err);
       throw err;
     }finally{ localLoading=null; }
