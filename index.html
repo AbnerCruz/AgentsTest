@@ -467,6 +467,7 @@ if(modeloSelecionado==='onnx-community/SmolLM-135M-Instruct-ONNX'){ modeloSeleci
 if(!Object.values(MODELOS).some(m => m.id === modeloSelecionado)) modeloSelecionado = MODEL_PADRAO;
 let modelosInstalados = [];
 const modelosBaixando = new Set();
+const progressoDownloads = new Map();
 try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados') || '[]'); } catch(e) { modelosInstalados=[]; }
 if(!Array.isArray(modelosInstalados)) modelosInstalados=[];
 function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.recomendado; }
@@ -2443,6 +2444,9 @@ function renderModelManager(){
     const safeId='model_'+key;
     const status=downloading ? 'BAIXANDO' : installed ? (active?'ATIVO':'BAIXADO · DESLIGADO') : 'NÃO INSTALADO';
     const statusClass=downloading?'tag-info':active?'tag-ok':installed?'tag-info':'tag-pend';
+    const dp=progressoDownloads.get(m.id);
+    const pct=dp && typeof dp.pct==='number' ? dp.pct : 0;
+    const detalheDown=dp ? `${escapeHtml(dp.file||'preparando')} · ${escapeHtml(dp.mbDone||'0 MB')} / ${escapeHtml(dp.mbTotal||'calculando…')}${dp.fileTotal ? ` · arquivo ${escapeHtml(dp.fileDone||'0 MB')} / ${escapeHtml(dp.fileTotal)}`:''}` : '';
     return `<div class="card" style="padding:12px;">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
         <div><div style="font-weight:700;">${escapeHtml(m.nome)}</div><div class="stage-note">${escapeHtml(m.nivel)} · ${escapeHtml(m.tamanho)} · RAM ${escapeHtml(m.memoria)}</div></div>
@@ -2450,6 +2454,7 @@ function renderModelManager(){
       </div>
       <div class="stage-note" style="margin-top:6px;">${escapeHtml(m.detalhe)}</div>
       <div class="stage-note" style="margin-top:3px;">Modelo: ${escapeHtml(m.id)}</div>
+      ${downloading ? `<div style="margin-top:10px;"><div style="height:10px;background:var(--grid);border-radius:999px;overflow:hidden;border:1px solid var(--line);"><div data-download-bar="${safeId}" style="height:100%;width:${pct}%;background:var(--amber);transition:width .2s ease;"></div></div><div data-download-detail="${safeId}" class="stage-note" style="margin-top:5px;">${detalheDown || 'Preparando download…'}</div></div>` : ''}
       <div class="modal-actions" style="margin-top:9px;">
         ${!installed ? `<button class="btn small primary" data-model-action="download" data-model-id="${escapeHtml(m.id)}" data-model-key="${safeId}" ${downloading?'disabled':''}>${downloading?'Baixando…':'Baixar modelo'}</button>` : ''}
         ${installed && !active ? `<button class="btn small" data-model-action="activate" data-model-id="${escapeHtml(m.id)}">Ativar e executar</button>` : ''}
@@ -2479,45 +2484,96 @@ function renderModelManager(){
   });
 }
 
+function atualizarProgressoDownloadUI(id, info){
+  progressoDownloads.set(id, info||{});
+  const m=configModelo(id); const key=Object.entries(MODELOS).find(([,x])=>x.id===id)?.[0];
+  const safeId=key ? 'model_'+key : '';
+  const bar=safeId ? document.querySelector(`[data-download-bar="${safeId}"]`) : null;
+  const detail=safeId ? document.querySelector(`[data-download-detail="${safeId}"]`) : null;
+  const pct=typeof info?.pct==='number' ? Math.max(0,Math.min(100,info.pct)) : 0;
+  if(bar) bar.style.width=pct+'%';
+  if(detail) detail.textContent=`${info?.file||'preparando'} · ${info?.mbDone||'0 MB'} / ${info?.mbTotal||'calculando…'}${info?.fileTotal ? ` · arquivo ${info.fileDone||'0 MB'} / ${info.fileTotal}`:''}`;
+  const topBar=document.getElementById('aiProgressBar');
+  if(topBar) topBar.style.width=pct+'%';
+  const topBox=document.getElementById('aiProgress'); if(topBox) topBox.hidden=false;
+}
+function fmtMB(n){
+  if(!Number.isFinite(n) || n<0) return '0 MB';
+  const mb=n/1048576;
+  return (mb>=100 ? mb.toFixed(0) : mb.toFixed(1))+' MB';
+}
+async function baixarModeloDiretoSemIA(id){
+  const m=configModelo(id);
+  const api='https://huggingface.co/api/models/'+id;
+  const metaResp=await fetch(api,{cache:'no-store'});
+  if(!metaResp.ok) throw new Error(`Não foi possível consultar o modelo (${metaResp.status}).`);
+  const meta=await metaResp.json();
+  const files=(meta.siblings||[]).map(x=>x.rfilename).filter(Boolean);
+  const pequenos=['config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','generation_config.json','chat_template.jinja','merges.txt','vocab.json'];
+  const escolhidos=files.filter(f=>pequenos.includes(f));
+  const onnx=files.filter(f=>/\.onnx$/i.test(f));
+  const d=String(m.dtype||'q8').toLowerCase();
+  function score(f){ const x=f.toLowerCase(); let z=0; if(d==='q4f16'&&/q4f16/.test(x))z+=100; if(d==='q4'&&/q4(\.|_|$)/.test(x))z+=100; if(d==='q8'&&/q8(\.|_|$)/.test(x))z+=100; if(d==='q8'&&/quantized/.test(x))z+=70; if(d==='q8'&&/int8|uint8/.test(x))z+=50; if(/(^|\/)model\.onnx$/.test(x))z+=10; if(/^onnx\//.test(x))z+=5; return z; }
+  onnx.sort((a,b)=>score(b)-score(a));
+  if(!onnx.length) throw new Error('Este modelo não possui arquivo ONNX no repositório.');
+  escolhidos.push(onnx[0]);
+  const unique=[...new Set(escolhidos)];
+  const cache=await caches.open('ia-modelos-v1');
+  const tamanhos=[]; let totalBytes=0; let bytesProntos=0;
+  for(const f of unique){
+    const u='https://huggingface.co/'+id+'/resolve/main/'+f;
+    const ex=await cache.match(u,{ignoreVary:true});
+    let n=Number(ex?.headers?.get('content-length')||0);
+    tamanhos.push(n); totalBytes+=n;
+  }
+  // Quando o tamanho total não está disponível no cache, o progresso passa a
+  // ser recalculado à medida que cada servidor informa Content-Length.
+  for(let i=0;i<unique.length;i++){
+    const f=unique[i]; const url='https://huggingface.co/'+id+'/resolve/main/'+f;
+    const existente=await cache.match(url,{ignoreVary:true});
+    if(existente){
+      const n=tamanhos[i]||0; bytesProntos+=n;
+      atualizarProgressoDownloadUI(id,{pct:totalBytes?bytesProntos/totalBytes*100:0,file:f,mbDone:fmtMB(bytesProntos),mbTotal:totalBytes?fmtMB(totalBytes):'calculando…',fileDone:fmtMB(n),fileTotal:n?fmtMB(n):''});
+      continue;
+    }
+    atualizarProgressoDownloadUI(id,{pct:totalBytes?bytesProntos/totalBytes*100:0,file:`Preparando ${f}`,mbDone:fmtMB(bytesProntos),mbTotal:totalBytes?fmtMB(totalBytes):'calculando…'});
+    const r=await fetch(url,{cache:'no-store'}); if(!r.ok) throw new Error(`Falha ao baixar ${f} (${r.status}).`);
+    const len=Number(r.headers.get('content-length')||0); if(len&&!tamanhos[i]){tamanhos[i]=len; totalBytes+=len;}
+    const inicio=bytesProntos;
+    if(!r.body){ await cache.put(url,r.clone()); bytesProntos+=len; atualizarProgressoDownloadUI(id,{pct:totalBytes?bytesProntos/totalBytes*100:0,file:f,mbDone:fmtMB(bytesProntos),mbTotal:totalBytes?fmtMB(totalBytes):'concluído',fileDone:fmtMB(len),fileTotal:len?fmtMB(len):''}); continue; }
+    const [cacheStream,progressStream]=r.body.tee();
+    const cachePromise=cache.put(url,new Response(cacheStream,{headers:r.headers,status:r.status,statusText:r.statusText}));
+    const reader=progressStream.getReader(); let atual=0;
+    while(true){
+      const chunk=await reader.read(); if(chunk.done) break; atual+=chunk.value?.byteLength||0;
+      const global=inicio+atual;
+      atualizarProgressoDownloadUI(id,{pct:totalBytes?global/totalBytes*100:0,file:f,mbDone:fmtMB(global),mbTotal:totalBytes?fmtMB(totalBytes):'calculando…',fileDone:fmtMB(atual),fileTotal:len?fmtMB(len):''});
+      await new Promise(requestAnimationFrame);
+    }
+    await cachePromise; bytesProntos=inicio+atual;
+    atualizarProgressoDownloadUI(id,{pct:totalBytes?bytesProntos/totalBytes*100:100,file:f,mbDone:fmtMB(bytesProntos),mbTotal:totalBytes?fmtMB(totalBytes):fmtMB(bytesProntos),fileDone:fmtMB(atual),fileTotal:len?fmtMB(len):fmtMB(atual)});
+  }
+}
+
 async function baixarModeloIA(id){
   const m=configModelo(id);
-  if(modeloInstalado(id)){
-    setAIStatus('idle','Modelo já baixado',`${m.nome} está instalado. O download não inicia a IA. Use “Ativar” para executar.`);
-    renderModelManager();
-    return;
-  }
+  if(modeloInstalado(id)){ setAIStatus('idle','Modelo já baixado',`${m.nome} está instalado. O download não inicia a IA. Use “Ativar” para executar.`); renderModelManager(); return; }
   if(modelosBaixando.has(id)) return;
   try{
-    modelosBaixando.add(id); renderModelManager();
-    // IMPORTANTE: este caminho nao chama carregarIA(), nao cria pipeline e nao
-    // tenta executar o modelo. O download acontece isoladamente no Worker.
-    setAIStatus('loading','Baixando modelo (sem executar IA)',`${m.nome} · os arquivos serão guardados no cache. Você poderá ativá-lo depois.`,0);
-    await prepararRuntimeOffline();
-    const w=criarWorkerIA();
-    await new Promise((resolve,reject)=>{
-      const onDownloadReady=ev=>{ if(ev.modelId===id) resolve(true); };
-      const onDownloadError=ev=>{ if(ev.modelId===id) reject(new Error(ev.error||'Falha no download.')); };
-      // O fluxo de mensagens normal já atualiza a interface; estes listeners
-      // existem apenas para encerrar a promessa do download.
-      const old=w.onmessage;
-      w.addEventListener('message',function handler(ev){
-        const d=ev.data||{};
-        if(d.type==='download-ready' && d.modelId===id){ w.removeEventListener('message',handler); resolve(true); }
-        if(d.type==='download-error' && d.modelId===id){ w.removeEventListener('message',handler); reject(new Error(d.error||'Falha no download.')); }
-      });
-      w.postMessage({type:'download',modelId:id,dtype:m.dtype});
-    });
+    modelosBaixando.add(id);
+    progressoDownloads.set(id,{pct:0,file:'Preparando download…',mbDone:'0 MB',mbTotal:'calculando…'});
+    renderModelManager();
+    setAIStatus('loading','Baixando modelo — IA desligada',`${m.nome} · download separado da execução. O modelo não será carregado na RAM.`,0);
+    // IMPORTANTE: este caminho NÃO cria Worker de IA, NÃO importa Transformers.js
+    // e NÃO chama carregarIA(). É somente rede + Cache Storage.
+    await baixarModeloDiretoSemIA(id);
     marcarModeloInstalado(id);
     modelosBaixando.delete(id);
-    try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
-    setAIStatus('idle','Download concluído ✓',`${m.nome} está instalado, mas permanece desligado. Isso é intencional: baixar e executar são etapas separadas.`);
+    progressoDownloads.set(id,{pct:100,file:'Download concluído',mbDone:progressoDownloads.get(id)?.mbDone||'',mbTotal:progressoDownloads.get(id)?.mbTotal||''});
+    setAIStatus('idle','Download concluído ✓',`${m.nome} está instalado e permanece desligado. Agora o botão “Ativar e executar” é o único caminho que carrega a IA.`);
     renderModelManager(); renderModelUI();
-    // Nao deixamos o worker de download virar o motor da IA. Ele e encerrado
-    // aqui para liberar qualquer memoria temporaria antes da ativacao.
-    encerrarWorkerIA();
   }catch(err){
     modelosBaixando.delete(id);
-    encerrarWorkerIA();
     setAIStatus('error','Falha no download do modelo',String(err?.message||err));
     renderModelManager();
   }
