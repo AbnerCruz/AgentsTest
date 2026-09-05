@@ -831,17 +831,20 @@ PRECISA_USUARIO: sim ou nao`;
   };
 }
 
-async function chamarAPI(system, userText, maxTokens, model, agentId){
+async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='decisao'){
   if(!modeloInstalado(modeloSelecionado)) throw new Error('Nenhum modelo de IA instalado. Abra IA / Modelos e baixe um modelo gratuito.');
   await carregarIA();
   setAIStatus('loading','IA processando…','O modelo está trabalhando em segundo plano; o escritório continua livre.',null);
   const memoria = Number(navigator.deviceMemory || 0);
-  // Em CPU, cada token custa tempo real. Textos curtos sao a diferenca entre
-  // uma resposta em 20s e uma em 4 minutos.
-  const tetoCelular = memoria && memoria <= 4 ? 64 : 110;
+  // Em CPU cada token custa tempo real, mas cortar tudo entrega arquivo pela
+  // metade. Decisao curta e apertada; conteudo entregavel tem folga.
+  const conteudo = tipo === 'conteudo';
+  const fraco = memoria && memoria <= 4;
+  const tetoCelular = conteudo ? (fraco ? 320 : 480) : (fraco ? 64 : 110);
   const limite=Math.min(Number(maxTokens)||80,tetoCelular);
-  const sysText=String(system||'').slice(0,650);
-  const userTextSafe=String(userText||'').slice(0,650);
+  const corte = conteudo ? 1100 : 650;
+  const sysText=String(system||'').slice(0,corte);
+  const userTextSafe=String(userText||'').slice(0,corte);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
   chamadasNaFila++;
   const inicioGeracao = Date.now();
@@ -876,9 +879,13 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
     const text=extrairTextoGerado(result);
     if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
     setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
-    monFim(monId,'ok',{resposta:text.slice(0,400)});
+    // Sem contagem de tokens exposta, o tamanho serve de indicio: texto que
+    // encosta no teto quase sempre foi cortado no meio.
+    var truncado = text.length > limite*3.2;
+    monFim(monId, truncado ? 'cortado' : 'ok', {resposta:text.slice(0,400), erro: truncado ? 'bateu no limite de tokens; pode estar incompleta' : ''});
+    if(truncado) monEvento(`Resposta de ${nomeDeAgente(agentId)} bateu no limite de ${limite} tokens; pode ter vindo incompleta.`,'aviso');
     contabilizar(modeloSelecionado,{ms:Date.now()-inicioGeracao},agentId);
-    return {text,cortado:false};
+    return {text,cortado:truncado};
   }catch(err){
     setAIStatus('error','Erro ao gerar resposta',String(err?.message || err || 'erro desconhecido'),null);
     monFim(monId,'erro',{erro:String(err?.message||err||'erro')});
@@ -929,7 +936,7 @@ async function askAI(system, userText, maxTokens, model, agentId){
    arquivo quebravam o parse. O modelo responde em blocos de texto simples. */
 async function askAIBlock(system, userText, maxTokens, model, agentId){
   try{
-    const { text, cortado } = await chamarAPI(system, userText, maxTokens, model, agentId);
+    const { text, cortado } = await chamarAPI(system, userText, maxTokens, model, agentId, 'conteudo');
     const limpo = text.replace(/```[a-z]*/gi,'').trim();
     const campo = k => {
       const m = limpo.match(new RegExp('^'+k+':\\s*(.*)$','mi'));
@@ -1007,7 +1014,7 @@ function monFim(id, status, extra){
   const reg = Object.assign({}, a, extra||{}, {status, ms: Date.now()-a.inicio, fim: Date.now()});
   MON.chamadas.unshift(reg);
   if(MON.chamadas.length>40) MON.chamadas.pop();
-  if(status==='ok'){ MON.ultimaConclusao = Date.now(); MON.falhasSeguidas = 0; }
+  if(status==='ok' || status==='cortado'){ MON.ultimaConclusao = Date.now(); MON.falhasSeguidas = 0; }
   else MON.falhasSeguidas++;
   renderMonitor();
 }
@@ -1041,7 +1048,7 @@ function renderMonitor(){
     cel('Modelo', configModelo().nome) +
     cel('Na fila', String(chamadasNaFila)) +
     cel('Ultima resposta', desdeConclusao==null ? 'nenhuma nesta sessao' : 'ha '+monTempo(desdeConclusao)) +
-    cel('Chamadas ok/erro', `${MON.chamadas.filter(c=>c.status==='ok').length}/${MON.chamadas.filter(c=>c.status!=='ok').length}`) +
+    cel('Ok/incompl/erro', `${MON.chamadas.filter(c=>c.status==='ok').length}/${MON.chamadas.filter(c=>c.status==='cortado').length}/${MON.chamadas.filter(c=>c.status!=='ok'&&c.status!=='cortado').length}`) +
     cel('Religadas sozinho', String(MON.autoReinicios)) +
     cel('Threads de CPU', MOTOR_THREADS + (self.crossOriginIsolated ? ' (turbo)' : ' (sem turbo)'));
 
@@ -1060,11 +1067,11 @@ function renderMonitor(){
   const lista = document.getElementById('monChamadas');
   if(lista){
     lista.innerHTML = MON.chamadas.length ? MON.chamadas.map(c=>{
-      const cls = c.status==='ok' ? 'ok' : 'erro';
+      const cls = c.status==='ok' ? 'ok' : c.status==='cortado' ? 'aviso' : 'erro';
       const extra = MON.mostrarPrompt
         ? `<pre>PEDIDO: ${escapeHtml(String(c.pedido||'').slice(0,300))}\nRESPOSTA: ${escapeHtml(String(c.resposta||c.erro||'').slice(0,300))}</pre>`
         : (c.status!=='ok' ? `<pre>${escapeHtml(String(c.erro||'').slice(0,200))}</pre>` : '');
-      return `<div class="mon-item ${cls}"><span class="ts">${monHora(c.fim)}</span>${escapeHtml(c.agente)} · ${escapeHtml(c.motivo||'')} · ${monTempo(c.ms)} · ${c.status==='ok'?'ok':'falhou'}${extra}</div>`;
+      return `<div class="mon-item ${cls}"><span class="ts">${monHora(c.fim)}</span>${escapeHtml(c.agente)} · ${escapeHtml(c.motivo||'')} · ${monTempo(c.ms)} · ${c.status==='ok'?'ok':c.status==='cortado'?'incompleta':'falhou'}${extra}</div>`;
     }).join('') : '<div class="mon-item">Nenhuma chamada registrada nesta sessao.</div>';
   }
 
