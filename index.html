@@ -310,6 +310,10 @@
         <input id="orderInput" type="text" placeholder="Dar uma ordem à equipe...">
         <button class="btn primary" id="sendBtn">Enviar</button>
       </div>
+      <div class="card" style="margin-bottom:10px;">
+        <h3>Plano de trabalho</h3>
+        <div id="backlogList"></div>
+      </div>
       <div class="approval-box" id="approvalBox" hidden>
         <div class="ab-title">Aguardando sua aprovação</div>
         <div id="approvalList"></div>
@@ -331,7 +335,11 @@
         <input id="deliverableInput" type="text" placeholder="Pedir um entregável... (ex: texto do anúncio de lançamento)">
         <button class="btn primary" id="deliverableBtn">Pedir</button>
       </div>
-      <div class="stage-note">O agente certo escreve o arquivo de verdade. Ele aparece aqui pra você ler e baixar. Tarefas normais da aba Reuniões também deixam arquivo aqui quando produzem algo concreto.</div>
+      <div class="log-scope">
+        <button class="scope-btn active" data-escopo="trabalho">Trabalho</button>
+        <button class="scope-btn" data-escopo="produto">Produto final</button>
+      </div>
+      <div class="stage-note" id="filesNote"></div>
       <div id="filesList"></div>
     </section>
 
@@ -946,6 +954,7 @@ const FURNITURE = {
   eat:  {pos:{x:150,y:330}, icon:'🍎'},
   drink:{pos:{x:310,y:330}, icon:'💧'},
   think:{pos:{x:470,y:330}, icon:'💭'},
+  rest: {pos:{x:620,y:330}, icon:'😴'},
 };
 const ACAO_KEY = { comer:'eat', beber:'drink', pensar:'think' };
 
@@ -971,6 +980,11 @@ function buildRuntime(){
       desk, pos:{ x: desk.x, y: desk.y + 56 }, target:null, state:'sitting',
       icon:null, bubbleText:null, forced:false, currentTask:null, thinking:false,
       norte:{produto:f.norte?.produto||'', equipe:f.norte?.equipe||''},
+      vitais: Object.assign({energia:80,fome:25,sede:30,humor:65,satisfacao:60}, f.vitais||{}),
+      memoria: Array.isArray(f.memoria) ? f.memoria.slice(-6) : [],
+      afinidade: Object.assign({}, f.afinidade||{}),
+      opinioes: Array.isArray(f.opinioes) ? f.opinioes.slice(-6) : [],
+      desmaiadoAte: 0,
     };
     return rt;
   });
@@ -1176,6 +1190,228 @@ async function demitirPorDecisaoGerente(manager, funcionarioId, justificativa){
   return true;
 }
 
+/* ============================================================
+   Plano de trabalho: a fila de tarefas que a gerente mantem e os
+   funcionarios consomem. E isto que substitui o antigo comportamento
+   em que cada agente inventava sozinho o que fazer a cada ciclo.
+   ============================================================ */
+function backlog(){
+  const emp = empresaAtual(); if(!emp) return [];
+  if(!Array.isArray(emp.backlog)) emp.backlog = [];
+  return emp.backlog;
+}
+function adicionarTarefa({titulo, para=null, origem='gerente', entrega='arquivo'}){
+  const t = String(titulo||'').trim(); if(!t) return null;
+  const lista = backlog();
+  if(lista.some(x => x.status!=='feita' && x.titulo.toLowerCase() === t.toLowerCase())) return null;
+  const tarefa = { id:'t'+Date.now()+Math.random().toString(36).slice(2,5), titulo:t, para, origem, entrega, status:'aberta', criadaEm:Date.now() };
+  lista.push(tarefa);
+  emp_limparBacklog();
+  renderBacklog(); saveDB();
+  return tarefa;
+}
+function emp_limparBacklog(){
+  const emp = empresaAtual(); if(!emp) return;
+  const feitas = emp.backlog.filter(t => t.status==='feita');
+  if(feitas.length > 12) emp.backlog = emp.backlog.filter(t => t.status!=='feita').concat(feitas.slice(-12));
+}
+function proximaTarefaDe(rt){
+  return backlog().find(t => t.status==='aberta' && t.para === rt.id)
+      || backlog().find(t => t.status==='aberta' && !t.para);
+}
+function renderBacklog(){
+  const box = document.getElementById('backlogList'); if(!box) return;
+  const emp = empresaAtual();
+  const lista = emp ? (emp.backlog||[]) : [];
+  const abertas = lista.filter(t => t.status!=='feita');
+  if(!abertas.length){
+    box.innerHTML = '<div class="files-empty">Sem tarefas abertas. A gerente monta o plano sozinha no próximo ciclo, ou você pode dar uma ordem acima.</div>';
+    return;
+  }
+  box.innerHTML = abertas.map(t => {
+    const quem = t.para ? (emp.equipe.find(x=>x.id===t.para)?.nome || 'alguém') : 'primeiro livre';
+    const marca = t.status==='fazendo' ? '⏳' : '•';
+    return `<div class="row"><span>${marca} ${escapeHtml(t.titulo)}</span><span class="val">${escapeHtml(quem)}</span></div>`;
+  }).join('');
+}
+
+/* ============================================================
+   Vida interior: necessidades, humor e relacoes.
+   Tudo isto roda em JavaScript puro, sem consultar a IA — o modelo local
+   so entra quando o agente precisa FALAR (ideia, opiniao, desabafo).
+   ============================================================ */
+const LIMITE = { fome:75, sede:70, energia:25, humorBaixo:30 };
+
+function persistirVitais(rt){
+  const emp=empresaAtual(); if(!emp) return;
+  const f=emp.equipe.find(x=>x.id===rt.id); if(!f) return;
+  f.vitais={...rt.vitais}; f.memoria=rt.memoria.slice(-6);
+  f.afinidade={...rt.afinidade}; f.opinioes=rt.opinioes.slice(-6);
+}
+function lembrar(rt, texto){
+  if(!texto) return;
+  rt.memoria.push({ts:Date.now(), texto:String(texto).slice(0,120)});
+  if(rt.memoria.length>6) rt.memoria.shift();
+  persistirVitais(rt);
+}
+function ajustarHumor(rt, delta, motivo){
+  const v=rt.vitais;
+  const antes=v.humor;
+  v.humor=Math.max(0,Math.min(100,v.humor+delta));
+  if(motivo && Math.abs(delta)>=8){
+    lembrar(rt, `${delta>0?'Fiquei melhor':'Fiquei chateado'}: ${motivo}`);
+    if(antes>=LIMITE.humorBaixo && v.humor<LIMITE.humorBaixo) addLog(`${rt.name} está desanimado: ${motivo}`,'pend',rt.id);
+  }
+  persistirVitais(rt);
+}
+function afinidadeCom(rt, outroId){ return Number(rt.afinidade[outroId] ?? 0); }
+function mudarAfinidade(rt, outroId, delta){
+  rt.afinidade[outroId]=Math.max(-100,Math.min(100, afinidadeCom(rt,outroId)+delta));
+  persistirVitais(rt);
+}
+function estaDesmaiado(rt){ return Date.now() < (rt.desmaiadoAte||0); }
+
+/* Relogio biologico: uma passagem a cada 6s para todo mundo. */
+function tickVitais(){
+  const emp=empresaAtual(); if(!emp) return;
+  for(const rt of runtime){
+    const v=rt.vitais; if(!v) continue;
+    if(estaDesmaiado(rt)) continue;
+    const trabalhando = rt.state==='acting' || rt.thinking;
+    v.fome  = Math.min(100, v.fome + (trabalhando?0.9:0.5));
+    v.sede  = Math.min(100, v.sede + (trabalhando?1.2:0.7));
+    v.energia = Math.max(0, v.energia - (trabalhando?1.1:0.35));
+    let pressao=0;
+    if(v.fome>LIMITE.fome) pressao+=0.5;
+    if(v.sede>LIMITE.sede) pressao+=0.5;
+    if(v.energia<LIMITE.energia) pressao+=0.7;
+    if(pressao) ajustarHumor(rt,-pressao);
+    else if(v.humor<60) ajustarHumor(rt,0.2);
+    if(v.energia<=0 && !estaDesmaiado(rt)) desmaiar(rt);
+  }
+  renderAgentCards();
+}
+
+async function desmaiar(rt){
+  rt.desmaiadoAte=Date.now()+45000;
+  rt.forced=true; rt.state='acting'; rt.icon='💫'; rt.thinking=false; rt.currentTask=null;
+  addLog(`${rt.name} DESMAIOU de exaustão. Vai ficar fora por um tempo.`,'pend',rt.id);
+  lembrar(rt,'Desmaiei de cansaço no meio do expediente.');
+  const colega=runtime.find(r=>r.id!==rt.id && !estaDesmaiado(r) && !r.forced);
+  if(colega){
+    colega.forced=true;
+    await moveTo(colega, {x:rt.pos.x-34,y:rt.pos.y});
+    colega.state='talking'; colega.bubbleText='Você está bem?';
+    addLog(`${colega.name} largou o que estava fazendo para socorrer ${rt.name}.`,'info',colega.id);
+    mudarAfinidade(rt, colega.id, 18); mudarAfinidade(colega, rt.id, 8);
+    lembrar(rt, `${colega.name} me socorreu quando desmaiei.`);
+    await sleep(2500); colega.bubbleText=null; colega.state='sitting'; colega.forced=false;
+  }
+  await sleep(Math.max(0, rt.desmaiadoAte-Date.now()));
+  rt.vitais.energia=40; rt.vitais.fome=Math.min(rt.vitais.fome,60); rt.vitais.humor=Math.max(rt.vitais.humor,35);
+  rt.icon=null; rt.state='sitting'; rt.forced=false;
+  addLog(`${rt.name} voltou a si e retomou o expediente.`,'ok',rt.id);
+  persistirVitais(rt);
+}
+
+/* Necessidade fisica ganha da tarefa: ninguem produz bem com sede. */
+async function atenderNecessidade(rt){
+  const v=rt.vitais;
+  let tipo=null;
+  if(v.energia<LIMITE.energia) tipo='rest';
+  else if(v.sede>LIMITE.sede) tipo='drink';
+  else if(v.fome>LIMITE.fome) tipo='eat';
+  if(!tipo) return false;
+  const spot=FURNITURE[tipo];
+  rt.forced=true;
+  await moveTo(rt,spot.pos);
+  rt.state='acting'; rt.icon=spot.icon;
+  const rotulo={rest:'foi descansar',drink:'foi beber água',eat:'foi comer alguma coisa'}[tipo];
+  addLog(`${rt.name} ${rotulo}.`,'info',rt.id);
+  await sleep(tipo==='rest'?9000:4500);
+  if(tipo==='rest'){ v.energia=Math.min(100,v.energia+45); }
+  if(tipo==='drink'){ v.sede=Math.max(0,v.sede-70); }
+  if(tipo==='eat'){ v.fome=Math.max(0,v.fome-70); v.energia=Math.min(100,v.energia+12); }
+  ajustarHumor(rt,6);
+  rt.icon=null;
+  await moveTo(rt,seatOf(rt)); rt.state='sitting'; rt.forced=false;
+  persistirVitais(rt);
+  return true;
+}
+
+/* Conversa, ajuda e atrito — decididos por afinidade e humor, sem IA. */
+const CONVERSAS_BOAS=['Como você tocou aquilo?','Achei bom o que você entregou.','Se travar, me chama.','Isso aqui tá ficando bom.'];
+const CONVERSAS_RUINS=['Você mexeu no meu arquivo.','Assim não dá pra trabalhar.','De novo essa tarefa?','Isso não era comigo.'];
+
+async function interacaoSocial(rt,token){
+  while(token===autonomyToken){
+    await sleep(20000+Math.floor(Math.random()*25000));
+    if(token!==autonomyToken||rt.forced||estaDesmaiado(rt)) continue;
+    const outros=runtime.filter(r=>r.id!==rt.id && !r.forced && !estaDesmaiado(r));
+    if(!outros.length) continue;
+    const outro=outros[Math.floor(Math.random()*outros.length)];
+    const af=afinidadeCom(rt,outro.id);
+    const atrito = (af < -20 || rt.vitais.humor < LIMITE.humorBaixo) && Math.random()<0.5;
+    rt.forced=true; outro.forced=true;
+    try{
+      await moveTo(rt,{x:seatOf(outro).x-36,y:seatOf(outro).y});
+      if(token!==autonomyToken) return;
+      rt.state='talking';
+      if(atrito){
+        rt.bubbleText=CONVERSAS_RUINS[Math.floor(Math.random()*CONVERSAS_RUINS.length)];
+        addLog(`${rt.name} bateu de frente com ${outro.name}: "${rt.bubbleText}"`,'pend',rt.id);
+        mudarAfinidade(rt,outro.id,-12); mudarAfinidade(outro,rt.id,-10);
+        ajustarHumor(rt,-6,`discussão com ${outro.name}`); ajustarHumor(outro,-8,`discussão com ${rt.name}`);
+        lembrar(rt,`Discuti com ${outro.name}.`); lembrar(outro,`${rt.name} me destratou.`);
+      }else{
+        rt.bubbleText=CONVERSAS_BOAS[Math.floor(Math.random()*CONVERSAS_BOAS.length)];
+        addLog(`${rt.name} conversou com ${outro.name}: "${rt.bubbleText}"`,'info',rt.id);
+        mudarAfinidade(rt,outro.id,7); mudarAfinidade(outro,rt.id,7);
+        ajustarHumor(rt,4); ajustarHumor(outro,4);
+        const tarefaDoOutro=backlog().find(t=>t.status==='fazendo'&&t.para===outro.id);
+        if(tarefaDoOutro && afinidadeCom(rt,outro.id)>25){
+          addLog(`${rt.name} ajudou ${outro.name} em "${tarefaDoOutro.titulo}".`,'ok',rt.id);
+          tarefaDoOutro.ajuda=(tarefaDoOutro.ajuda||0)+1;
+          lembrar(rt,`Ajudei ${outro.name} em ${tarefaDoOutro.titulo}.`);
+          lembrar(outro,`${rt.name} me ajudou em ${tarefaDoOutro.titulo}.`);
+          ajustarHumor(outro,8,`ajuda de ${rt.name}`);
+        }
+      }
+      await sleep(2200); rt.bubbleText=null;
+      await moveTo(rt,seatOf(rt)); rt.state='sitting';
+    }finally{ rt.forced=false; outro.forced=false; rt.bubbleText=null; persistirVitais(rt); persistirVitais(outro); saveDB(); }
+  }
+}
+
+/* Onde a IA entra: o agente forma e diz uma opiniao propria. */
+async function opiniaoDoAgente(rt, assunto, texto){
+  const emp=empresaAtual(); if(!emp) return null;
+  const v=rt.vitais;
+  const sys=`Voce e ${rt.name}, ${rt.cargo} da ${emp.nome}. Estado agora: humor ${Math.round(v.humor)}/100, satisfacao com a empresa ${Math.round(v.satisfacao)}/100. Voce fala em primeira pessoa, com opiniao propria, e pode discordar.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+GOSTEI: sim ou nao
+NOTA: <numero de 0 a 10>
+COMENTARIO: <sua opiniao sincera, ate 16 palavras>`;
+  const usr=`Memoria recente: ${rt.memoria.slice(-3).map(m=>m.texto).join(' | ')||'nada marcante'}\nAssunto: ${assunto}\n${texto}`;
+  const out=await askAI(sys,usr,90,modeloDe(rt),rt.id);
+  if(!out) return null;
+  const nota=Math.max(0,Math.min(10,Number(out.nota)||5));
+  const registro={assunto,nota,gostei:out.gostei===true,comentario:String(out.comentario||''),ts:Date.now()};
+  rt.opinioes.push(registro); if(rt.opinioes.length>6) rt.opinioes.shift();
+  ajustarHumor(rt, registro.gostei?4:-4);
+  rt.vitais.satisfacao=Math.max(0,Math.min(100, rt.vitais.satisfacao + (nota-5)*2));
+  lembrar(rt, `Sobre ${assunto}: ${registro.comentario}`);
+  addLog(`${rt.name} opinou sobre ${assunto} (${nota}/10): ${registro.comentario}`, registro.gostei?'ok':'pend', rt.id);
+  persistirVitais(rt); saveDB();
+  return registro;
+}
+
+function climaDaEmpresa(){
+  if(!runtime.length) return null;
+  const m=k=>Math.round(runtime.reduce((a,r)=>a+(r.vitais?.[k]||0),0)/runtime.length);
+  return { humor:m('humor'), satisfacao:m('satisfacao'), energia:m('energia') };
+}
+
 function managerNameForLog(){ return runtime.find(r=>r.papel==='gerente')?.name || 'Gerente'; }
 
 async function executarIdeia(rt, plano){
@@ -1193,10 +1429,12 @@ async function executarIdeia(rt, plano){
   rt.norte.equipe=String(plano.equipe||rt.norte.equipe||'').trim();
   addLog(`${rt.name} começou: ${plano.ideia} | produto: ${rt.norte.produto} | equipe: ${rt.norte.equipe}`, 'info', rt.id);
 
+  const v=rt.vitais||{humor:60,satisfacao:60};
+  const persona=`Sua memoria recente: ${(rt.memoria||[]).slice(-3).map(m=>m.texto).join(' | ')||'primeiro dia util'}. Seu humor agora: ${Math.round(v.humor)}/100. Escreva do seu jeito, coerente com quem voce e e com o que ja fez.`;
   const pedeArquivo=plano.tipo==='criar';
   const sys=pedeArquivo
-    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Produza o material de verdade, pronto para uso. Deve ser diretamente útil ao produto final e deixar algo que outro colega possa aproveitar. ${FORMATO_ARQUIVO}`
-    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Execute a tarefa de forma concreta. Responda EXATAMENTE, sem markdown:
+    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Produza o material de verdade, pronto para uso. ${persona} ${FORMATO_ARQUIVO}`
+    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Execute a tarefa de forma concreta. ${persona} Responda EXATAMENTE, sem markdown:
 RESULTADO: <o que você fez, até 16 palavras>
 VENDAS: <numero>
 VISITAS: <numero>
@@ -1207,22 +1445,13 @@ SEGUIDORES: <numero>`;
     rt.currentTask=null; addLog(`${rt.name} tentou executar, mas não entregou resultado.`, 'pend', rt.id); return null;
   }
   const m=emp.metricas;
-  m.vendas+=(out.vendas||0); m.visitas+=(out.visitas||0); m.seguidores+=(out.seguidores||0); m.tarefas+=1;
+  m.tarefas+=1; // vendas/visitas/seguidores deixaram de ser numeros inventados pelo modelo
   if(pedeArquivo && out.conteudo?.trim()) salvarArquivo({nome:out.nome,tipo:out.tipo,conteudo:out.conteudo},rt);
   const resumo=out.resultado||plano.ideia;
   addLog(`${rt.name} PRODUZIU → ${resumo}`, 'ok', rt.id);
   renderMetrics();
   rt.currentTask=null;
-  const q=await revisarEntrega(rt, resumo + (pedeArquivo ? ` | arquivo ${out.nome}` : ''));
-  if(q && q.qualidade!=='boa' && q.pronto !== true && q.melhoria){
-    addLog(`${rt.name} vai corrigir a própria entrega: ${q.melhoria}`, 'info', rt.id);
-    const plano2={...plano, tipo:'tarefa', ideia:q.melhoria, produto:rt.norte.produto, equipe:rt.norte.equipe};
-    await executarCorrecao(rt, plano2);
-  }
-  const avaliacaoGerente=await aprovarEntregaGerente(rt,plano,out);
-  if(!avaliacaoGerente.aprovado){
-    addLog(`${managerNameForLog()} mantém a entrega de ${rt.name} fora do produto até nova correção.`, 'pend', rt.id);
-  }
+  // A avaliacao da gerente acontece no ciclo dela, sem travar o funcionario.
   saveDB();
   return out;
 }
@@ -1257,138 +1486,152 @@ async function autonomiaAmbiente(rt,token){
   }
 }
 
+/* O funcionario nao inventa mais uma acao aleatoria por ciclo: ele pega a
+   proxima tarefa do plano de trabalho, executa ate o fim e devolve. Uma
+   chamada de IA por entrega, em vez de cinco. */
 async function autonomiaDecisao(rt,token){
   while(token===autonomyToken){
-    await sleep(60000+Math.floor(Math.random()*60000));
-    if(token!==autonomyToken||rt.forced)continue;
-    if(chamadasNaFila>0)continue; // nao empilhar pedidos: o modelo local atende um por vez
-    const emp=empresaAtual(); if(!emp)continue;
-    const manager=runtime.find(r=>r.papel==='gerente'); rt.forced=true;
-    try{
-      if(!modeloInstalado(modeloSelecionado)){
-        addLog(`${rt.name} aguardou: nenhum modelo de IA está instalado.`, 'pend', rt.id);
+    await sleep(8000+Math.floor(Math.random()*7000));
+    if(token!==autonomyToken||rt.forced||estaDesmaiado(rt)) continue;
+    const emp=empresaAtual(); if(!emp) continue;
+    // Necessidade fisica vem antes da tarefa, e nao consome IA.
+    if(await atenderNecessidade(rt)) continue;
+    if(chamadasNaFila>0) continue;
+    if(!modeloInstalado(modeloSelecionado)) continue;
+    const tarefa=proximaTarefaDe(rt);
+    if(!tarefa){
+      // Ocioso e de bem: propoe uma ideia propria para o plano de trabalho.
+      if(rt.vitais.humor > 60 && Math.random() < 0.25 && chamadasNaFila === 0){
+        const emp2=empresaAtual();
+        const sys=`Voce e ${rt.name}, ${rt.cargo} da ${emp2.nome}. Voce esta sem tarefa e teve uma ideia propria do que fazer a seguir, coerente com seu cargo.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+IDEIA: <tarefa concreta que voce quer fazer, ate 12 palavras>
+PORQUE: <motivo, ate 12 palavras>`;
+        const out=await askAI(sys,`${contextoDaEmpresa()}\nSua memoria: ${(rt.memoria||[]).slice(-3).map(m=>m.texto).join(' | ')||'nada ainda'}`,90,modeloDe(rt),rt.id);
+        if(out && typeof out.ideia==='string' && adicionarTarefa({titulo:out.ideia, para:rt.id, origem:rt.name})){
+          addLog(`${rt.name} propôs uma ideia própria: ${out.ideia}${out.porque?' — '+out.porque:''}`,'ok',rt.id);
+          lembrar(rt, `Tive a ideia: ${out.ideia}.`);
+          ajustarHumor(rt, 5);
+        }
         continue;
       }
-      rt.thinking=true;rt.icon='🤔';rt.state='sitting';
-      const plano=await pensarContribuicao(rt); rt.thinking=false;rt.icon=null;
-      if(!plano||!plano.ideia){rt.forced=false;continue;}
-      if(plano.tipo==='pausa'){addLog(`${rt.name} fez uma pausa: ${plano.pausa||'pensar'}`,'info',rt.id);await fazerPausa(rt,plano.pausa);rt.forced=false;saveDB();continue;}
-      if(rt.papel==='gerente'){await executarIdeia(rt,plano);rt.state='sitting';rt.forced=false;saveDB();continue;}
-      if(!manager){rt.forced=false;continue;}
-      await moveTo(rt,{x:seatOf(manager).x-40,y:seatOf(manager).y}); if(token!==autonomyToken)return;
-      rt.state='talking';rt.bubbleText=plano.ideia.length>36?plano.ideia.slice(0,36)+'…':plano.ideia;
-      addLog(`${rt.name} propôs: ${plano.ideia} | produto: ${rt.norte.produto} | equipe: ${rt.norte.equipe}`,'info',rt.id);
-      const resposta=await pedirPermissao(rt,plano.ideia,manager); rt.bubbleText=null;
-      if(token!==autonomyToken)return;
-      const aprovado=resposta?resposta.aprovado:false;
-      manager.state='talking';manager.bubbleText=aprovado?'Pode ir ✓':'Reoriente';await sleep(900);manager.bubbleText=null;manager.state='sitting';
-      if(!aprovado){addLog(`${manager.name} reorientou ${rt.name}: ${resposta?.motivo||'a proposta não é prioridade'}`,'pend',rt.id);if(resposta?.ajuste) addLog(`Ajuste pedido: ${resposta.ajuste}`,'info',manager.id);await moveTo(rt,seatOf(rt));rt.state='sitting';rt.forced=false;saveDB();continue;}
-      if(resposta.ajuste)plano.ideia=`${plano.ideia} (ajuste da gerente: ${resposta.ajuste})`;
-      addLog(`${manager.name} aprovou o trabalho de ${rt.name}: ${resposta.motivo||'coerente com a empresa'}`,'ok',manager.id);
-      if(resposta.precisa_usuario){emp.aprovacoes.push({id:'p'+Date.now(),tipo:'estrategica',quem:rt.name,texto:plano.ideia,justificativa:`${manager.name} considerou necessária sua decisão antes desta ação.`,plano:{...plano,agentId:rt.id}});addLog(`${rt.name} aguarda sua aprovação para: ${plano.ideia}`,'pend',rt.id);renderApprovals();await moveTo(rt,seatOf(rt));rt.state='sitting';rt.forced=false;saveDB();continue;}
-      await moveTo(rt,seatOf(rt)); if(token!==autonomyToken)return;
-      await executarIdeia(rt,plano);rt.state='sitting';
-    }catch(err){console.warn('Ciclo autônomo falhou:',err);rt.thinking=false;rt.icon=null;rt.state='sitting';addLog(`${rt.name} teve uma falha no ciclo: ${err?.message||'erro desconhecido'}`,'pend',rt.id);
-    }finally{rt.thinking=false;rt.icon=null;rt.forced=false;saveDB();}
+      if(rt.state!=='sitting'){ await moveTo(rt,seatOf(rt)); rt.state='sitting'; }
+      continue;
+    }
+    // Com humor no chao e a tarefa nem sendo dele, o funcionario recusa.
+    if(rt.vitais.humor < LIMITE.humorBaixo && !tarefa.para && Math.random()<0.6){
+      addLog(`${rt.name} recusou pegar "${tarefa.titulo}": não está bem e diz que não é trabalho dele.`,'pend',rt.id);
+      lembrar(rt, `Recusei a tarefa "${tarefa.titulo}".`);
+      tarefa.recusas=(tarefa.recusas||0)+1;
+      continue;
+    }
+    tarefa.status='fazendo'; tarefa.para=rt.id; renderBacklog();
+    rt.forced=true;
+    try{
+      garantirNorte(rt);
+      addLog(`${rt.name} assumiu: ${tarefa.titulo}`,'info',rt.id);
+      await moveTo(rt,seatOf(rt));
+      const feito=await executarIdeia(rt,{ideia:tarefa.titulo, tipo:tarefa.entrega==='arquivo'?'criar':'tarefa'});
+      tarefa.status='feita'; tarefa.concluidaEm=Date.now();
+      if(feito) tarefa.entregue=feito.nome||feito.resultado||'';
+      if(feito){
+        ajustarHumor(rt, 7, 'entreguei uma tarefa');
+        rt.vitais.satisfacao=Math.min(100, rt.vitais.satisfacao+3);
+        lembrar(rt, `Entreguei: ${tarefa.titulo}.`);
+      }else{
+        ajustarHumor(rt, -6, `não consegui entregar "${tarefa.titulo}"`);
+        lembrar(rt, `Empaquei em ${tarefa.titulo}.`);
+      }
+      renderBacklog();
+    }catch(err){
+      tarefa.status='aberta';
+      addLog(`${rt.name} não conseguiu concluir "${tarefa.titulo}": ${err?.message||'erro'}`,'pend',rt.id);
+    }finally{
+      rt.forced=false; rt.thinking=false; rt.icon=null; rt.state='sitting'; saveDB(); renderBacklog();
+    }
   }
 }
 
-async function revisarProdutoContinuamente(rt,token){
-  while(token===autonomyToken){
-    await sleep(240000+Math.floor(Math.random()*120000));
-    if(token!==autonomyToken||rt.forced) continue;
-    if(chamadasNaFila>0) continue;
-    const emp=empresaAtual(); if(!emp) continue;
-    const arquivos=(emp.arquivos||[]).filter(f=>f.conteudo?.trim());
-    if(!arquivos.length){
-      addLog(`${rt.name} verificou o produto: ainda não há material para revisar; procurando algo útil para produzir.`,'info',rt.id);
-      continue;
-    }
-    rt.forced=true; rt.thinking=true; rt.icon='🔎';
-    try{
-      const lista=arquivos.slice(-8).map(f=>`${f.nome} (${f.tipo||'arquivo'})`).join('; ');
-      const sys=`Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Você participa do controle contínuo de qualidade do produto. Escolha o arquivo mais importante para o produto final e decida se precisa de melhoria. Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
-ARQUIVO: <nome exato>
-PRECISA_MELHORA: sim ou nao
-PROBLEMA: <ate 14 palavras>
-MELHORIA: <instrucao concreta, ate 18 palavras> Só diga que está bom se realmente estiver coerente com a missão, útil ao cliente e aproveitável pela equipe.`;
-      const out=await askAI(sys,`${contextoDaEmpresa()}\nArquivos para auditoria: ${lista}\nPerguntas-core: ${METRICAS_CORE[0]} / ${METRICAS_CORE[1]}`,120,modeloDe(rt),rt.id);
-      if(!out) continue;
-      const f=arquivos.find(x=>x.nome===out.arquivo)||arquivos.find(x=>out.arquivo&&x.nome.includes(out.arquivo));
-      if(!f){addLog(`${rt.name} não encontrou o arquivo indicado para revisão.`,'pend',rt.id);continue;}
-      if(out.precisa_melhora !== true){addLog(`${rt.name} revisou ${f.nome}: qualidade considerada suficiente por enquanto.`,'ok',rt.id);continue;}
-      const melhoria=out.melhoria||`Melhore ${f.nome} para ficar mais coerente com a missão da empresa e mais útil aos colegas.`;
-      addLog(`${rt.name} encontrou uma melhoria em ${f.nome}: ${out.problema||melhoria}`,'info',rt.id);
-      const manager=runtime.find(r=>r.papel==='gerente');
-      if(!manager){addLog(`${rt.name} não pode aplicar a melhoria porque a gerente não está disponível.`,'pend',rt.id);continue;}
-      const plano={ideia:melhoria,tipo:'editar',alvo:f.nome,produto:'melhorar o produto final existente',equipe:'entregar material mais útil aos colegas'};
-      const decisao=await pedirPermissao(rt,melhoria,manager);
-      if(!decisao?.aprovado){addLog(`${manager.name} recusou a melhoria proposta por ${rt.name} em ${f.nome}.`,'pend',manager.id);continue;}
-      if(decisao.precisa_usuario){
-        registrarPendenciaUsuario({tipo:'estrategica',quem:rt.name,texto:`Autorizar melhoria em ${f.nome}: ${melhoria}`,justificativa:`${manager.name} considera esta mudança estratégica e a equipe continuará operando em paralelo.`,plano:{...plano,agentId:rt.id}});
-        continue;
-      }
-      await aplicarEdicaoArquivo(f.id,melhoria,rt.id);
-      addLog(`${manager.name} aprovou e ${rt.name} concluiu a melhoria contínua em ${f.nome}.`,'ok',manager.id);
-    }catch(err){
-      addLog(`${rt.name} falhou na revisão contínua: ${err?.message||'erro desconhecido'}`,'pend',rt.id);
-    }finally{rt.thinking=false;rt.icon=null;rt.forced=false;saveDB();}
+/* A gerente tem duas funcoes concretas: manter o plano de trabalho cheio e
+   decidir o que vira produto final. Nada de auditoria generica a cada minuto. */
+async function planejarTrabalho(manager){
+  const emp=empresaAtual(); if(!emp) return;
+  const equipe=runtime.filter(r=>r.papel==='func').map(r=>`${r.id}=${r.name} (${r.cargo})`).join('; ')||'sem funcionarios';
+  const prontos=(emp.arquivos||[]).filter(f=>f.escopo!=='produto').slice(0,6).map(f=>f.nome).join(', ')||'nenhum';
+  const sys=`Voce e ${manager.name}, socia-gerente da ${emp.nome} (${emp.ramo}). Missao: ${emp.missao}. Defina as proximas tarefas concretas da equipe. Cada tarefa deve gerar um material utilizavel, nao uma reflexao.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+TAREFA1: <tarefa concreta, ate 12 palavras>
+PARA1: <id do funcionario>
+TAREFA2: <tarefa concreta, ate 12 palavras>
+PARA2: <id do funcionario>
+TAREFA3: <tarefa concreta, ate 12 palavras>
+PARA3: <id do funcionario>`;
+  const usr=`${contextoDaEmpresa()}\nEquipe: ${equipe}\nMateriais de trabalho ja existentes: ${prontos}\nDefina tarefas que avancem o produto final, sem repetir o que ja existe.`;
+  manager.thinking=true; manager.icon='📋';
+  addLog(`${manager.name} está montando o plano de trabalho da equipe.`,'info',manager.id);
+  const out=await askAI(sys,usr,150,MODEL_GERENTE,manager.id);
+  manager.thinking=false; manager.icon=null;
+  if(!out){ addLog(`${manager.name} não conseguiu montar o plano agora.`,'pend',manager.id); return; }
+  let criadas=0;
+  for(const n of ['1','2','3']){
+    const titulo=out['tarefa'+n]; if(!titulo||typeof titulo!=='string') continue;
+    const alvo=runtime.find(r=>r.papel==='func' && r.id===String(out['para'+n]||'').trim());
+    if(adicionarTarefa({titulo,para:alvo?alvo.id:null})) criadas++;
   }
+  addLog(criadas?`${manager.name} definiu ${criadas} tarefa(s) para a equipe.`:`${manager.name} revisou o plano e não achou tarefa nova necessária.`, criadas?'ok':'info', manager.id);
+}
+
+async function avaliarParaProduto(manager){
+  const emp=empresaAtual(); if(!emp) return;
+  const cand=(emp.arquivos||[]).find(f=>f.escopo!=='produto' && !f.avaliado);
+  if(!cand) return;
+  cand.avaliado=true;
+  const sys=`Voce e ${manager.name}, socia-gerente da ${emp.nome}. Decida se este material ja pode virar PRODUTO FINAL, aquele que o cliente recebe. Produto final nao se conserta depois: se faltar algo, ele volta para a equipe.
+Responda EXATAMENTE nestas linhas, sem markdown e sem JSON:
+PUBLICAR: sim ou nao
+MOTIVO: <ate 14 palavras>
+CORRECAO: <o que falta, ate 14 palavras, ou vazio>`;
+  const usr=`${contextoDaEmpresa()}\nArquivo: ${cand.nome} (${cand.tipo})\nAutor: ${cand.autor}\nTrecho: ${String(cand.conteudo).slice(0,1200)}`;
+  manager.thinking=true; manager.icon='✅';
+  const out=await askAI(sys,usr,110,MODEL_GERENTE,manager.id);
+  manager.thinking=false; manager.icon=null;
+  if(!out) return;
+  if(out.publicar === true){
+    publicarProduto(cand, manager, String(out.motivo||''));
+  }else{
+    const correcao=String(out.correcao||out.motivo||'').trim();
+    addLog(`${manager.name} não publicou ${cand.nome}: ${correcao||'ainda não está pronto'}`,'pend',manager.id);
+    if(correcao) adicionarTarefa({titulo:`Corrigir ${cand.nome}: ${correcao}`, para:null});
+  }
+  saveDB();
 }
 
 async function autonomiaGerente(manager,token){
   while(token===autonomyToken){
-    await sleep(90000+Math.floor(Math.random()*60000));
-    if(token!==autonomyToken||manager.forced)continue;
-    if(chamadasNaFila>0)continue;
+    await sleep(15000+Math.floor(Math.random()*10000));
+    if(token!==autonomyToken||manager.forced) continue;
+    if(chamadasNaFila>0) continue;
+    const emp=empresaAtual(); if(!emp) continue;
+    if(!modeloInstalado(modeloSelecionado)) continue;
     manager.forced=true;
     try{
-      const emp=empresaAtual(); if(!emp) continue;
-      if(!modeloInstalado(modeloSelecionado)){ addLog(`${manager.name} aguarda um modelo de IA instalado para assumir a gestão autônoma.`, 'pend', manager.id); continue; }
-      const plano=await auditoriaGerente(manager,'gestão contínua: pessoas, produtos, métricas, gargalos e direção');
-      if(token!==autonomyToken||!plano)continue;
-
-      if(plano.precisa_usuario === true || plano.decisao==='pedir_usuario'){
-        const pergunta=String(plano.pergunta_usuario||`O rumo atual da ${emp.nome} está agradando você?`).trim();
-        registrarPendenciaUsuario({tipo:'estrategica',quem:manager.name,texto:pergunta,justificativa:String(plano.justificativa||plano.diagnostico||''),plano:null});
-      }
-
-      if(plano.decisao==='contratar' && plano.necessidade){
-        await contratarPorDecisaoGerente(manager,plano.necessidade,plano.justificativa||plano.diagnostico||'necessidade identificada nas métricas');
-      } else if(plano.decisao==='demitir' && plano.funcionario){
-        await demitirPorDecisaoGerente(manager,plano.funcionario,plano.motivo_demitir||plano.justificativa||plano.diagnostico||'desempenho ou necessidade organizacional');
-      } else if(plano.decisao==='revisar' && plano.arquivo){
-        const f=(emp.arquivos||[]).find(x=>x.nome===plano.arquivo)||null;
-        if(f){addLog(`${manager.name} decidiu revisar ${f.nome}: ${plano.justificativa||plano.diagnostico||''}`,'info',manager.id);await aplicarEdicaoArquivo(f.id,`Revise criticamente este material e melhore-o. Motivo da gerente: ${plano.justificativa||plano.acao||''}`,manager.id);}
-      } else if((plano.decisao==='delegar'||plano.decisao==='rejeitar_produto') && plano.funcionario && plano.tarefa){
-        const alvo=runtime.find(r=>r.id===plano.funcionario&&r.papel==='func');
-        if(alvo){
-          garantirNorte(alvo);alvo.norte.produto=String(plano.produto||'').trim();alvo.norte.equipe=String(plano.equipe||'').trim();alvo.currentTask=plano.tarefa;
-          addLog(`${manager.name} → coordenou ${alvo.name}: ${plano.tarefa}`,'info',manager.id);
-          await moveTo(manager,{x:seatOf(alvo).x-40,y:seatOf(alvo).y});manager.state='talking';manager.bubbleText=plano.tarefa.length>38?plano.tarefa.slice(0,38)+'…':plano.tarefa;await sleep(900);manager.bubbleText=null;manager.state='sitting';
-          alvo.forced=true; await moveTo(alvo,seatOf(alvo));
-          await executarIdeia(alvo,{ideia:plano.tarefa,tipo:'criar',produto:plano.produto,equipe:plano.equipe});
-          alvo.forced=false;alvo.state='sitting';
-        }
-      } else if(plano.decisao==='aprovar_produto' && plano.arquivo){
-        addLog(`${manager.name} marcou ${plano.arquivo} como aprovado na auditoria executiva.`,'ok',manager.id);
-      }
-
-      // Pergunta de rumo não bloqueia a operação: o gerente continua trabalhando.
-      if((Date.now()-(emp.ultimaConsultaRumo||0)) > 180000){
-        emp.ultimaConsultaRumo=Date.now();
-        registrarPendenciaUsuario({tipo:'feedback_rumo',quem:manager.name,texto:`Você está satisfeito com o rumo que estou tomando na ${emp.nome}?`,justificativa:`Métricas: ${emp.metricas.vendas} vendas, ${emp.metricas.visitas} visitas, ${emp.metricas.seguidores} seguidores, ${emp.metricas.tarefas} tarefas. Minha direção atual: ${plano.diagnostico||'continuar melhorando produto e equipe.'}`});
-      }
-    }catch(err){addLog(`${manager.name} não conseguiu concluir uma ação gerencial: ${err?.message||'erro'}`,'pend',manager.id);
-    }finally{manager.forced=false;manager.thinking=false;manager.icon=null;saveDB();}
+      const abertas=backlog().filter(t=>t.status!=='feita').length;
+      if(abertas < 2) await planejarTrabalho(manager);
+      else await avaliarParaProduto(manager);
+    }catch(err){
+      addLog(`${manager.name} não concluiu uma ação gerencial: ${err?.message||'erro'}`,'pend',manager.id);
+    }finally{ manager.forced=false; manager.thinking=false; manager.icon=null; saveDB(); }
   }
 }
 
+let relogioVitais=null;
 function iniciarVidaAutonoma(token){
-  runtime.forEach(rt=>autonomiaAmbiente(rt,token));
-  runtime.filter(rt=>rt.papel==='func').forEach(rt=>{ autonomiaDecisao(rt,token); revisarProdutoContinuamente(rt,token); });
+  if(relogioVitais) clearInterval(relogioVitais);
+  relogioVitais=setInterval(tickVitais,6000);
+  runtime.forEach(rt=>{ autonomiaAmbiente(rt,token); interacaoSocial(rt,token); });
+  runtime.filter(rt=>rt.papel==='func').forEach(rt=>autonomiaDecisao(rt,token));
   const manager=runtime.find(r=>r.papel==='gerente');
-  if(manager){ autonomiaDecisao(manager,token); autonomiaGerente(manager,token); }
+  if(manager) autonomiaGerente(manager,token);
 }
 
 /* ============================================================
@@ -1870,6 +2113,7 @@ async function desinstalarModeloIA(id){
 }
 
 function renderAll(){
+  renderBacklog();
   const emp = empresaAtual();
   document.getElementById('emptyState').hidden = !!emp;
   document.getElementById('mainApp').hidden = !emp;
@@ -1925,6 +2169,8 @@ function renderAgentCards(){
   });
 }
 function statusLabel(rt){
+  if(estaDesmaiado(rt)) return 'desmaiado — precisa se recuperar';
+  if(rt.icon === '😴') return 'descansando';
   if(rt.thinking) return 'pensando (consultando a IA)...';
   if(rt.state === 'walking') return 'andando pelo escritório';
   if(rt.state === 'talking') return `falando: "${rt.bubbleText||''}"`;
@@ -1967,6 +2213,21 @@ function renderInspector(){
     <div class="field"><b>Tarefa atual:</b> ${escapeHtml(rt.currentTask || '— nenhuma —')}</div><div class="field"><b>Produto final:</b> ${escapeHtml(rt.norte?.produto || '—')}</div><div class="field"><b>Equipe:</b> ${escapeHtml(rt.norte?.equipe || '—')}</div><div class="field"><b>Qualidade:</b> ${rt.qualidade ? escapeHtml(`${rt.qualidade.nota}/10 · ${rt.qualidade.status}${rt.qualidade.problema ? ' · '+rt.qualidade.problema : ''}`) : '— ainda não revisada —'}</div>
     <div class="field"><b>Modelo:</b> <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></div>
     <div class="field"><b>Trabalho da IA:</b> ${f && f.uso && f.uso.chamadas ? `${f.uso.chamadas} gerações · ${fmtDur(f.uso.ms)}` : 'nenhuma geração ainda'}</div>
+    ${rt.vitais ? `
+    <div class="field"><b>Como está:</b></div>
+    <div class="hist-item">Humor ${Math.round(rt.vitais.humor)}/100 · Energia ${Math.round(rt.vitais.energia)}/100</div>
+    <div class="hist-item">Fome ${Math.round(rt.vitais.fome)}/100 · Sede ${Math.round(rt.vitais.sede)}/100</div>
+    <div class="hist-item">Satisfação com a empresa ${Math.round(rt.vitais.satisfacao)}/100</div>` : ''}
+    ${(rt.memoria&&rt.memoria.length) ? `<div class="field"><b>O que ele lembra:</b></div>`+rt.memoria.slice(-4).reverse().map(m=>`<div class="hist-item">${escapeHtml(m.texto)}</div>`).join('') : ''}
+    ${(rt.opinioes&&rt.opinioes.length) ? `<div class="field"><b>Opiniões:</b></div>`+rt.opinioes.slice(-3).reverse().map(o=>`<div class="hist-item">${escapeHtml(o.assunto)} — ${o.nota}/10: ${escapeHtml(o.comentario)}</div>`).join('') : ''}
+    ${(() => {
+      const rel = Object.entries(rt.afinidade||{}).map(([id,v]) => {
+        const outro = runtime.find(r=>r.id===id); if(!outro) return '';
+        const t = v>30?'próximo':v>0?'cordial':v>-30?'distante':'em atrito';
+        return `<div class="hist-item">${escapeHtml(outro.name)}: ${t} (${v>0?'+':''}${Math.round(v)})</div>`;
+      }).filter(Boolean);
+      return rel.length ? `<div class="field"><b>Relações:</b></div>`+rel.join('') : '';
+    })()}
     <div class="field"><b>Últimos eventos:</b></div>
     ${(f && f.historico.length) ? f.historico.map(h=>`<div class="hist-item">${h.ts} — ${escapeHtml(h.text)}</div>`).join('') : '<div class="hist-item">sem eventos ainda</div>'}`;
   document.getElementById('closeInspector').onclick = () => { selectedAgentId = null; renderInspector(); };
@@ -1987,6 +2248,8 @@ function salvarArquivo(arq, rt){
   if(!nome.toLowerCase().endsWith('.'+tipo)) nome += '.'+tipo;
   emp.arquivos.unshift({
     id:'f'+Date.now(), nome, tipo, conteudo: String(arq.conteudo), versao: 1,
+    escopo: arq.escopo === 'produto' ? 'produto' : 'trabalho',
+    linhagem: arq.linhagem || nome.replace(/\.[a-z0-9]+$/i,''),
     autor: rt ? rt.name : 'equipe',
     quando: new Date().toLocaleString('pt-BR', {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'}),
   });
@@ -2003,12 +2266,47 @@ function baixarArquivo(id){
   a.href = url; a.download = f.nome; document.body.appendChild(a); a.click();
   document.body.removeChild(a); setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
+/* Produto final e imutavel: publicar cria uma versao congelada. Uma correcao
+   nunca reescreve a versao publicada, ela gera a versao seguinte. */
+function publicarProduto(arqTrabalho, manager, motivo=''){
+  const emp=empresaAtual(); if(!emp||!arqTrabalho) return null;
+  const linhagem=arqTrabalho.linhagem || arqTrabalho.nome.replace(/\.[a-z0-9]+$/i,'');
+  const anteriores=(emp.arquivos||[]).filter(f=>f.escopo==='produto' && f.linhagem===linhagem);
+  const versao=anteriores.reduce((m,f)=>Math.max(m,f.versao||1),0)+1;
+  const base=arqTrabalho.nome.replace(/\.[a-z0-9]+$/i,'');
+  const produto={
+    id:'p'+Date.now(), nome:`${base}-v${versao}.${arqTrabalho.tipo}`, tipo:arqTrabalho.tipo,
+    conteudo:String(arqTrabalho.conteudo), versao, escopo:'produto', linhagem,
+    autor:arqTrabalho.autor||'equipe', publicadoPor:manager?manager.name:'gerente', motivo,
+    quando:new Date().toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}),
+  };
+  emp.arquivos.unshift(produto);
+  addLog(`${manager?manager.name:'A gerente'} PUBLICOU o produto final ${produto.nome}${motivo?' — '+motivo:''}`,'ok',manager?manager.id:null);
+  // Alguem da equipe forma opiniao propria sobre o que foi publicado.
+  const plateia=runtime.filter(r=>r.papel==='func'&&!estaDesmaiado(r));
+  if(plateia.length){
+    const quem=plateia[Math.floor(Math.random()*plateia.length)];
+    opiniaoDoAgente(quem, `o produto final ${produto.nome}`, `Trecho: ${String(produto.conteudo).slice(0,600)}`).catch(()=>{});
+  }
+  renderFiles(); saveDB();
+  return produto;
+}
+
+let escopoArquivos='trabalho';
 function renderFiles(){
   const emp = empresaAtual();
   const box = document.getElementById('filesList'); if(!box) return;
-  const arqs = (emp && emp.arquivos) || [];
+  const todos = (emp && emp.arquivos) || [];
+  const produto = escopoArquivos === 'produto';
+  const arqs = todos.filter(f => produto ? f.escopo==='produto' : f.escopo!=='produto');
+  const nota = document.getElementById('filesNote');
+  if(nota) nota.textContent = produto
+    ? 'Versões finais, prontas para entregar ou vender. Não são editadas: uma correção vira a próxima versão, e a anterior continua aqui.'
+    : 'Rascunhos e materiais de apoio. A gerente escolhe daqui o que vira produto final.';
   if(!arqs.length){
-    box.innerHTML = '<div class="files-empty">Nenhum arquivo ainda. Peça um entregável acima, ou dê uma ordem na aba Reuniões que produza algo concreto.</div>';
+    box.innerHTML = produto
+      ? '<div class="files-empty">Nenhum produto final publicado ainda. A gerente publica quando um material de trabalho estiver pronto.</div>'
+      : '<div class="files-empty">Nenhum arquivo de trabalho ainda. Peça um entregável acima, ou espere a equipe puxar as tarefas do plano.</div>';
     return;
   }
   box.innerHTML = arqs.map(f => `
@@ -2016,13 +2314,15 @@ function renderFiles(){
       <div class="file-head">
         <div>
           <div class="file-name">${escapeHtml(f.nome)}</div>
-          <div class="file-meta">v${f.versao||1} · ${escapeHtml(f.autor)} · ${escapeHtml(f.quando)} · ${f.conteudo.length} caracteres</div>
+          <div class="file-meta">v${f.versao||1} · ${escapeHtml(f.autor)}${f.publicadoPor?' · publicado por '+escapeHtml(f.publicadoPor):''} · ${escapeHtml(f.quando)} · ${f.conteudo.length} caracteres</div>
         </div>
         <div class="file-actions">
           <button class="btn small" data-ver="${f.id}">Ver</button>
-          <button class="btn small" data-editar="${f.id}">Editar</button>
+          ${f.escopo==='produto'
+            ? `<button class="btn small" data-nova="${f.id}">Nova versão</button>`
+            : `<button class="btn small" data-editar="${f.id}">Editar</button><button class="btn small" data-publicar="${f.id}">Publicar</button>`}
           <button class="btn small primary" data-baixar="${f.id}">Baixar</button>
-          <button class="btn small danger" data-apagar="${f.id}">×</button>
+          ${f.escopo==='produto' ? '' : `<button class="btn small danger" data-apagar="${f.id}">×</button>`}
         </div>
       </div>
       <div class="file-body" id="body-${f.id}" hidden>${escapeHtml(f.conteudo)}</div>
@@ -2032,6 +2332,11 @@ function renderFiles(){
     body.hidden = !body.hidden; b.textContent = body.hidden ? 'Ver' : 'Fechar';
   });
   box.querySelectorAll('[data-editar]').forEach(b => b.onclick = () => editarArquivoFlow(b.dataset.editar));
+  box.querySelectorAll('[data-nova]').forEach(b => b.onclick = () => editarArquivoFlow(b.dataset.nova));
+  box.querySelectorAll('[data-publicar]').forEach(b => b.onclick = () => {
+    const f = (empresaAtual().arquivos||[]).find(x => x.id === b.dataset.publicar);
+    if(f) publicarProduto(f, runtime.find(r=>r.papel==='gerente'), 'publicação pedida por você');
+  });
   box.querySelectorAll('[data-baixar]').forEach(b => b.onclick = () => baixarArquivo(b.dataset.baixar));
   box.querySelectorAll('[data-apagar]').forEach(b => b.onclick = () => {
     emp.arquivos = emp.arquivos.filter(x => x.id !== b.dataset.apagar);
@@ -2085,8 +2390,10 @@ function editarArquivoFlow(fileId){
   const opcoes = `<option value="">deixar a gerente escolher</option>` +
     funcs.map(x => `<option value="${x.id}">${escapeHtml(x.nome)} (${escapeHtml(x.cargo)})</option>`).join('');
   openModal(`
-    <h2>Editar ${escapeHtml(f.nome)}</h2>
-    <div class="msub">Está na versão ${f.versao||1}. Descreva a alteração — o agente recebe o conteúdo atual inteiro e reescreve.</div>
+    <h2>${f.escopo==='produto'?'Nova versão de':'Editar'} ${escapeHtml(f.nome)}</h2>
+    <div class="msub">${f.escopo==='produto'
+      ? `Esta é a versão ${f.versao||1} do produto final e não será alterada. O que você pedir vira a versão ${(f.versao||1)+1}.`
+      : `Está na versão ${f.versao||1}. Descreva a alteração — o agente recebe o conteúdo atual inteiro e reescreve.`}</div>
     <div class="form-row"><label for="editInstr">O que mudar?</label>
       <input class="field-input" id="editInstr" placeholder="ex: deixar o tom mais informal e adicionar um CTA"></div>
     <div class="form-row"><label for="editQuem">Quem edita?</label>
@@ -2145,6 +2452,13 @@ ALTERAÇÃO PEDIDA: ${instrucao}`;
 
   if(out && out.conteudo.trim()){
     if(out.cortado) addLog(`Atenção: a edição de ${f.nome} pode ter sido cortada no limite de tokens.`, 'pend', alvo.id);
+    if(f.escopo === 'produto'){
+      // Versao publicada nao se altera: a correcao vira a proxima versao.
+      const novo = publicarProduto({...f, conteudo:String(out.conteudo), autor:alvo.name}, runtime.find(r=>r.papel==='gerente'), out.resultado||instrucao);
+      addLog(`${alvo.name} gerou a versão seguinte de ${f.nome}${novo?' → '+novo.nome:''}.`, 'ok', alvo.id);
+      renderFiles(); saveDB();
+      return;
+    }
     f.conteudo = String(out.conteudo);
     f.versao = (f.versao||1) + 1;
     f.autor = alvo.name;
@@ -2172,6 +2486,7 @@ function renderTokens(){
     `<div class="row"><span>Tempo de IA acumulado</span><span class="val">${fmtDur(u.ms)}</span></div>`,
     `<div class="row"><span>Média por geração</span><span class="val">${fmtDur(media)}</span></div>`,
     `<div class="row"><span>Na fila agora</span><span class="val">${chamadasNaFila}</span></div>`,
+    (() => { const c = climaDaEmpresa(); return c ? `<div class="row"><span>Clima da equipe</span><span class="val">humor ${c.humor} · satisfação ${c.satisfacao} · energia ${c.energia}</span></div>` : ''; })(),
   ];
   const porAgente = emp.equipe.filter(f => f.uso && f.uso.chamadas).map(f =>
     `<div class="row"><span>${escapeHtml(f.nome)}</span><span class="val">${f.uso.chamadas} · ${fmtDur(f.uso.ms)}</span></div>`
@@ -2366,6 +2681,13 @@ canvas.addEventListener('click', e => {
 /* ============================================================
    Eventos de UI
    ============================================================ */
+document.querySelectorAll('[data-escopo]').forEach(b => b.onclick = () => {
+  document.querySelectorAll('[data-escopo]').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  escopoArquivos = b.dataset.escopo;
+  renderFiles();
+});
+
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
