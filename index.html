@@ -8,8 +8,15 @@
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <!-- Importação do WebLLM para rodar IA 100% no navegador sem chaves ou custos -->
 <script type="module">
-  import * as webllm from "https://esm.run/@mlc-ai/web-llm";
-  window.webllm = webllm;
+  try {
+    import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+    window.webllm = webllm;
+    window.webllmLoaded = true;
+  } catch(err) {
+    console.error("Falha ao importar WebLLM:", err);
+    window.webllmLoaded = false;
+    window.webllmLoadError = err.message || "Erro desconhecido ao importar módulo";
+  }
 </script>
 <style>
   :root{
@@ -212,6 +219,18 @@
   .modal-actions .btn{ flex:1; }
   [hidden]{ display:none !important; }
 
+  /* ---------- loader erro / simulação ---------- */
+  .loader-error{ color:#E28A7E; font-size:12.5px; margin:12px 0; line-height:1.5; }
+  .loader-error code{ background:#2A3A48; padding:2px 6px; border-radius:3px; font-size:11px; }
+  .loader-actions{ display:flex; gap:8px; margin-top:12px; }
+  .loader-actions .btn{ flex:1; }
+  .sim-badge{
+    display:inline-block; font-size:10px; font-weight:600; padding:2px 8px;
+    border-radius:999px; background:rgba(196,69,54,.25); color:#E28A7E; margin-left:6px;
+  }
+  .webgpu-ok .sim-badge{ background:rgba(107,144,128,.25); color:#9FC2AE; }
+
+
   /* ---------- carregamento da IA local ---------- */
   #loaderOverlay{
     position:fixed; inset:0; background:rgba(27,39,51,0.92); z-index:100;
@@ -231,10 +250,15 @@
 <!-- Tela de carregamento do WebLLM (Modelo 100% Gratuito no Navegador) -->
 <div id="loaderOverlay">
   <div class="loader-box">
-    <h2>Carregando IA no Navegador</h2>
-    <p>O simulador roda um modelo leve inteligente diretamente na sua placa de vídeo (WebGPU), totalmente gratuito e sem gastar créditos externos.</p>
-    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-    <div class="loader-status" id="loaderStatus">Inicializando motor local...</div>
+    <h2 id="loaderTitle">Carregando IA no Navegador</h2>
+    <p id="loaderDesc">O simulador roda um modelo leve inteligente diretamente na sua placa de vídeo (WebGPU), totalmente gratuito e sem gastar créditos externos.</p>
+    <div class="progress-bar" id="progressBarWrap"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="loader-status" id="loaderStatus">Verificando compatibilidade...</div>
+    <div class="loader-error" id="loaderError" hidden></div>
+    <div class="loader-actions" id="loaderActions" hidden>
+      <button class="btn" id="retryLoadBtn">Tentar de novo</button>
+      <button class="btn primary" id="simModeBtn">Usar modo simulação</button>
+    </div>
   </div>
 </div>
 
@@ -321,9 +345,9 @@
       <button class="btn" id="analyzeBtn">Pedir análise à gerente</button>
       <div class="card" id="analysisCard" hidden></div>
       <div class="card token-card">
-        <h3>Motor de IA Local</h3>
+        <h3>Motor de IA <span id="motorStatus">Local</span></h3>
         <div id="tokenBreakdown"></div>
-        <div class="stage-note" style="margin-top:9px;">
+        <div class="stage-note" style="margin-top:9px;" id="motorDesc">
           Toda a simulação roda localmente na sua placa de vídeo via WebGPU, sem servidores externos e com custo zero financeiro ou de chaves de API.
         </div>
       </div>
@@ -364,21 +388,78 @@
    Motor de IA 100% Gratuito no Navegador (WebLLM Engine)
    ============================================================ */
 let engine = null;
+let simMode = false;           // true = fallback sem WebGPU
 const SELECTED_MODEL = "Llama-3.2-3B-Instruct-q4f16_1-MLC";
 
+/* ---------- detecção de WebGPU ---------- */
+function hasWebGPU(){
+  return !!(navigator.gpu && typeof navigator.gpu.requestAdapter === 'function');
+}
+
+/* ---------- UI do loader ---------- */
+function setLoaderError(msg, showRetry){
+  const errEl = document.getElementById('loaderError');
+  const actEl = document.getElementById('loaderActions');
+  const barEl = document.getElementById('progressBarWrap');
+  const statusEl = document.getElementById('loaderStatus');
+  const titleEl = document.getElementById('loaderTitle');
+
+  titleEl.textContent = 'Não foi possível carregar a IA local';
+  statusEl.textContent = 'Verificação concluída';
+  barEl.style.opacity = '0.3';
+  errEl.hidden = false;
+  errEl.innerHTML = msg;
+  if(showRetry) actEl.hidden = false;
+}
+
+function hideLoader(){
+  document.getElementById('loaderOverlay').hidden = true;
+}
+
+/* ---------- inicialização ---------- */
 async function initWebLLM(){
+  const statusEl = document.getElementById('loaderStatus');
+  const fillEl = document.getElementById('progressFill');
+  const errEl = document.getElementById('loaderError');
+  const actEl = document.getElementById('loaderActions');
+
+  // Reset UI
+  errEl.hidden = true; actEl.hidden = true;
+  fillEl.style.width = '5%';
+
+  // 1) Verifica se o módulo carregou
+  if(!window.webllmLoaded || !window.webllm){
+    const importErr = window.webllmLoadError ? `<br><code>${escapeHtml(window.webllmLoadError)}</code>` : '';
+    setLoaderError(
+      `O módulo WebLLM não pôde ser importado. Isso pode ser bloqueio de rede, CORS no GitHub Pages, ou extensão do navegador.${importErr}<br><br>
+      <b>Navegadores compatíveis:</b> Chrome 113+, Edge 113+, Opera 99+ (com WebGPU ativado). Firefox e Safari ainda não suportam WebGPU.`,
+      true
+    );
+    return;
+  }
+
+  // 2) Verifica WebGPU
+  if(!hasWebGPU()){
+    setLoaderError(
+      `Seu navegador não suporta <b>WebGPU</b>.<br><br>
+      <b>Soluções:</b><br>
+      • Use <b>Chrome 113+</b> ou <b>Edge 113+</b><br>
+      • No Chrome, vá em <code>chrome://flags</code> e ative "WebGPU"<br>
+      • No Windows, atualize os drivers da placa de vídeo<br><br>
+      Você pode usar o <b>modo simulação</b> abaixo — a equipe ainda funciona, mas com respostas pré-programadas.`,
+      true
+    );
+    return;
+  }
+
+  statusEl.textContent = 'Inicializando motor local...';
+
   try {
-    const statusEl = document.getElementById('loaderStatus');
-    const fillEl = document.getElementById('progressFill');
-    
     const initProgressCallback = (report) => {
       statusEl.textContent = report.text;
-      // Tenta extrair porcentagem se houver no texto
       const match = report.text.match(/(\d+)%/);
-      if(match){
-        fillEl.style.width = match[1] + '%';
-      } else {
-        // Progresso simulado fluido caso o texto mude
+      if(match){ fillEl.style.width = match[1] + '%'; }
+      else {
         let w = parseFloat(fillEl.style.width) || 0;
         if(w < 90) fillEl.style.width = (w + 2) + '%';
       }
@@ -389,16 +470,76 @@ async function initWebLLM(){
       { initProgressCallback: initProgressCallback }
     );
 
-    document.getElementById('loaderOverlay').hidden = true;
+    fillEl.style.width = '100%';
+    statusEl.textContent = 'Pronto!';
+    setTimeout(hideLoader, 400);
   } catch(err) {
     console.error("Erro ao iniciar WebLLM:", err);
-    document.getElementById('loaderStatus').textContent = "Erro ao carregar IA. Verifique se seu navegador suporta WebGPU.";
+    const errMsg = err.message || String(err);
+    setLoaderError(
+      `Erro ao iniciar o modelo:<br><code>${escapeHtml(errMsg)}</code><br><br>
+      Causas comuns:<br>
+      • Modelo não disponível no cache — tente recarregar a página<br>
+      • Memória insuficiente (o modelo precisa de ~2 GB de VRAM)<br>
+      • WebGPU desativado ou driver desatualizado<br>
+      • GitHub Pages pode bloquear cache do Service Worker em alguns casos<br><br>
+      <b>Dica:</b> abra o console (F12 → Console) para ver o erro completo.`,
+      true
+    );
   }
 }
 
+/* ---------- fallback de simulação ---------- */
+const SIM_RESPOSTAS = {
+  fundacao: {"nome":"Café & Cria","ramo":"cafeteria criativa","missao":"Servir café com propósito e conectar pessoas","tom":"acolhedor e criativo","gerente":{"nome":"Marina"},"equipe":[{"nome":"Lucas","cargo":"barista"},{"nome":"Julia","cargo":"marketing"},{"nome":"Pedro","cargo":"estoque"}]},
+
+  ideia: {"ideia":"criar post para Instagram","tipo":"criar","alvo":"","pausa":""},
+
+  permissao: {"aprovado":true,"motivo":"boa ideia","ajuste":"","precisa_usuario":false},
+
+  delegar: {"funcionario":"a1","tarefa":"criar conteúdo","precisa_aprovacao":false},
+
+  execucao: {"resultado":"Post criado com sucesso","nome":"post-instagram","tipo":"md","vendas":0,"visitas":12,"seguidores":3,"conteudo":"# Novidade no Café & Cria!\n\nHoje lançamos nosso blend especial da semana. Venha experimentar! ☕\n\n---\nCafé & Cria — café com propósito.","cortado":false},
+
+  analise: {"leitura":"Visitas cresceram 12% esta semana. Engajamento está bom.","proxima_acao":"lançar promoção de segunda-feira"},
+
+  contratar: {"nome":"Camila","cargo":"atendente"},
+
+  escolher: {"funcionario":"a1"},
+
+  edicao: {"resultado":"arquivo atualizado","conteudo":"# Novidade no Café & Cria!\n\nHoje lançamos nosso blend especial da semana com 20% OFF. Venha experimentar! ☕\n\n---\nCafé & Cria — café com propósito.","cortado":false}
+};
+
+function simularResposta(tipo, system, userText){
+  // Tenta extrair do texto do usuário qual simulação usar
+  if(tipo === 'json'){
+    if(userText.includes('Negócio:')) return SIM_RESPOSTAS.fundacao;
+    if(system.includes('sócia-gerente') && system.includes('aprovado')) return SIM_RESPOSTAS.permissao;
+    if(system.includes('sócia-gerente') && system.includes('funcionario')) return SIM_RESPOSTAS.delegar;
+    if(system.includes('sócia-gerente') && system.includes('nome')) return SIM_RESPOSTAS.contratar;
+    if(system.includes('sócia-gerente') && system.includes('Quem')) return SIM_RESPOSTAS.escolher;
+    if(system.includes('contribuir')) return SIM_RESPOSTAS.ideia;
+    if(system.includes('números')) return SIM_RESPOSTAS.analise;
+    return SIM_RESPOSTAS.ideia;
+  }
+  if(tipo === 'block'){
+    if(system.includes('editar')) return SIM_RESPOSTAS.edicao;
+    return SIM_RESPOSTAS.execucao;
+  }
+  return null;
+}
+
 async function chamarAPI(system, userText, maxTokens, model, agentId){
+  if(simMode){
+    await sleep(800 + Math.random()*1200);
+    const fake = simularResposta('block', system, userText);
+    const text = fake ? (fake.conteudo || JSON.stringify(fake)) : 'Simulação: tarefa concluída.';
+    contabilizar({ prompt_tokens: 120, completion_tokens: 180 }, agentId);
+    return { text, cortado: false };
+  }
+
   if(!engine) throw new Error("Motor de IA local ainda não inicializado.");
-  
+
   const messages = [
     { role: "system", content: system },
     { role: "user", content: userText }
@@ -426,11 +567,12 @@ function repararJSON(bruto){
   let saida = '', dentro = false, escape = false;
   for(const c of t){
     if(escape){ saida += c; escape = false; continue; }
-    if(c === '\\'){ saida += c; escape = true; continue; }
+    if(c === '\'){ saida += c; escape = true; continue; }
     if(c === '"'){ dentro = !dentro; saida += c; continue; }
-    if(dentro && c === '\n'){ saida += '\\n'; continue; }
-    if(dentro && c === '\r'){ continue; }
-    if(dentro && c === '\t'){ saida += '\\t'; continue; }
+    if(dentro && c === '
+'){ saida += '\n'; continue; }
+    if(dentro && c === ''){ continue; }
+    if(dentro && c === '	'){ saida += '\t'; continue; }
     saida += c;
   }
   try{ return JSON.parse(saida); }catch(e){}
@@ -446,6 +588,13 @@ function repararJSON(bruto){
 
 async function askAI(system, userText, maxTokens, model, agentId){
   try{
+    if(simMode){
+      await sleep(600 + Math.random()*800);
+      const out = simularResposta('json', system, userText);
+      if(!out) console.warn('Simulação não encontrou resposta para:', userText.slice(0,100));
+      contabilizar({ prompt_tokens: 80, completion_tokens: 120 }, agentId);
+      return out;
+    }
     const { text } = await chamarAPI(system, userText, maxTokens, model, agentId);
     const out = repararJSON(text);
     if(!out) console.warn('Resposta ilegivel da IA:', text.slice(0,200));
@@ -455,14 +604,28 @@ async function askAI(system, userText, maxTokens, model, agentId){
 
 async function askAIBlock(system, userText, maxTokens, model, agentId){
   try{
+    if(simMode){
+      await sleep(700 + Math.random()*1000);
+      const out = simularResposta('block', system, userText);
+      contabilizar({ prompt_tokens: 100, completion_tokens: 250 }, agentId);
+      return out || {
+        resultado: 'Tarefa simulada', nome: 'arquivo-simulado', tipo: 'md',
+        vendas: Math.floor(Math.random()*5), visitas: Math.floor(Math.random()*20),
+        seguidores: Math.floor(Math.random()*3), conteudo: '# Simulação
+
+Este arquivo foi gerado no modo simulação (sem WebGPU).',
+        cortado: false, bruto: ''
+      };
+    }
     const { text, cortado } = await chamarAPI(system, userText, maxTokens, model, agentId);
     const limpo = text.replace(/```[a-z]*/gi,'').trim();
     const campo = k => {
-      const m = limpo.match(new RegExp('^'+k+':\\s*(.*)$','mi'));
+      const m = limpo.match(new RegExp('^'+k+':\s*(.*)$','mi'));
       return m ? m[1].trim() : '';
     };
     const corte = limpo.indexOf('---');
-    const conteudo = corte >= 0 ? limpo.slice(corte+3).replace(/^\n/,'') : '';
+    const conteudo = corte >= 0 ? limpo.slice(corte+3).replace(/^
+/,'') : '';
     return {
       resultado: campo('RESULTADO'),
       nome: campo('NOME'), tipo: campo('TIPO').toLowerCase(),
@@ -500,261 +663,6 @@ function contabilizar(usage, agentId){
   renderTokens(); saveDB();
 }
 function fmtNum(n){ return n >= 1000 ? (n/1000).toFixed(1).replace('.',',')+'k' : String(n); }
-
-/* ============================================================
-   Estado / persistência nativa (localStorage)
-   ============================================================ */
-const STORE_KEY = 'empresas-all-local';
-let DB = { empresas: [], atual: null };
-let saveTimer = null;
-let storageOK = true;      
-let storageWarned = false; 
-
-function warnNoStorage(){
-  if(storageWarned) return;
-  storageWarned = true;
-  const el = document.getElementById('storageWarn');
-  if(el) el.hidden = false;
-}
-
-function loadDB(){
-  try{
-    const val = localStorage.getItem(STORE_KEY);
-    if(val) DB = JSON.parse(val);
-  }catch(e){}
-  if(!DB.empresas) DB.empresas = [];
-  if(!DB.logGlobal) DB.logGlobal = [];
-}
-
-function saveDB(){
-  if(!storageOK) return;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    if(!storageOK) return;
-    try{
-      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-    }catch(e){
-      storageOK = false;       
-      warnNoStorage();
-    }
-  }, 900);
-}
-function empresaAtual(){ return DB.empresas.find(e => e.id === DB.atual) || null; }
-
-const PALETA = ['#E8A33D','#3E6E8E','#B34C7A','#5C8A5C','#8A6BAF','#C4653D','#3E8E86','#9A5B5B'];
-
-/* ============================================================
-   Escritório — layout, sprites, física
-   ============================================================ */
-const canvas = document.getElementById('stage');
-const ctx = canvas.getContext('2d');
-const W = canvas.width, H = canvas.height;
-const SPEED = 70;
-
-const FURNITURE = {
-  eat:  {pos:{x:150,y:330}, icon:'🍎'},
-  drink:{pos:{x:310,y:330}, icon:'💧'},
-  think:{pos:{x:470,y:330}, icon:'💭'},
-};
-const ACAO_KEY = { comer:'eat', beber:'drink', pensar:'think' };
-
-let runtime = [];           
-let selectedAgentId = null;
-let autonomyToken = 0;      
-
-function deskPos(index){
-  const perRow = 4, gapX = 140, x0 = 90, y0 = 90, gapY = 118;
-  const row = Math.floor(index/perRow), col = index%perRow;
-  return { x: x0 + col*gapX, y: y0 + row*gapY };
-}
-function seatOf(rt){ return { x: rt.desk.x, y: rt.desk.y + 56 }; }
-
-function buildRuntime(){
-  const emp = empresaAtual();
-  autonomyToken++;
-  const token = autonomyToken;
-  runtime = (emp ? emp.equipe : []).map((f, i) => {
-    const desk = deskPos(i);
-    const rt = {
-      id: f.id, name: f.nome, papel: f.papel, cargo: f.cargo, color: f.cor,
-      desk, pos:{ x: desk.x, y: desk.y + 56 }, target:null, state:'sitting',
-      icon:null, bubbleText:null, forced:false, currentTask:null, thinking:false,
-    };
-    return rt;
-  });
-  runtime.forEach(rt => autonomyLoop(rt, token));
-  renderAgentCards();
-}
-function rtById(id){ return runtime.find(r => r.id === id); }
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-function moveTo(rt, target){
-  rt.state = 'walking'; rt.target = target;
-  return new Promise(res => { rt._resolve = res; });
-}
-
-let lastTs = performance.now();
-function physics(now){
-  const dt = Math.min((now-lastTs)/1000, .05); lastTs = now;
-  for(const rt of runtime){
-    if(rt.state === 'walking' && rt.target){
-      const dx = rt.target.x - rt.pos.x, dy = rt.target.y - rt.pos.y;
-      const d = Math.hypot(dx,dy), step = SPEED*dt;
-      if(d <= step){
-        rt.pos = {...rt.target}; rt.target = null;
-        if(rt._resolve){ const r = rt._resolve; rt._resolve = null; r(); }
-      } else { rt.pos.x += dx/d*step; rt.pos.y += dy/d*step; }
-    }
-  }
-}
-
-/* ---------- vida autônoma ---------- */
-function contextoDaEmpresa(){
-  const emp = empresaAtual(); if(!emp) return '';
-  const arqs = (emp.arquivos||[]).slice(0,6).map(f => f.nome).join(', ') || 'nenhum';
-  const ultimos = (emp.log||[]).slice(-4).map(l => l.text).join(' | ') || 'nada ainda';
-  const m = emp.metricas;
-  return `Empresa: ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Arquivos existentes: ${arqs}. Últimos acontecimentos: ${ultimos}. Números: ${m.vendas} vendas, ${m.visitas} visitas, ${m.seguidores} seguidores.`;
-}
-
-async function pensarContribuicao(rt){
-  const emp = empresaAtual(); if(!emp) return null;
-  const sys = `Você é ${rt.name}, ${rt.cargo} da ${emp.nome}. Responda SOMENTE JSON: {"ideia":"o que você quer fazer agora, até 12 palavras","tipo":"criar|editar|tarefa|pausa","alvo":"nome exato do arquivo, só se tipo=editar","pausa":"comer|beber|pensar"}. Use tipo=pausa se no momento a melhor coisa for descansar; nesse caso preencha "pausa".`;
-  const usr = `${contextoDaEmpresa()}\nDe que forma você pode, no presente momento, contribuir com a empresa? Escolha algo dentro do seu cargo e que ainda não foi feito.`;
-  return await askAI(sys, usr, 130, null, rt.id);
-}
-
-async function pedirPermissao(rt, ideia, manager){
-  const emp = empresaAtual();
-  const sys = `Você é ${manager.name}, sócia-gerente da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Um membro da equipe pede permissão para agir. Responda SOMENTE JSON: {"aprovado":true|false,"motivo":"até 8 palavras","ajuste":"correção de rumo, ou vazio","precisa_usuario":true|false}. precisa_usuario=true só se envolver gasto real de dinheiro ou publicação pública irreversível.`;
-  const usr = `${contextoDaEmpresa()}\n${rt.name} (${rt.cargo}) propõe: ${ideia}`;
-  return await askAI(sys, usr, 120, null, manager.id);
-}
-
-async function executarIdeia(rt, plano){
-  const emp = empresaAtual();
-  if(plano.tipo === 'editar'){
-    const alvo = (emp.arquivos||[]).find(f => f.nome === plano.alvo)
-              || (emp.arquivos||[]).find(f => plano.alvo && f.nome.includes(plano.alvo));
-    if(alvo){ await aplicarEdicaoArquivo(alvo.id, plano.ideia, rt.id); return; }
-    plano.tipo = 'criar'; 
-  }
-
-  rt.state = 'acting'; rt.icon = plano.tipo === 'criar' ? '📄' : '📝'; rt.thinking = true;
-  rt.currentTask = plano.ideia;
-
-  const pedeArquivo = plano.tipo === 'criar';
-  const sys = pedeArquivo
-    ? `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Produza o material de verdade, pronto para uso. ${FORMATO_ARQUIVO}`
-    : `Você é ${rt.name}, ${rt.cargo} da ${emp.nome} (${emp.ramo}). Tom da marca: ${emp.tom}. Responda EXATAMENTE neste formato, sem markdown:
-RESULTADO: <o que voce fez, ate 14 palavras>
-VENDAS: <numero>
-VISITAS: <numero>
-SEGUIDORES: <numero>`;
-  const out = await askAIBlock(sys, plano.ideia, pedeArquivo ? 2200 : 150, null, rt.id);
-
-  rt.thinking = false; rt.icon = null; rt.currentTask = null;
-  if(!out || (!out.resultado && !out.conteudo.trim())){
-    addLog(`${rt.name} tentou "${plano.ideia}" mas não concluiu.`, 'pend', rt.id); return;
-  }
-
-  const m = emp.metricas;
-  m.vendas += out.vendas; m.visitas += out.visitas;
-  m.seguidores += out.seguidores; m.tarefas += 1;
-
-  if(pedeArquivo && out.conteudo.trim()) salvarArquivo({ nome: out.nome, tipo: out.tipo, conteudo: out.conteudo }, rt);
-  addLog(`${rt.name} → ${out.resultado || plano.ideia}`, 'ok', rt.id);
-  renderMetrics();
-}
-
-async function fazerPausa(rt, tipo){
-  const key = ACAO_KEY[tipo] || 'think';
-  const spot = FURNITURE[key];
-  await moveTo(rt, spot.pos);
-  rt.state = 'acting'; rt.icon = spot.icon;
-  await sleep(key==='eat' ? 3000 : key==='drink' ? 1800 : 3200);
-  rt.icon = null;
-  await moveTo(rt, seatOf(rt));
-  rt.state = 'sitting';
-}
-
-async function autonomyLoop(rt, token){
-  while(token === autonomyToken){
-    if(rt.forced){ await sleep(400); continue; }
-    rt.state = 'sitting'; rt.icon = null;
-    await sleep(24000 + Math.floor(Math.random()*14000)); 
-    if(token !== autonomyToken) return;
-    if(rt.forced || !document.getElementById('autoToggle').checked) continue;
-
-    const emp = empresaAtual(); if(!emp) continue;
-    const manager = runtime.find(r => r.papel === 'gerente');
-    rt.forced = true;
-
-    try{
-      rt.thinking = true; rt.icon = '🤔';
-      const plano = await pensarContribuicao(rt);
-      rt.thinking = false; rt.icon = null;
-      if(token !== autonomyToken) return;
-      if(!plano || !plano.ideia){ rt.forced = false; continue; }
-
-      if(plano.tipo === 'pausa'){
-        addLog(`${rt.name} fez uma pausa: ${plano.pausa || 'pensar'}`, 'info', rt.id);
-        await fazerPausa(rt, plano.pausa);
-        rt.forced = false; continue;
-      }
-
-      if(rt.papel === 'gerente'){
-        addLog(`${rt.name} decidiu por conta própria: ${plano.ideia}`, 'info', rt.id);
-        await executarIdeia(rt, plano);
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      if(!manager){ rt.forced = false; continue; }
-      await moveTo(rt, { x: seatOf(manager).x - 40, y: seatOf(manager).y });
-      if(token !== autonomyToken) return;
-      rt.state = 'talking';
-      rt.bubbleText = plano.ideia.length > 36 ? plano.ideia.slice(0,36)+'…' : plano.ideia;
-      addLog(`${rt.name} pediu permissão: "${plano.ideia}"`, 'info', rt.id);
-
-      manager.thinking = true; manager.icon = '🤔';
-      const resposta = await pedirPermissao(rt, plano.ideia, manager);
-      manager.thinking = false; manager.icon = null;
-      rt.bubbleText = null;
-      if(token !== autonomyToken) return;
-
-      const aprovado = resposta ? resposta.aprovado : false;
-      manager.state = 'talking';
-      manager.bubbleText = aprovado ? 'Pode ir ✓' : 'Agora não';
-      await sleep(1400);
-      manager.bubbleText = null; manager.state = 'sitting';
-
-      if(!aprovado){
-        addLog(`${manager.name} negou a ${rt.name}: ${resposta && resposta.motivo ? resposta.motivo : 'sem justificativa'}`, 'pend', rt.id);
-        await moveTo(rt, seatOf(rt));
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      if(resposta.ajuste) plano.ideia = `${plano.ideia} (ajuste da gerente: ${resposta.ajuste})`;
-      addLog(`${manager.name} autorizou ${rt.name}: ${resposta.motivo || 'aprovado'}`, 'ok', manager.id);
-
-      if(resposta.precisa_usuario){
-        emp.aprovacoes.push({ id:'p'+Date.now(), quem: rt.name, texto: plano.ideia });
-        addLog(`${rt.name} → "${plano.ideia}" aguarda a SUA aprovação`, 'pend', rt.id);
-        renderApprovals();
-        await moveTo(rt, seatOf(rt));
-        rt.state = 'sitting'; rt.forced = false; saveDB(); continue;
-      }
-
-      await moveTo(rt, seatOf(rt));
-      if(token !== autonomyToken) return;
-      await executarIdeia(rt, plano);
-      rt.state = 'sitting';
-    } finally {
-      rt.forced = false;
-      saveDB();
-    }
-  }
-}
-
 /* ============================================================
    Log
    ============================================================ */
@@ -946,7 +854,7 @@ async function analyzeMetrics(){
   const card = document.getElementById('analysisCard');
   const btn = document.getElementById('analyzeBtn');
   btn.disabled = true;
-  card.hidden = false; card.textContent = 'A gerente está analisando os números...';
+  card.hidden = false; card.textContent = simMode ? 'Gerando análise simulada...' : 'A gerente está analisando os números...';
   if(manager){ manager.thinking = true; manager.icon = '📊'; }
 
   const m = emp.metricas;
@@ -1289,7 +1197,8 @@ function renderTokens(){
   if(!emp){ if(pill) pill.hidden = true; return; }
   const t = emp.tokens || { entrada:0, saida:0, chamadas:0 };
   const total = t.entrada + t.saida;
-  if(pill){ pill.hidden = false; pill.textContent = `${fmtNum(total)} tok · GRATUITO LOCAL`; }
+  const modoLabel = simMode ? 'SIMULAÇÃO' : 'GRATUITO LOCAL';
+  if(pill){ pill.hidden = false; pill.textContent = `${fmtNum(total)} tok · ${modoLabel}`; }
   if(!box) return;
 
   const linhas = [
