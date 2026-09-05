@@ -239,7 +239,7 @@
       <small id="brandSub">nenhuma empresa fundada</small>
     </div>
     <div class="top-actions">
-      <div class="token-pill" id="tokenPill" hidden>0 tok · US$ 0,000</div>
+      <div class="token-pill" id="tokenPill" hidden>0 gerações</div>
       <select class="company-select" id="companySelect" hidden></select>
       <button class="btn small" id="aiModelsTopBtn">IA / Modelos</button>
       <button class="btn small" id="newCompanyBtn">+ Nova empresa</button>
@@ -342,7 +342,7 @@
       <button class="btn" id="analyzeBtn">Pedir análise à gerente</button>
       <div class="card" id="analysisCard" hidden></div>
       <div class="card token-card">
-        <h3>Consumo de IA</h3>
+        <h3>Trabalho da IA local</h3>
         <div id="tokenBreakdown"></div>
         <div class="stage-note" style="margin-top:9px;">
           A empresa usa o modelo que você selecionar entre os modelos instalados. Todos rodam localmente e têm custo de API zero; o tamanho e o consumo de memória variam.
@@ -398,13 +398,11 @@
    do Web Worker; a página principal não duplica o consumo de RAM.
    ============================================================ */
 const MODELOS = {
-  muitoLeve: { id:'onnx-community/SmolLM-135M-Instruct-ONNX', dtype:'q8', nome:'SmolLM 135M · muito leve', nivel:'Muito leve', tamanho:'~136 MB', detalhe:'Quantização q8 em WASM/CPU: a combinação testada e estável no Android.', memoria:'Baixa', licenca:'Apache-2.0' },
-  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q8', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~272 MB', detalhe:'Mais capaz que o 135M, ainda adequado para aparelhos modestos.', memoria:'Baixa–média', licenca:'Apache-2.0' },
-  medio: { id:'onnx-community/TinyLlama-1.1B-Chat-v1.0-ONNX', dtype:'q4f16', nome:'TinyLlama 1.1B · médio', nivel:'Médio', tamanho:'~714 MB', detalhe:'Modelo intermediário com boa relação entre capacidade e consumo.', memoria:'Média–alta', licenca:'Apache-2.0' },
-  pesado: { id:'HuggingFaceTB/SmolLM2-1.7B-Instruct', dtype:'q4f16', nome:'SmolLM2 1.7B · pesado', nivel:'Pesado', tamanho:'~1,11 GB', detalhe:'Mais capacidade para gestão, escrita e decisões; indicado para aparelhos fortes.', memoria:'Alta', licenca:'Apache-2.0' },
-  muitoPesado: { id:'onnx-community/Phi-3.5-mini-instruct-onnx-web', dtype:'q4f16', nome:'Phi-3.5 Mini · muito pesado', nivel:'Muito pesado', tamanho:'~2,32 GB', detalhe:'Modelo grande e multilíngue, voltado a raciocínio e tarefas mais exigentes. Pode não ser adequado para celulares.', memoria:'Muito alta', licenca:'MIT' },
-};
-const MODEL_PADRAO = MODELOS.muitoLeve.id;
+  minimo: { id:'onnx-community/SmolLM-135M-Instruct-ONNX', dtype:'q8', nome:'SmolLM 135M · mínimo', nivel:'Mínimo', tamanho:'~136 MB', detalhe:'Serve para testar se o motor roda no aparelho. Responde mal em português e não sustenta a gestão.', memoria:'Baixa', licenca:'Apache-2.0' },
+  leve: { id:'onnx-community/SmolLM2-360M-Instruct-ONNX', dtype:'q8', nome:'SmolLM2 360M · leve', nivel:'Leve', tamanho:'~380 MB', detalhe:'Segue instrução melhor que o 135M, mas ainda tropeça em português.', memoria:'Baixa–média', licenca:'Apache-2.0' },
+  recomendado: { id:'onnx-community/Qwen2.5-0.5B-Instruct', dtype:'q8', nome:'Qwen2.5 0.5B · recomendado', nivel:'Recomendado', tamanho:'~530 MB', detalhe:'Primeiro modelo que responde de forma coerente em português e obedece ao formato de resposta do app.', memoria:'Média', licenca:'Apache-2.0' },
+  forte: { id:'onnx-community/Qwen2.5-1.5B-Instruct', dtype:'q4', nome:'Qwen2.5 1.5B · forte', nivel:'Forte', tamanho:'~1,1 GB', detalhe:'Melhor qualidade de decisão e escrita. Cada resposta demora bem mais e exige aparelho folgado de memória.', memoria:'Alta', licenca:'Apache-2.0' },
+};const MODEL_PADRAO = MODELOS.recomendado.id;
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
@@ -414,11 +412,10 @@ let modelosInstalados = [];
 const modelosBaixando = new Set();
 try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados') || '[]'); } catch(e) { modelosInstalados=[]; }
 if(!Array.isArray(modelosInstalados)) modelosInstalados=[];
-function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.muitoLeve; }
+function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.recomendado; }
 const MODEL_LOCAL = MODEL_PADRAO;
 let MODEL_BARATO = modeloSelecionado;
 let MODEL_GERENTE = modeloSelecionado;
-const PRECO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, {in:0,out:0}]));
 const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.nome]));
 function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
 function modeloInstalado(id){ return modelosInstalados.includes(id); }
@@ -523,16 +520,8 @@ async function initRuntime(source, allowRemote=false){
   return runtimeReady;
 }
 async function escolherDevice(modelId){
-  // No Android, priorizamos WASM no modelo de 135M: WebGPU pode ser
-  // detectado pelo Chrome e ainda assim derrubar o processo ao compilar
-  // o grafo. Para os modelos maiores, WebGPU continua disponível.
-  if(modelId==='onnx-community/SmolLM-135M-Instruct-ONNX') return 'wasm';
-  try{
-    if(navigator.gpu && typeof navigator.gpu.requestAdapter==='function'){
-      const adapter=await navigator.gpu.requestAdapter({powerPreference:'low-power'});
-      if(adapter) return 'webgpu';
-    }
-  }catch(e){}
+  // WebGPU no Chrome Android e detectado mas derruba o processo ao compilar o
+  // grafo. WASM/CPU foi a unica combinacao que se manteve estavel nos testes.
   return 'wasm';
 }
 async function load(modelId, dtype, runtimeSource, allowRemote=false){
@@ -773,6 +762,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
   const userTextSafe=String(userText||'').slice(0,1100);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
   chamadasNaFila++;
+  const inicioGeracao = Date.now();
   try{
     const trabalho = filaIA.catch(()=>{}).then(async () => {
       return await new Promise((resolve,reject)=>{
@@ -797,7 +787,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId){
     const text=extrairTextoGerado(result);
     if(!text.trim()) throw new Error('O modelo terminou sem produzir texto.');
     setAIStatus('ready','IA local pronta ✓','Motor em segundo plano · o escritório continua responsivo durante a geração.',null);
-    contabilizar(modeloSelecionado,{input_tokens:Math.round((sysText.length+userTextSafe.length)/4),output_tokens:Math.round(text.length/4)},agentId);
+    contabilizar(modeloSelecionado,{ms:Date.now()-inicioGeracao},agentId);
     return {text,cortado:false};
   }catch(err){
     setAIStatus('error','Erro ao gerar resposta',String(err?.message || err || 'erro desconhecido'),null);
@@ -873,28 +863,27 @@ TIPO: <md|txt|html|css|js|csv|json>
 ---
 <aqui o conteudo completo do arquivo, quantas linhas forem precisas>`;
 
+/* A IA e local e gratuita: o que custa aqui e tempo de aparelho, nao dinheiro. */
 function contabilizar(model, usage, agentId){
   const emp = empresaAtual(); if(!emp || !usage) return;
-  if(!emp.tokens) emp.tokens = { entrada:0, saida:0, chamadas:0, custo:0 };
-  const ent = usage.input_tokens || 0, sai = usage.output_tokens || 0;
-  const p = PRECO[model] || PRECO[MODEL_BARATO];
-  const custo = (ent/1e6)*p.in + (sai/1e6)*p.out;
-
-  emp.tokens.entrada += ent; emp.tokens.saida += sai;
-  emp.tokens.chamadas += 1;  emp.tokens.custo += custo;
-
+  const ms = Number(usage.ms) || 0;
+  if(!emp.uso) emp.uso = { chamadas:0, ms:0 };
+  emp.uso.chamadas += 1; emp.uso.ms += ms;
   if(agentId){
     const f = emp.equipe.find(x => x.id === agentId);
     if(f){
-      if(!f.tokens) f.tokens = { entrada:0, saida:0, chamadas:0, custo:0 };
-      f.tokens.entrada += ent; f.tokens.saida += sai;
-      f.tokens.chamadas += 1;  f.tokens.custo += custo;
+      if(!f.uso) f.uso = { chamadas:0, ms:0 };
+      f.uso.chamadas += 1; f.uso.ms += ms;
     }
   }
   renderTokens(); saveDB();
 }
+function fmtDur(ms){
+  if(!ms) return '0s';
+  const s = ms/1000;
+  return s < 60 ? s.toFixed(s<10?1:0)+'s' : Math.floor(s/60)+'min '+Math.round(s%60)+'s';
+}
 function fmtNum(n){ return n >= 1000 ? (n/1000).toFixed(1).replace('.',',')+'k' : String(n); }
-function fmtCusto(c){ return 'US$ ' + (c < 0.01 ? c.toFixed(4) : c.toFixed(3)); }
 function modeloDe(rt){ return rt.papel === 'gerente' ? MODEL_GERENTE : MODEL_BARATO; }
 
 /* ============================================================
@@ -1977,7 +1966,7 @@ function renderInspector(){
     <div class="field"><b>Estado:</b> ${escapeHtml(statusLabel(rt))}</div>
     <div class="field"><b>Tarefa atual:</b> ${escapeHtml(rt.currentTask || '— nenhuma —')}</div><div class="field"><b>Produto final:</b> ${escapeHtml(rt.norte?.produto || '—')}</div><div class="field"><b>Equipe:</b> ${escapeHtml(rt.norte?.equipe || '—')}</div><div class="field"><b>Qualidade:</b> ${rt.qualidade ? escapeHtml(`${rt.qualidade.nota}/10 · ${rt.qualidade.status}${rt.qualidade.problema ? ' · '+rt.qualidade.problema : ''}`) : '— ainda não revisada —'}</div>
     <div class="field"><b>Modelo:</b> <span class="model-tag ${rt.papel==='gerente'?'pro':''}">${rt.papel==='gerente'?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></div>
-    <div class="field"><b>Consumo:</b> ${f && f.tokens ? `${fmtNum(f.tokens.entrada+f.tokens.saida)} tokens em ${f.tokens.chamadas} chamadas · ${fmtCusto(f.tokens.custo)}` : 'nenhuma chamada ainda'}</div>
+    <div class="field"><b>Trabalho da IA:</b> ${f && f.uso && f.uso.chamadas ? `${f.uso.chamadas} gerações · ${fmtDur(f.uso.ms)}` : 'nenhuma geração ainda'}</div>
     <div class="field"><b>Últimos eventos:</b></div>
     ${(f && f.historico.length) ? f.historico.map(h=>`<div class="hist-item">${h.ts} — ${escapeHtml(h.text)}</div>`).join('') : '<div class="hist-item">sem eventos ainda</div>'}`;
   document.getElementById('closeInspector').onclick = () => { selectedAgentId = null; renderInspector(); };
@@ -2173,21 +2162,20 @@ function renderTokens(){
   const pill = document.getElementById('tokenPill');
   const box = document.getElementById('tokenBreakdown');
   if(!emp){ if(pill) pill.hidden = true; return; }
-  const t = emp.tokens || { entrada:0, saida:0, chamadas:0, custo:0 };
-  const total = t.entrada + t.saida;
-  if(pill){ pill.hidden = false; pill.textContent = `${fmtNum(total)} tok · ${fmtCusto(t.custo)}`; }
+  const u = emp.uso || { chamadas:0, ms:0 };
+  const media = u.chamadas ? u.ms/u.chamadas : 0;
+  if(pill){ pill.hidden = false; pill.textContent = `${u.chamadas} ${u.chamadas===1?'geração':'gerações'}`; }
   if(!box) return;
 
   const linhas = [
-    `<div class="row"><span>Total de chamadas</span><span class="val">${t.chamadas}</span></div>`,
-    `<div class="row"><span>Tokens de entrada</span><span class="val">${fmtNum(t.entrada)}</span></div>`,
-    `<div class="row"><span>Tokens de saída</span><span class="val">${fmtNum(t.saida)}</span></div>`,
-    `<div class="row"><span><b>Custo estimado</b></span><span class="val"><b>${fmtCusto(t.custo)}</b></span></div>`,
+    `<div class="row"><span>Gerações concluídas</span><span class="val">${u.chamadas}</span></div>`,
+    `<div class="row"><span>Tempo de IA acumulado</span><span class="val">${fmtDur(u.ms)}</span></div>`,
+    `<div class="row"><span>Média por geração</span><span class="val">${fmtDur(media)}</span></div>`,
+    `<div class="row"><span>Na fila agora</span><span class="val">${chamadasNaFila}</span></div>`,
   ];
-  const porAgente = emp.equipe.filter(f => f.tokens && f.tokens.chamadas).map(f => {
-    const pro = f.papel === 'gerente';
-    return `<div class="row"><span>${escapeHtml(f.nome)} <span class="model-tag ${pro?'pro':''}">${pro?NOME_CURTO[MODEL_GERENTE]:NOME_CURTO[MODEL_BARATO]}</span></span><span class="val">${fmtNum(f.tokens.entrada+f.tokens.saida)} tok · ${fmtCusto(f.tokens.custo)}</span></div>`;
-  });
+  const porAgente = emp.equipe.filter(f => f.uso && f.uso.chamadas).map(f =>
+    `<div class="row"><span>${escapeHtml(f.nome)}</span><span class="val">${f.uso.chamadas} · ${fmtDur(f.uso.ms)}</span></div>`
+  );
   box.innerHTML = linhas.join('') +
     (porAgente.length ? `<div class="row" style="border-top:1.5px solid var(--grid);margin-top:4px;"><span><b>Por pessoa</b></span><span></span></div>` + porAgente.join('') : '');
 }
