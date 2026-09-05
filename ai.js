@@ -186,8 +186,7 @@
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low',
-          service_tier: 'auto'
+          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
         })
       });
       let dados = null;

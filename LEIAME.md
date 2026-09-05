@@ -53,7 +53,7 @@ O chão do estúdio é uma representação visual dos agentes: deslocamento, tra
 - O contexto é limitado por caracteres para evitar crescimento infinito, mas é deliberadamente mais rico que versões anteriores.
 - Movimentação, animações e interações sociais simples não usam IA.
 - Não existe mais cronômetro, ritmo ou cota diária artificial no Estúdio: a IA pode ser chamada sempre que houver uma necessidade operacional real.
-- O cliente usa `service_tier: auto`, permitindo à Groq escolher automaticamente a melhor capacidade disponível para a conta.
+- O cliente não força `service_tier`: a requisição usa a capacidade padrão disponível no plano da conta, evitando falha em organizações que não têm tiers pagos habilitados.
 - Os limites de requisições/tokens mostrados no Motor vêm dos headers reais devolvidos pela Groq; antes da primeira resposta, o Estúdio não inventa uma cota local.
 
 Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que os modelos Qwen disponíveis; o GPT-OSS 120B continua sendo a escolha forte para produção. Os modelos Qwen 3.6/3.8 ficam disponíveis como alternativas, mas são mais caros e por isso não são usados automaticamente.
