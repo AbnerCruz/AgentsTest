@@ -452,6 +452,7 @@ let workerReadyReject = null;
 let aiGeneration = 0;
 let ultimoSinalWorker = 0;
 let chamadasNaFila = 0;
+let recarregando = false;
 let iaPronta = false;
 let iaTentativaEmAndamento = false; let iaBloqueadaAte = 0;
 const workerPendentes = new Map();
@@ -666,8 +667,16 @@ async function carregarIA(){
       iaBloqueadaAte=0;
       return true;
     }catch(err){
-      iaBloqueadaAte=Date.now()+120000;
+      const reinicio = /reiniciado/i.test(String(err?.message||''));
       encerrarWorkerIA();
+      if(reinicio && !recarregando){
+        // Alguem trocou/reiniciou o motor no meio do carregamento. Isso nao e
+        // falha do modelo: tentamos mais uma vez em vez de bloquear a IA.
+        recarregando = true;
+        try{ return await carregarIA(); }
+        finally{ recarregando = false; }
+      }
+      iaBloqueadaAte=Date.now()+120000;
       setAIStatus('error','A IA não conseguiu iniciar',String(err?.message||err),null);
       throw err;
     }
@@ -2059,8 +2068,8 @@ async function baixarModeloIA(id){
     await carregarIAComModelo(id);
     marcarModeloInstalado(id);
     modelosBaixando.delete(id);
-    // Não mantemos o modelo apenas porque foi baixado; o usuário decide qual fica ativo.
-    encerrarWorkerIA();
+    // O modelo recem-baixado ja fica carregado: derrubar o worker aqui obrigava
+    // um segundo carregamento completo e derrubava quem estivesse esperando.
     modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
     const emp=empresaAtual(); if(emp) emp.modeloIA=id;
     persistirModelos();
@@ -2083,6 +2092,7 @@ async function carregarIAComModelo(id){
 
 async function ativarModeloIA(id){
   if(!modeloInstalado(id)) return;
+  if(carregandoIA){ try{ await carregandoIA; }catch(e){} }
   encerrarWorkerIA();
   modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
   const emp=empresaAtual(); if(emp) emp.modeloIA=id;
