@@ -59,18 +59,6 @@
     background:#FFF4F2; border:1.5px solid var(--brick); border-radius:6px;
     padding:9px 12px; font-size:11.5px; line-height:1.45; margin-bottom:10px; color:#7A2A22;
   }
-  .ai-status{
-    background:var(--white); border:1.5px solid var(--line); border-radius:6px;
-    padding:9px 12px; font-size:11.5px; line-height:1.45; margin-bottom:10px;
-    display:flex; align-items:center; gap:9px; flex-wrap:wrap;
-  }
-  .ai-status strong{font-size:11.5px;}
-  .ai-status .ai-detail{color:var(--ink-soft);}
-  .ai-dot{width:8px;height:8px;border-radius:50%;background:var(--amber);flex-shrink:0;}
-  .ai-dot.ready{background:var(--sage);}
-  .ai-dot.error{background:var(--brick);}
-  .ai-progress{width:100%;height:5px;background:var(--grid);border-radius:99px;overflow:hidden;}
-  .ai-progress > span{display:block;height:100%;width:0%;background:var(--amber);transition:width .2s;}
 
   /* ---------- abas ---------- */
   .tabs{ display:flex; gap:4px; border-bottom:1.5px solid var(--line); margin-bottom:12px; }
@@ -230,6 +218,7 @@
     .top-actions{ width:100%; margin-left:0; }
     select.company-select{ flex:1; min-width:0; }
   }
+.ai-status{margin:8px 0 14px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--white);display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}.ai-detail{color:var(--ink-soft)}.ai-dot{width:9px;height:9px;border-radius:50%;background:var(--amber);display:inline-block}.ai-dot[data-state="ready"]{background:var(--sage)}.ai-dot[data-state="error"]{background:var(--brick)}.ai-progress{flex-basis:100%;height:5px;background:var(--grid);border-radius:99px;overflow:hidden}.ai-progress span{display:block;height:100%;width:0;background:var(--sage);transition:width .2s}
 </style>
 </head>
 <body>
@@ -249,13 +238,6 @@
 
   <div class="storage-warn" id="storageWarn" hidden>
     Salvamento indisponível nesta sessão — a empresa funciona normalmente, mas não fica guardada ao fechar.
-  </div>
-
-  <div class="ai-status" id="aiStatus">
-    <span class="ai-dot" id="aiDot"></span>
-    <strong id="aiStatusTitle">IA local pronta para carregar</strong>
-    <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
-    <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
   </div>
 
   <!-- estado vazio -->
@@ -280,7 +262,7 @@
       <canvas id="stage" width="620" height="400"></canvas>
       <label class="toggle-row">
         <input type="checkbox" id="autoToggle">
-        vida autônoma (a equipe tem ideias, pede permissão à gerente e produz sozinha — roda a IA local)
+        vida autônoma (a equipe tem ideias, pede permissão à gerente e produz sozinha — consome chamadas de IA)
       </label>
       <div class="stage-note">Toque num agente no escritório ou num card abaixo para inspecionar. Quem está com 🤔 e brilho no chão está aguardando uma decisão real do modelo.</div>
       <div class="agents-row" id="agentsRow"></div>
@@ -327,7 +309,7 @@
         <h3>Consumo de IA</h3>
         <div id="tokenBreakdown"></div>
         <div class="stage-note" style="margin-top:9px;">
-          Toda a equipe e a gerente usam uma IA local leve. Os tokens exibidos são estimativas de processamento; o custo de API é US$ 0,00 porque não há chamada para serviço pago.
+          Toda a equipe e a gerente rodam a IA localmente neste navegador. Custo de API: US$ 0.
         </div>
       </div>
     </section>
@@ -357,6 +339,14 @@
   </div>
 </div>
 
+<div class="ai-status" id="aiStatus">
+  <span class="ai-dot" id="aiDot"></span>
+  <strong id="aiStatusTitle">IA local pronta para carregar</strong>
+  <span class="ai-detail" id="aiStatusDetail">Roda neste navegador; não usa chave de API nem cobra tokens.</span>
+  <div class="ai-progress" id="aiProgress" hidden><span id="aiProgressBar"></span></div>
+  <button class="btn small" id="aiRetryBtn" type="button" hidden>Tentar novamente</button>
+</div>
+
 <!-- modal genérico -->
 <div class="modal-backdrop" id="modalBackdrop" hidden>
   <div class="modal" id="modalBox"></div>
@@ -365,99 +355,95 @@
 <script type="module">
 import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm";
 
+env.allowLocalModels = false;
+env.useBrowserCache = true;
+
 /* ============================================================
-   IA LOCAL — tudo roda no navegador. O modelo é baixado uma vez
-   e fica em cache do navegador; nenhuma chave/API paga é usada.
+   IA — todas as decisões passam por aqui. Prompts curtos e
+   respostas em JSON compacto: economia de tokens é a base.
    ============================================================ */
-const MODEL_LOCAL = "onnx-community/SmolLM2-360M-ONNX";
+// IA local: nenhum servidor de inferência e nenhuma chave de API.
+// Este repositório ONNX é a versão Instruct, própria para seguir comandos.
+const MODEL_LOCAL = "onnx-community/SmolLM2-360M-Instruct-ONNX";
 const MODEL_BARATO = MODEL_LOCAL;
 const MODEL_GERENTE = MODEL_LOCAL;
-const NOME_CURTO = { [MODEL_LOCAL]: 'SmolLM2 360M · local' };
+const NOME_CURTO = { [MODEL_LOCAL]: 'SmolLM2 360M Instruct · local' };
 const PRECO = { [MODEL_LOCAL]: { in:0, out:0 } };
-
-let localPipeline = null;
-let localLoading = null;
-let aiBusy = false;
+let pipe = null;
+let aiLoading = null;
 
 function setAIStatus(title, detail, state='loading', progress=null){
-  const t=document.getElementById('aiStatusTitle');
-  const d=document.getElementById('aiStatusDetail');
-  const dot=document.getElementById('aiDot');
-  const wrap=document.getElementById('aiProgress');
-  const bar=document.getElementById('aiProgressBar');
+  const t=document.getElementById('aiStatusTitle'), d=document.getElementById('aiStatusDetail');
+  const dot=document.getElementById('aiDot'), bar=document.getElementById('aiProgressBar'), box=document.getElementById('aiProgress');
+  const retry=document.getElementById('aiRetryBtn');
   if(t) t.textContent=title;
   if(d) d.textContent=detail;
-  if(dot) dot.className='ai-dot '+(state==='ready'?'ready':state==='error'?'error':'');
-  if(wrap){ wrap.hidden = progress===null; }
-  if(bar && progress!==null) bar.style.width=Math.max(0,Math.min(100,progress))+'%';
-}
-
-async function carregarIA(){
-  if(localPipeline) return localPipeline;
-  if(localLoading) return localLoading;
-  localLoading=(async()=>{
-    try{
-      const webgpu = !!(navigator.gpu && env.IS_WEBGPU_AVAILABLE !== false);
-      const device = webgpu ? 'webgpu' : 'wasm';
-      const dtype = webgpu ? 'q4f16' : 'q4';
-      setAIStatus('Preparando IA local', webgpu ? 'WebGPU disponível. Primeiro uso baixa o modelo (~272 MB).' : 'WebGPU não disponível; usando WASM. Pode ficar mais lento no celular.', 'loading', 0);
-      localPipeline = await pipeline('text-generation', MODEL_LOCAL, {
-        device, dtype,
-        progress_callback: p => {
-          if(p && typeof p.progress === 'number'){
-            setAIStatus('Baixando/preparando IA local', `${p.file || 'modelo'} · ${Math.round(p.progress)}%`, 'loading', p.progress);
-          }
-        }
-      });
-      setAIStatus('IA local pronta', webgpu ? 'Rodando no seu navegador com WebGPU. Sem API e sem custo por token.' : 'Rodando no seu navegador com WASM. Sem API e sem custo por token.', 'ready', 100);
-      return localPipeline;
-    }catch(err){
-      localPipeline=null;
-      const detalhe = err?.message ? String(err.message).slice(0, 220) : 'Falha desconhecida';
-      setAIStatus('Não foi possível carregar a IA local', 'Erro: '+detalhe+' · recarregue e tente novamente.', 'error', null);
-      console.error('Falha ao carregar IA local:',err);
-      throw err;
-    }finally{ localLoading=null; }
-  })();
-  return localLoading;
+  if(dot) dot.dataset.state=state;
+  if(box){ box.hidden = progress===null; if(progress!==null && bar) bar.style.width=Math.max(0,Math.min(100,progress))+'%'; }
+  if(retry) retry.hidden = state !== 'error';
 }
 
 function extrairTextoGerado(result){
-  const g=result?.[0]?.generated_text;
-  if(typeof g==='string') return g.trim();
-  if(Array.isArray(g)){
-    const last=g[g.length-1];
-    return typeof last==='string' ? last.trim() : String(last?.content || '').trim();
+  const item = Array.isArray(result) ? result[0] : result;
+  if(!item) return '';
+  if(typeof item.generated_text === 'string') return item.generated_text;
+  if(Array.isArray(item.generated_text)){
+    const last=item.generated_text[item.generated_text.length-1];
+    return typeof last==='string' ? last : (last?.content || '');
   }
   return '';
 }
 
-function estimarUso(system,userText,text){
-  return { input_tokens:Math.ceil((String(system).length+String(userText).length)/4), output_tokens:Math.ceil(String(text).length/4) };
+async function carregarIA(){
+  if(pipe) return pipe;
+  if(aiLoading) return aiLoading;
+  aiLoading=(async()=>{
+    setAIStatus('Baixando a IA local…','Primeiro uso: cerca de 272 MB. O arquivo fica em cache no navegador.', 'loading', 0);
+    const progresso = p => {
+      if(p?.progress!=null) setAIStatus('Baixando a IA local…', `${p.fileName||'modelo'} · ${Math.round(p.progress)}%`, 'loading', p.progress);
+    };
+    // Primeiro tenta WebGPU; se o aparelho/driver não suportar, tenta CPU/WASM.
+    const tentativas = [];
+    if(navigator.gpu) tentativas.push({device:'webgpu', dtype:'q4f16', nome:'WebGPU'});
+    tentativas.push({device:'wasm', dtype:'q4', nome:'CPU/WASM'});
+    let ultimo=null;
+    for(const op of tentativas){
+      try{
+        setAIStatus('Preparando a IA local…', `Modo ${op.nome}.`, 'loading', null);
+        pipe = await pipeline('text-generation', MODEL_LOCAL, {
+          device: op.device,
+          dtype: op.dtype,
+          progress_callback: progresso
+        });
+        setAIStatus('IA local pronta ✓', `Rodando neste celular em ${op.nome}. Sem chave de API e sem custo de tokens.`, 'ready', null);
+        return pipe;
+      }catch(err){
+        ultimo=err;
+        console.warn('Falha no modo', op.nome, err);
+        pipe=null;
+      }
+    }
+    throw ultimo || new Error('Nenhum modo de execução disponível.');
+  })().catch(err=>{
+    const msg=err?.message || String(err);
+    setAIStatus('Não foi possível carregar a IA local', `Detalhe: ${msg}`, 'error', null);
+    throw err;
+  }).finally(()=>{ aiLoading=null; });
+  return aiLoading;
 }
 
 async function chamarAPI(system, userText, maxTokens, model, agentId){
-  if(aiBusy) await new Promise(r=>setTimeout(r,80));
-  aiBusy=true;
-  try{
-    const pipe=await carregarIA();
-    const limite=Math.min(Number(maxTokens)||180, maxTokens>=1000 ? 900 : 420);
-    const messages=[
-      {role:'system',content:String(system||'')},
-      {role:'user',content:String(userText||'')}
-    ];
-    setAIStatus('IA trabalhando…','A decisão está sendo calculada no aparelho.', 'loading', null);
-    const result=await pipe(messages,{
-      max_new_tokens:limite,
-      do_sample:false,
-      temperature:0.15,
-      return_full_text:false
-    });
-    const text=extrairTextoGerado(result);
-    contabilizar(MODEL_LOCAL, estimarUso(system,userText,text), agentId);
-    setAIStatus('IA local pronta','Roda neste navegador; sem chave de API e sem custo por token.', 'ready', 100);
-    return {text,cortado:text.length>=limite*3.5};
-  }finally{ aiBusy=false; }
+  const usado = model || MODEL_LOCAL;
+  const p = await carregarIA();
+  const limite = Math.min(Number(maxTokens)||300, 700);
+  const messages=[
+    {role:'system', content:String(system||'')},
+    {role:'user', content:String(userText||'')}
+  ];
+  const result=await p(messages,{max_new_tokens:limite, do_sample:false, temperature:0.15, return_full_text:false});
+  const text=extrairTextoGerado(result);
+  contabilizar(usado,{input_tokens:Math.ceil((String(system||'').length+String(userText||'').length)/4), output_tokens:Math.ceil(text.length/4)},agentId);
+  return {text, cortado:false};
 }
 
 // Conserta JSON truncado ou com quebras de linha cruas dentro das aspas.
@@ -556,34 +542,40 @@ function modeloDe(rt){ return rt.papel === 'gerente' ? MODEL_GERENTE : MODEL_BAR
 const STORE_KEY = 'empresas-all';
 let DB = { empresas: [], atual: null };
 let saveTimer = null;
-let storageOK = true;
-let storageWarned = false;
+let storageOK = true;      // vira false no primeiro erro real
+let storageWarned = false; // avisa uma vez só, sem spam
 
 function warnNoStorage(){
   if(storageWarned) return;
-  storageWarned=true;
-  const el=document.getElementById('storageWarn');
-  if(el) el.hidden=false;
+  storageWarned = true;
+  const el = document.getElementById('storageWarn');
+  if(el) el.hidden = false;
 }
 
 async function loadDB(){
   try{
-    const raw=localStorage.getItem(STORE_KEY);
-    if(raw) DB=JSON.parse(raw);
-  }catch(e){ storageOK=false; warnNoStorage(); }
-  if(!DB.empresas) DB.empresas=[];
-  if(!DB.logGlobal) DB.logGlobal=[];
+    const value = localStorage.getItem(STORE_KEY);
+    if(value) DB = JSON.parse(value);
+  }catch(e){
+    // pode ser só "chave ainda não existe" — não desliga o salvamento por isso
+  }
+  if(!DB.empresas) DB.empresas = [];
+  if(!DB.logGlobal) DB.logGlobal = [];
 }
 
 function saveDB(){
   if(!storageOK) return;
   clearTimeout(saveTimer);
-  saveTimer=setTimeout(()=>{
-    try{ localStorage.setItem(STORE_KEY,JSON.stringify(DB)); }
-    catch(e){ storageOK=false; warnNoStorage(); }
-  },300);
+  saveTimer = setTimeout(async () => {
+    if(!storageOK) return;
+    try{
+      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+    }catch(e){
+      storageOK = false;       // para de tentar: nada de erro em loop
+      warnNoStorage();
+    }
+  }, 900);
 }
-
 function empresaAtual(){ return DB.empresas.find(e => e.id === DB.atual) || null; }
 
 const PALETA = ['#E8A33D','#3E6E8E','#B34C7A','#5C8A5C','#8A6BAF','#C4653D','#3E8E86','#9A5B5B'];
@@ -1601,6 +1593,11 @@ document.getElementById('modalBackdrop').onclick = e => {
   setInterval(tickCards, 350);
   requestAnimationFrame(loop);
 })();
+
+const retry = document.getElementById('aiRetryBtn');
+if(retry) retry.onclick = () => carregarIA().catch(()=>{});
+// Começa o download só depois de a interface aparecer.
+setTimeout(() => carregarIA().catch(()=>{}), 250);
 </script>
 
 </body>
