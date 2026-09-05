@@ -574,7 +574,7 @@ async function runtimeOfflinePronto(){
    principal e o WASM podia congelar toda a interface durante a geração.
    Agora o escritório continua animado enquanto a fila neural trabalha. */
 const WORKER_CODE = `
-let pipeline = null, env = null, runtimeReady = null;
+let pipeline = null, env = null, runtimeReady = null, TextStreamerCls = null;
 // Um pipeline por modelo, para nao recarregar a cada troca de papel.
 const pipes = new Map(), loadings = new Map();
 const MAX_PIPES = 2;
@@ -585,7 +585,7 @@ async function initRuntime(source, allowRemote=false){
     // uma origem http(s) isto falha; e importar um Blob quebra a resolucao dos
     // binarios .wasm do ONNX. Offline quem entrega estes arquivos e o Service Worker.
     const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
-    pipeline=mod.pipeline; env=mod.env;
+    pipeline=mod.pipeline; env=mod.env; TextStreamerCls=mod.TextStreamer||null;
     env.allowRemoteModels=true; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
     try{ if(env.backends?.onnx?.wasm){
       env.backends.onnx.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/';
@@ -629,8 +629,22 @@ self.onmessage = async (ev)=>{
   const msg=ev.data||{};
   if(msg.type==='load') { try { await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); } catch(e){} return; }
   if(msg.type==='generate'){
+    // Heartbeat de reserva: mesmo se o streamer abaixo nao existir nesta
+    // versao da biblioteca, isso avisa o lado principal que o worker esta
+    // vivo, para ele nao matar a geracao antes da hora em celular lento.
+    const hb=setInterval(()=>postMessage({type:'gen-progress',id:msg.id}),2000);
     try{
       const p=await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote);
+      let streamer=null;
+      try{
+        if(TextStreamerCls && p.tokenizer){
+          streamer=new TextStreamerCls(p.tokenizer,{
+            skip_prompt:true, skip_special_tokens:true,
+            // Cada pedaco de texto gerado conta como sinal de progresso real.
+            callback_function:()=>postMessage({type:'gen-progress',id:msg.id})
+          });
+        }
+      }catch(e){ streamer=null; }
       // Greedy puro (do_sample:false) em modelo minusculo costuma emitir o token
       // de fim na primeira posicao e devolver texto vazio. Amostragem resolve.
       const result=await p(msg.messages,{
@@ -639,11 +653,13 @@ self.onmessage = async (ev)=>{
         temperature: msg.temperatura || 0.7,
         top_p: 0.9,
         repetition_penalty: 1.12,
-        return_full_text: false
+        return_full_text: false,
+        ...(streamer ? {streamer} : {})
       });
       postMessage({type:'result',id:msg.id,result});
     }
     catch(e){ postMessage({type:'error',id:msg.id,error:String(e?.message||e)}); }
+    finally{ clearInterval(hb); }
   }
 };
 `;
@@ -715,6 +731,10 @@ function criarWorkerIA(){
       if(workerReadyReject) workerReadyReject(err);
       workerReadyResolve=null; workerReadyReject=null;
       setAIStatus('error','Não foi possível carregar a IA',err.message);
+      return;
+    }
+    if(m.type==='gen-progress'){
+      const p=workerPendentes.get(m.id); if(p && typeof p.tocar==='function') p.tocar();
       return;
     }
     if(m.type==='result' || m.type==='error'){
@@ -892,7 +912,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   const modeloDaChamada = modeloDoTipo(tipo);
   chamadasNaFila++;
   const inicioGeracao = Date.now();
-  const tetoMon = 20000 + limite*1800;
+  const tetoMon = 15000 + limite*3500;
   const monId = monInicio({
     agente: nomeDeAgente(agentId),
     motivo: (sysText.match(/^[^\n.]{0,60}/)||[''])[0].trim() || 'chamada de IA',
@@ -904,16 +924,29 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
       const enviar = (msgs, temperatura) => new Promise((resolve,reject)=>{
         const id=++workerSeq;
         if(!workerIA || !iaPronta){ reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
-        // O prazo so comeca quando chega a vez desta chamada na fila. Antes,
-        // o relogio corria durante a espera e quase tudo estourava.
-        const teto = 12000 + limite*900;
-        const t = setTimeout(()=>{
-          workerPendentes.delete(id);
-          reject(new Error(`A geração passou de ${Math.round(teto/1000)}s e foi interrompida.`));
-        }, teto);
+        // Prazo fixo nao funciona bem em 1 thread: o tempo por resposta varia
+        // muito com o aparelho. Em vez disso vigiamos INATIVIDADE — o worker
+        // avisa a cada pedaco de texto gerado (ou a cada 2s como reserva) — e
+        // so cortamos se ficar tempo real sem nenhum sinal. O teto absoluto
+        // e so uma rede de seguranca bem mais folgada que antes.
+        const inicioChamada = Date.now();
+        let ultimoSinal = Date.now();
+        const inatividadeMax = 40000;
+        const absolutoMax = 15000 + limite*3500;
+        const vigia = setInterval(()=>{
+          const agora = Date.now();
+          if(agora - ultimoSinal > inatividadeMax){
+            clearInterval(vigia); workerPendentes.delete(id);
+            reject(new Error(`O motor ficou ${Math.round(inatividadeMax/1000)}s sem gerar nenhum token novo e foi interrompido.`));
+          } else if(agora - inicioChamada > absolutoMax){
+            clearInterval(vigia); workerPendentes.delete(id);
+            reject(new Error(`A geração passou de ${Math.round(absolutoMax/1000)}s e foi interrompida.`));
+          }
+        }, 2000);
         workerPendentes.set(id,{
-          resolve:v=>{ clearTimeout(t); resolve(v); },
-          reject:e=>{ clearTimeout(t); reject(e); }
+          resolve:v=>{ clearInterval(vigia); resolve(v); },
+          reject:e=>{ clearInterval(vigia); reject(e); },
+          tocar:()=>{ ultimoSinal = Date.now(); }
         });
         workerIA.postMessage({type:'generate',id,modelId:modeloDaChamada,dtype:configModelo(modeloDaChamada).dtype,messages:msgs,maxTokens:limite,temperatura,runtimeSource:runtimeOfflineSource,allowRemote:false});
       });
