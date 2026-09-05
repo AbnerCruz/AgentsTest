@@ -14,11 +14,30 @@
   const K_USO = 'groq-usage-v1';
 
   const MODELOS = [
-    { id: 'llama-3.1-8b-instant', nome: 'Llama 3.1 8B · instantâneo', nota: 'O mais barato. Bom para decisões curtas.' },
-    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · rápido', nota: 'Equilíbrio entre custo e texto decente.' },
-    { id: 'llama-3.3-70b-versatile', nome: 'Llama 3.3 70B · versátil', nota: 'Escreve bem, custa mais por chamada.' },
-    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · forte', nota: 'Melhor redação. Reserve para produção.' }
+    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · rápido e barato', nota: 'O mais em conta. ~$0,075 entrada / $0,30 saída por milhão de tokens. Ótimo para decisões curtas.' },
+    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · forte', nota: 'Ainda barato (~$0,15 / $0,60 por milhão). Melhor redação — bom para produção.' },
+    { id: 'qwen/qwen3.6-27b', nome: 'Qwen 3.6 27B · raciocínio', nota: 'Mais caro (~$0,60 / $3,00 por milhão), mas raciocina melhor em tarefas mais difíceis.' }
   ];
+
+  /* A Groq decomissionou os antigos Llama (llama-3.1-8b-instant e
+     llama-3.3-70b-versatile) em 16/08/2026 para conta gratuita/dev.
+     Quem tinha um desses salvos no aparelho é migrado automaticamente
+     para o substituto recomendado pela própria Groq. */
+  const MODELOS_MIGRADOS = {
+    'llama-3.1-8b-instant': 'openai/gpt-oss-20b',
+    'llama-3.3-70b-versatile': 'openai/gpt-oss-120b',
+    'llama3-70b-8192': 'openai/gpt-oss-120b',
+    'gemma2-9b-it': 'openai/gpt-oss-20b',
+    'qwen/qwen3-32b': 'openai/gpt-oss-120b',
+    'meta-llama/llama-4-scout-17b-16e-instruct': 'qwen/qwen3.6-27b',
+    'meta-llama/llama-4-maverick-17b-128e-instruct': 'openai/gpt-oss-120b',
+    'mistral-saba-24b': 'qwen/qwen3.6-27b',
+    'qwen-qwq-32b': 'qwen/qwen3.6-27b'
+  };
+  function migrarModelo(id) {
+    if (MODELOS.some(m => m.id === id)) return id;
+    return MODELOS_MIGRADOS[id] || MODELOS[0].id;
+  }
 
   const RITMOS = {
     economico: { intervalo: 10 * 60 * 1000, rotulo: 'econômico' },
@@ -29,9 +48,12 @@
   const REF_DIARIA = { requisicoes: 1000, tokens: 200000 };
 
   const cfg = Object.assign(
-    { decisao: 'llama-3.1-8b-instant', producao: 'openai/gpt-oss-20b', ritmo: 'normal' },
+    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', ritmo: 'normal' },
     S.local.json(K_CFG, {})
   );
+  cfg.decisao = migrarModelo(cfg.decisao);
+  cfg.producao = migrarModelo(cfg.producao);
+  S.local.setJson(K_CFG, cfg);
   let chave = S.local.get(K_CHAVE, '') || '';
 
   let uso = Object.assign(
@@ -179,7 +201,9 @@
       try { dados = await resp.json(); } catch (e) {}
       lerHeaders(resp);
       const ms = Date.now() - inicio;
-      if (dados && dados.usage) contabilizar(modelo, dados, ms);
+      // Só contabiliza o que a Groq realmente processou e devolveu como uso —
+      // uma resposta de erro não deve inflar o total gasto.
+      if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
 
       if (!resp.ok) {
         const msg = (dados && dados.error && dados.error.message) || `A Groq respondeu HTTP ${resp.status}.`;
@@ -268,11 +292,22 @@
 
   function orcamento() {
     const q = usoHoje();
+    const h = q.headers;
+    const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
+    const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
+    // Sempre que a Groq já disse (pelos cabeçalhos) qual é o limite real da
+    // janela, o percentual usa esse número. Só cai no teto local (uma trava
+    // de segurança do app, não a cota oficial) antes da primeira resposta.
+    const pctTokens = temTok
+      ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100)
+      : clamp((q.tokens / REF_DIARIA.tokens) * 100, 0, 100);
+    const pctReq = temReq
+      ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100)
+      : clamp((q.requisicoes / REF_DIARIA.requisicoes) * 100, 0, 100);
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens: clamp((q.tokens / REF_DIARIA.tokens) * 100, 0, 100),
-      pctReq: clamp((q.requisicoes / REF_DIARIA.requisicoes) * 100, 0, 100),
-      ref: REF_DIARIA, headers: q.headers, porModelo: q.porModelo
+      pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'local',
+      ref: REF_DIARIA, headers: h, porModelo: q.porModelo
     };
   }
 

@@ -481,15 +481,17 @@
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       <div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>
       <div class="stats">
-        <div class="stat"><span>Tokens usados</span><b>${F.num(o.tokens)} / ${F.num(o.ref.tokens)}</b></div>
-        <div class="stat"><span>Chamadas</span><b>${F.num(o.requisicoes)} / ${F.num(o.ref.requisicoes)}</b></div>
+        <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
+        <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
-        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
+        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela (Groq)</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Próxima ação autônoma</span><b>${espera > 0 ? 'em ' + F.dur(espera) : 'liberada'}</b></div>
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
-      <p class="panel-foot">As linhas marcadas como restantes vêm dos cabeçalhos que a própria Groq devolve. O teto diário local é uma trava de segurança do app, não o limite oficial da sua conta.</p>`;
+      <p class="panel-foot">${o.fonte === 'groq'
+        ? 'A barra e os números acima vêm direto dos cabeçalhos que a Groq devolve na última resposta — sem cálculo por fora.'
+        : 'Ainda sem resposta da Groq nesta sessão: a barra usa um teto local só de referência até a primeira chamada trazer os números reais.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
