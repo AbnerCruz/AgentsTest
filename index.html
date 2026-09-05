@@ -375,10 +375,10 @@
       <button class="btn" id="analyzeBtn">Pedir análise à gerente</button>
       <div class="card" id="analysisCard" hidden></div>
       <div class="card token-card">
-        <h3>Trabalho da IA local</h3>
+        <h3>Trabalho da IA por API</h3>
         <div id="tokenBreakdown"></div>
         <div class="stage-note" style="margin-top:9px;">
-          A empresa usa o modelo que você selecionar entre os modelos instalados. Todos rodam localmente e têm custo de API zero; o tamanho e o consumo de memória variam.
+          A empresa usa a IA da Groq pela internet. Decisões usam o modelo rápido; produção usa o modelo forte. O consumo é contado nesta central.
         </div>
       </div>
     </section>
@@ -425,13 +425,13 @@
         <h3>Modelo desta empresa</h3>
         <div class="form-row"><label for="modelSelect">Modelo principal (decisões, conversas, gestão)</label><select class="field-input" id="modelSelect"></select></div>
         <div class="form-row"><label for="modelProdSelect">Modelo de produção (escreve os arquivos entregues)</label><select class="field-input" id="modelProdSelect"></select></div>
-        <div class="stage-note" id="modelDetail">Baixe os modelos na área IA / Modelos. Aqui você apenas escolhe entre os instalados.</div>
-        <div class="stage-note">O de decisão é acionado o tempo todo e só precisa de respostas curtas: um modelo pequeno serve e mantém o escritório rápido. O de produção é chamado poucas vezes, mas escreve o material final — vale um modelo maior. Se você escolher dois modelos diferentes, ambos ficam na memória; em aparelho apertado, deixe os dois iguais.</div>
+        <div class="stage-note" id="modelDetail">Os dois modelos são remotos. Aqui você escolhe qual fica nas decisões e qual fica na produção.</div>
+        <div class="stage-note">O modelo de decisão é usado com frequência. O modelo de produção é usado para materiais finais. Ambos rodam na Groq e não ocupam a RAM do celular.</div>
         <button class="btn small" id="applyModelBtn">Aplicar modelos</button>
       </div>
       <div class="card">
         <h3>Recomeçar do zero</h3>
-        <div class="msub">Apaga todas as empresas, o histórico e o cache dos modelos locais deste app. Depois você começa novamente.</div>
+        <div class="msub">Apaga todas as empresas, histórico, métricas e seleção de modelos desta simulação. A chave da API não é apagada.</div>
         <button class="btn small danger" id="resetAllBtn">Destruir tudo e apagar modelo</button>
       </div>
       <div class="card">
@@ -488,13 +488,13 @@ function salvarGroqConfig(){
   const keyEl=document.getElementById('groqApiKeyInput');
   const selEl=document.getElementById('groqModelSelect');
   const novoKey=String(keyEl?.value||'').trim();
-  if(novoKey && !/^gsk_[A-Za-z0-9_-]{20,}$/.test(novoKey)){
+  if(novoKey && !/^gsk_[A-Za-z0-9_-]+$/.test(novoKey)){
     throw new Error('A chave Groq parece inválida. Ela deve começar com gsk_.');
   }
   groqApiKey=novoKey;
   if(selEl?.value && Object.values(MODELOS).some(m=>m.id===selEl.value)) modeloSelecionado=selEl.value;
   MODEL_DECISAO=modeloSelecionado;
-  MODEL_PRODUCAO=modeloSelecionado===MODELOS.forte.id?MODELOS.forte.id:MODELOS.rapido.id;
+  MODEL_PRODUCAO=MODELOS.forte.id;
   persistirPapeis();
   try{
     if(groqApiKey) localStorage.setItem(GROQ_KEY_STORAGE,groqApiKey);
@@ -558,28 +558,12 @@ const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.n
 function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
 function modeloInstalado(id){ return !!Object.values(MODELOS).find(m=>m.id===id); }
 async function validarModelosInstalados(){
-  if(!('caches' in window)) return;
-  const cache=await caches.open('ia-modelos-v1').catch(()=>null);
-  if(!cache) return;
-  const bons=[];
-  for(const id of modelosInstalados){
-    const m=configModelo(id);
-    // O instalador atual usa sempre q4 para os modelos principais (fp32,
-    // estável em WASM — ver comentário em MODELOS). Se uma versão antiga
-    // marcou q4f16/q8 mas esse arquivo não existe no cache, removemos
-    // apenas a marca local e obrigamos um download correto.
-    const u='https://huggingface.co/'+id+'/resolve/main/onnx/model_'+m.dtype+'.onnx';
-    const ok=await cache.match(u,{ignoreVary:true}).catch(()=>null);
-    if(ok) bons.push(id);
-  }
-  if(bons.length!==modelosInstalados.length){
-    modelosInstalados=bons;
-    if(!groqApiKey){
-      modeloSelecionado=MODEL_PADRAO;
-      try{ localStorage.setItem('modelo-ia-ativo',''); }catch(e){}
-    }
-    persistirModelos();
-  }
+  // Esta versão usa somente API. Não há pesos locais para validar.
+  modelosInstalados = Object.values(MODELOS).map(m=>m.id);
+  persistirModelos();
+  if(!Object.values(MODELOS).some(m=>m.id===MODEL_DECISAO)) MODEL_DECISAO=MODEL_PADRAO;
+  if(!Object.values(MODELOS).some(m=>m.id===MODEL_PRODUCAO)) MODEL_PRODUCAO=MODELOS.forte.id;
+  persistirPapeis();
 }
 function marcarModeloInstalado(id){ if(!modelosInstalados.includes(id)){ modelosInstalados.push(id); persistirModelos(); } }
 function setAIStatus(kind, title, detail, progress=null){
@@ -617,6 +601,8 @@ function avisarSeMemoriaBaixa(){
 }
 let chamadasNaFila = 0;
 let recarregando = false;
+let apiFalhasSeguidas = 0;
+let apiBloqueadaAte = 0;
 let iaPronta = false;
 let iaTentativaEmAndamento = false; let iaBloqueadaAte = 0;
 const workerPendentes = new Map();
@@ -1053,13 +1039,13 @@ async function limparCacheModelos(){
   runtimeOfflineSource=null;
   modelosInstalados=[];
   modeloSelecionado=MODEL_PADRAO;
-  MODEL_DECISAO=MODEL_PADRAO; MODEL_PRODUCAO=MODEL_PADRAO; persistirPapeis();
+  MODEL_DECISAO=MODEL_PADRAO; MODEL_PRODUCAO=MODELOS.forte.id; persistirPapeis();
   DB={empresas:[],atual:null,logGlobal:[]};
   try{ localStorage.removeItem(STORE_KEY); }catch(e){}
   selectedAgentId=null;
   closeModal();
   renderAll();
-  setAIStatus('idle','Tudo zerado ✓','Empresas, histórico e seleção de modelo foram apagados. O modelo local será baixado novamente quando necessário.');
+  setAIStatus('idle','Tudo zerado ✓','Empresas, histórico e seleção de modelos foram apagados. A API Groq continua configurada.');
 }
 
 /* Extrai o texto do formato do Transformers.js. Sem isto, toda chamada
@@ -1118,44 +1104,98 @@ PRECISA_USUARIO: sim ou nao`;
 
 async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='decisao'){
   if(!groqApiKey) throw new Error('IA não configurada. Abra IA / Modelos, informe sua chave Groq e teste a conexão.');
+  if(tipo!=='diag' && Date.now()<apiBloqueadaAte) throw new Error(`API temporariamente em espera após falhas. Tente novamente em ${Math.ceil((apiBloqueadaAte-Date.now())/1000)}s.`);
   await carregarIA();
   const modeloDaChamada = modeloDoTipo(tipo);
   const qAtual=quotaHoje();
   const mq=qAtual.model?.[modeloDaChamada] || {requests:0,tokens:0};
   if(mq.tokens >= GROQ_FREE_DEFAULT.tpd || mq.requests >= GROQ_FREE_DEFAULT.rpd) throw new Error(`Limite diário local atingido para ${configModelo(modeloDaChamada).nome}.`);
   const conteudo = tipo === 'conteudo';
-  const limite=Math.min(Number(maxTokens)||300, conteudo?1200:700);
+  // GPT-OSS na Groq recomenda instruções no papel user. Também precisa de
+  // folga para os tokens de raciocínio; limites muito baixos podem terminar
+  // a resposta antes de surgir qualquer conteúdo final.
+  const pedidoMin = conteudo ? 2400 : 700;
+  const limite=Math.max(pedidoMin, Math.min(Number(maxTokens)||pedidoMin, conteudo?5000:1400));
   const sysText=String(system||'').slice(0,7000);
   const userTextSafe=String(userText||'').slice(0,7000);
-  const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
+  const messages=[{role:'user',content:sysText+'\n\n'+userTextSafe}];
   chamadasNaFila++;
   const inicioGeracao=Date.now();
   const monId=monInicio({agente:nomeDeAgente(agentId),motivo:'API Groq',teto:90000,pedido:userTextSafe.slice(0,400)});
   try{
     setAIStatus('loading','IA processando…',`${API_PROVIDER} · ${modeloDaChamada}`,null);
-    const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:limite,temperature:0.35,stream:false,reasoning_effort:'low',include_reasoning:false})});
-    let data=null; try{data=await resp.json();}catch(e){}
-    lerHeadersQuota(resp);
-    if(!resp.ok){
-      const msg=data?.error?.message || `Groq respondeu HTTP ${resp.status}.`;
-      if(resp.status===401) throw new Error('Chave Groq inválida ou expirada.');
-      if(resp.status===429) throw new Error('Limite gratuito da Groq atingido. Aguarde e tente novamente.');
-      throw new Error(msg);
+    const fazerRequisicao = async (maxOut) => {
+      const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:maxOut,temperature:0.35,stream:false,reasoning_effort:'low',include_reasoning:false,service_tier:'auto'})});
+      let data=null; try{data=await resp.json();}catch(e){}
+      lerHeadersQuota(resp);
+      // Toda tentativa consome cota; registramos inclusive respostas sem texto/erros com usage.
+      if(data?.usage) registrarUsoGroq(modeloDaChamada,data.usage);
+      if(!resp.ok){
+        const msg=data?.error?.message || `Groq respondeu HTTP ${resp.status}.`;
+        if(resp.status===401) throw new Error('Chave Groq inválida ou expirada.');
+        if(resp.status===429) throw new Error('Limite gratuito da Groq atingido. Aguarde e tente novamente.');
+        throw new Error(msg);
+      }
+      const choice=data?.choices?.[0]||{};
+      const msg=choice?.message||{};
+      const text=String(msg?.content ?? choice?.text ?? '').trim();
+      return {resp,data,choice,msg,text};
+    };
+    let tentativa=await fazerRequisicao(limite);
+    // Se o raciocínio consumiu todo o orçamento antes do texto final, tente
+    // uma segunda vez com mais espaço. Isso evita o falso "respondeu vazio".
+    if(!tentativa.text && limite < (conteudo?6000:1800)){
+      monEvento(`${nomeDeAgente(agentId)}: resposta sem texto final; repetindo com orçamento maior.`,'aviso');
+      tentativa=await fazerRequisicao(conteudo?6000:1800);
     }
-    const text=String(data?.choices?.[0]?.message?.content||'').trim();
-    if(!text) throw new Error('A API respondeu sem texto.');
-    registrarUsoGroq(modeloDaChamada,data?.usage||{});
+    const data=tentativa.data, choice=tentativa.choice, msg=tentativa.msg, text=tentativa.text;
+    if(!text){
+      const finish=String(choice?.finish_reason||'desconhecido');
+      const temRaciocinio=Boolean(String(msg?.reasoning||'').trim());
+      const uso=data?.usage ? ` uso ${data.usage.total_tokens||'?'} tokens` : '';
+      throw new Error(`Groq não entregou texto final (finish_reason=${finish}${temRaciocinio?', houve raciocínio':''}${uso}).`);
+    }
+    apiFalhasSeguidas=0; apiBloqueadaAte=0;
     monFim(monId,{ok:true,ms:Date.now()-inicioGeracao});
     contabilizar(modeloDaChamada,{ms:Date.now()-inicioGeracao,usage:data?.usage||{}},agentId);
     chamadasNaFila=Math.max(0,chamadasNaFila-1);
     setAIStatus('ready','IA pronta ✓',`${API_PROVIDER} respondeu em ${((Date.now()-inicioGeracao)/1000).toFixed(1)}s.`);
     return {text,cortado:false};
   }catch(e){
-    monFim(monId,{ok:false,ms:Date.now()-inicioGeracao});
+    apiFalhasSeguidas++;
+    const msg=String(e?.message||e);
+    const espera=/429|Limite gratuito/i.test(msg) ? 30000 : /401|inválida|expirada/i.test(msg) ? 60000 : Math.min(30000,5000*Math.max(1,apiFalhasSeguidas));
+    apiBloqueadaAte=Date.now()+espera;
+    monFim(monId,{ok:false,ms:Date.now()-inicioGeracao,erro:msg});
     chamadasNaFila=Math.max(0,chamadasNaFila-1);
-    setAIStatus('error','Falha na API de IA',String(e?.message||e));
+    setAIStatus('error','Falha na API de IA',msg);
     throw e;
   }
+}
+
+// Conserta JSON em code fence, quebras de linha cruas e respostas truncadas.
+function repararJSON(bruto){
+  let t = String(bruto||'').replace(/```json|```/gi,'').trim();
+  const ini = t.indexOf('{'); if(ini > 0) t = t.slice(ini);
+  try{ return JSON.parse(t); }catch(e){}
+  let saida='', dentro=false, escape=false;
+  for(const c of t){
+    if(escape){ saida+=c; escape=false; continue; }
+    if(c==='\\'){ saida+=c; escape=true; continue; }
+    if(c==='"'){ dentro=!dentro; saida+=c; continue; }
+    if(dentro && c==='\n'){ saida+='\\n'; continue; }
+    if(dentro && c==='\r'){ continue; }
+    if(dentro && c==='\t'){ saida+='\\t'; continue; }
+    saida+=c;
+  }
+  try{ return JSON.parse(saida); }catch(e){}
+  let t2=saida;
+  if(dentro) t2+='"';
+  const abre=(t2.match(/{/g)||[]).length, fecha=(t2.match(/}/g)||[]).length;
+  const abreA=(t2.match(/\[/g)||[]).length, fechaA=(t2.match(/\]/g)||[]).length;
+  t2+=']'.repeat(Math.max(0,abreA-fechaA))+'}'.repeat(Math.max(0,abre-fecha));
+  try{ return JSON.parse(t2); }catch(e){}
+  return null;
 }
 
 async function askAI(system, userText, maxTokens, model, agentId){
@@ -1272,7 +1312,8 @@ function estadoMotor(){
   if(motorPausado) return {txt:'equipe pausada', cor:'aviso'};
   if(!groqApiKey) return {txt:'API não configurada', cor:'erro'};
   const q=quotaHoje();
-  if(q.requests>=GROQ_FREE_DEFAULT.rpd || q.totalTokens>=GROQ_FREE_DEFAULT.tpd) return {txt:'limite diário atingido', cor:'erro'};
+  const ativo=q.model?.[modeloDoTipo('decisao')] || {requests:0,tokens:0};
+  if(ativo.requests>=GROQ_FREE_DEFAULT.rpd || ativo.tokens>=GROQ_FREE_DEFAULT.tpd) return {txt:'limite diário do modelo atingido', cor:'erro'};
   if(MON.ativas.size) return {txt:'gerando resposta', cor:'ok'};
   return {txt:'API ligada e ociosa', cor:'ok'};
 }
@@ -1311,7 +1352,7 @@ function renderMonitor(){
         ? `<pre>PEDIDO: ${escapeHtml(String(c.pedido||'').slice(0,300))}\nRESPOSTA: ${escapeHtml(String(c.resposta||c.erro||'').slice(0,300))}</pre>`
         : (c.status!=='ok' ? `<pre>${escapeHtml(String(c.erro||'').slice(0,200))}</pre>` : '');
       return `<div class="mon-item ${cls}"><span class="ts">${monHora(c.fim)}</span>${escapeHtml(c.agente)} · ${escapeHtml(c.motivo||'')} · ${monTempo(c.ms)} · ${c.status==='ok'?'ok':c.status==='cortado'?'incompleta':'falhou'}${extra}</div>`;
-    }).join('') : '<div class="mon-item">Nenhuma chamada registrada nesta sessao.</div>';
+    }).join('') : '<div class="mon-item">Nenhuma chamada registrada nesta sessão.</div>';
   }
 
   const eq = document.getElementById('monEquipe');
@@ -1348,15 +1389,15 @@ async function vigiaMotor(){
     monEvento('Contador de fila estava preso sem chamada real. Fila destravada.','aviso');
   }
   if(motorPausado || !empresaAtual() || !groqApiKey) { renderMonitor(); return; }
-  if(!workerIA || !iaPronta){
+  if(!iaPronta){
     if(carregandoIA || agora < iaBloqueadaAte){ renderMonitor(); return; }
     if(MON.falhasSeguidas >= 6){
-      renderMonitor(); return; // para de insistir; o usuario decide
+      renderMonitor(); return;
     }
     MON.autoReinicios++;
-    monEvento('Motor estava parado. Religando automaticamente.','aviso');
-    try{ await carregarIA(); MON.falhasSeguidas = 0; monEvento('Motor religado com sucesso.','ok'); }
-    catch(e){ MON.falhasSeguidas++; monEvento('Nao consegui religar: '+(e && e.message || e),'erro'); }
+    monEvento('IA por API estava parada. Verificando a conexão.','aviso');
+    try{ await carregarIA(); MON.falhasSeguidas = 0; monEvento('IA por API confirmada e pronta.','ok'); }
+    catch(e){ MON.falhasSeguidas++; monEvento('Não consegui preparar a API: '+(e && e.message || e),'erro'); }
   }
   renderMonitor();
 }
@@ -1965,7 +2006,7 @@ async function autonomiaDecisao(rt,token){
     // Necessidade fisica vem antes da tarefa, e nao consome IA.
     if(await atenderNecessidade(rt)) continue;
     if(chamadasNaFila>0) continue;
-    if(!groqApiKey) continue;
+    if(!groqApiKey || Date.now()<apiBloqueadaAte) continue;
     const tarefa=proximaTarefaDe(rt);
     if(!tarefa){
       // Ocioso e de bem: propoe uma ideia propria para o plano de trabalho.
@@ -2081,7 +2122,7 @@ async function autonomiaGerente(manager,token){
     if(token!==autonomyToken||manager.forced) continue;
     if(chamadasNaFila>0) continue;
     const emp=empresaAtual(); if(!emp) continue;
-    if(!groqApiKey) continue;
+    if(!groqApiKey || Date.now()<apiBloqueadaAte) continue;
     manager.forced=true;
     try{
       const abertas=backlog().filter(t=>t.status!=='feita').length;
@@ -2219,7 +2260,7 @@ function parseFundacaoTexto(bruto, ideia){
 function foundCompanyFlow(){
   openModal(`
     <h2>Fundar nova empresa</h2>
-    <div class="msub">A fundação é imediata e não consulta nenhum modelo. A gerente será ativada depois, quando você tiver um modelo instalado e ativo.</div>
+    <div class="msub">A fundação é imediata e não consulta nenhum modelo. A gerente será ativada quando a API Groq estiver configurada e disponível.</div>
     <div class="form-row">
       <label for="ideaInput">Ideia do negócio</label>
       <input class="field-input" id="ideaInput" placeholder="ex: uma loja de roupas vintage online">
@@ -2253,7 +2294,7 @@ function foundCompanyFlow(){
     DB.atual=id; saveDB(); closeModal(); renderAll();
     addLog(`Empresa ${nome} fundada sem consultar a IA.`, 'ok');
     if(!groqApiKey){
-      setAIStatus('idle','Empresa fundada ✓','Escolha um modelo em IA / Modelos e baixe-o para ativar a gerente.');
+      setAIStatus('idle','Empresa fundada ✓','Abra IA / Modelos, configure a API Groq e teste a conexão para ativar a gerente.');
     } else {
       setAIStatus('idle','Modelo disponível','A empresa foi fundada. A IA só será carregada quando for necessária.');
     }
@@ -2269,7 +2310,7 @@ async function criarPaginaApresentacao(emp, rt, tarefa){
   const prompt = `Escreva uma única frase curta e convincente para apresentar a empresa ${emp.nome}, do ramo ${emp.ramo}. Missão: ${emp.missao}. Não use aspas, markdown ou explicações.`;
   let frase = '';
   try {
-    const resp = await chamarAPI(prompt, `Pedido da equipe: ${String(tarefa||'criar página de apresentação').slice(0,500)}`, 64, MODEL_BARATO, rt.id);
+    const resp = await chamarAPI(prompt, `Pedido da equipe: ${String(tarefa||'criar página de apresentação').slice(0,500)}`, 128, MODEL_PRODUCAO, rt.id, 'conteudo');
     frase = String(resp?.text || '').replace(/\s+/g,' ').trim().slice(0,240);
   } catch(err) {
     console.warn('Texto da apresentação falhou; usando texto local.', err);
@@ -2450,7 +2491,7 @@ function hireFlow(){
     };
     emp.equipe.push(novo);
     saveDB(); closeModal(); buildRuntime(); renderStaff(); resizeStage();
-    addLog(`${out.nome} foi contratado(a) como ${out.cargo}.`, 'ok', novo.id);
+    addLog(`${nomeNovo} foi contratado(a) como ${cargoNovo}.`, 'ok', novo.id);
   };
 }
 
@@ -2464,20 +2505,20 @@ function renderModelUI(){
   const detail=document.getElementById('modelDetail');
   if(sel){
     const disponiveis=Object.values(MODELOS);
-    sel.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===escolhido?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
+    sel.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===escolhido?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo disponível</option>';
     sel.disabled=!disponiveis.length;
   }
   const selP=document.getElementById('modelProdSelect');
   if(selP){
     const disponiveis=Object.values(MODELOS);
-    selP.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===MODEL_PRODUCAO?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
+    selP.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===MODEL_PRODUCAO?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo disponível</option>';
     selP.disabled=!disponiveis.length;
   }
   const m=configModelo(escolhido);
   const mp=configModelo(MODEL_PRODUCAO);
   if(detail) detail.textContent=modeloInstalado(m.id)
     ? `Decisão: ${m.nome} (${m.tamanho}). Produção: ${mp.nome} (${mp.tamanho}).`
-    : 'Nenhum modelo instalado. Abra IA / Modelos para baixar um.';
+    : 'Nenhum modelo de API selecionado. Abra IA / Modelos para configurar.';
   renderModelManager();
 }
 
@@ -2508,7 +2549,7 @@ function renderModelManager(){
     test.disabled=true;
     try{
       salvarGroqConfig();
-      const r=await chamarAPI('Responda apenas com a palavra OK.','OK',64,modeloSelecionado,'diag','decisao');
+      const r=await chamarAPI('Responda apenas com a palavra OK.','OK',256,modeloSelecionado,'diag','decisao');
       const texto=String(r?.text||'').trim();
       setAIStatus('ready','GERAÇÃO CONFIRMADA ✓',`Resposta da API: ${texto.slice(0,120)}`);
       monEvento('Teste real da API concluído: “'+texto.slice(0,80)+'”.','ok');
@@ -2528,7 +2569,7 @@ function renderModelManager(){
     testConn.disabled=true;
     try{
       salvarGroqConfig();
-      const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',64,modeloSelecionado,'diag');
+      const r=await chamarAPI('Responda apenas com OK.','Teste de conexão.',256,modeloSelecionado,'diag');
       setAIStatus('ready','Conexão confirmada ✓',String(r.text).slice(0,120));
     }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); }
     finally{testConn.disabled=false;renderModelManager();}
@@ -2610,7 +2651,7 @@ async function baixarModeloDiretoSemIA(id){
 }
 
 async function baixarModeloIA(id){
-  setAIStatus('idle','Download desativado',`Esta versão usa API ${API_PROVIDER}; não é necessário baixar modelo para o celular.`);
+  setAIStatus('ready','Modelo remoto disponível ✓',`GPT-OSS é executado pela API ${API_PROVIDER}; nada é baixado para o celular.`);
   abrirCentralModelos();
 }
 
@@ -2623,8 +2664,10 @@ async function carregarIAComModelo(id){
 
 async function ativarModeloIA(id){
   if(!Object.values(MODELOS).some(m=>m.id===id)) return;
-  modeloSelecionado=id; MODEL_DECISAO=id; MODEL_PRODUCAO=id; persistirPapeis(); persistirModelos();
-  setAIStatus(groqApiKey?'ready':'error',groqApiKey?'IA por API pronta ✓':'API precisa de chave',groqApiKey?`${configModelo().nome} está selecionado.`:'Abra IA / Modelos e informe sua chave Groq.');
+  modeloSelecionado=id; MODEL_DECISAO=id; persistirPapeis(); persistirModelos();
+  const emp=empresaAtual(); if(emp) emp.modeloIA=id;
+  if(emp) saveDB();
+  setAIStatus(groqApiKey?'ready':'error',groqApiKey?'IA por API pronta ✓':'API precisa de chave',groqApiKey?`${configModelo().nome} está selecionado para decisões. Produção continua em ${configModelo(MODEL_PRODUCAO).nome}.`:'Abra IA / Modelos e informe sua chave Groq.');
   renderModelManager(); renderModelUI();
 }
 
@@ -2643,7 +2686,7 @@ async function desinstalarModeloIA(id){
   }catch(e){ console.warn('Limpeza do cache do modelo falhou',e); }
   modelosInstalados=modelosInstalados.filter(x=>x!==id);
   persistirModelos();
-  setAIStatus('idle','Modelo desinstalado',`${configModelo(id).nome} foi removido da lista local. O navegador pode manter algum cache interno que não seja controlável por esta página.`);
+  setAIStatus('ready','Modelo remoto disponível ✓',`${configModelo(id).nome} continua disponível pela API ${API_PROVIDER}; não há modelo instalado no celular.`);
   renderModelManager(); renderModelUI();
 }
 
@@ -2706,7 +2749,7 @@ function renderAgentCards(){
 function statusLabel(rt){
   if(estaDesmaiado(rt)) return 'desmaiado — precisa se recuperar';
   if(rt.icon === '😴') return 'descansando';
-  if(rt.thinking) return 'pensando (consultando a IA)...';
+  if(rt.thinking) return 'pensando (consultando a API)...';
   if(rt.state === 'walking') return 'andando pelo escritório';
   if(rt.state === 'talking') return `falando: "${rt.bubbleText||''}"`;
   if(rt.state === 'acting'){
@@ -2901,7 +2944,11 @@ async function pedirEntregavel(pedido){
   alvo.state = 'acting'; alvo.icon = '📄'; alvo.thinking = true;
 
   const sys = `Você é ${alvo.name}, ${alvo.cargo} da ${emp.nome} (${emp.ramo}). Missão: ${emp.missao}. Tom da marca: ${emp.tom}. Produza o material pedido de verdade, pronto para uso. ${FORMATO_ARQUIVO}`;
-  const out = await askAIBlock(sys, pedido, 384, MODEL_BARATO, alvo.id);
+  let out = await askAIBlock(sys, pedido, 384, MODEL_PRODUCAO, alvo.id);
+  if(!out || !out.conteudo?.trim()){
+    out = criarProdutoLocalDeContingencia(emp, alvo, pedido);
+    addLog(`${alvo.name} entrou em contingência e entregou uma versão local utilizável.`, 'pend', alvo.id);
+  }
 
   alvo.thinking = false; alvo.icon = null; alvo.currentTask = null;
   const ok = out && out.conteudo.trim();
@@ -3277,21 +3324,23 @@ document.getElementById('saveCfgBtn').onclick = () => {
   emp.tom = document.getElementById('cfgTom').value.trim();
   saveDB(); renderAll(); addLog('Configuração da empresa atualizada.', 'info');
 };
-document.getElementById('applyModelBtn').onclick = () => {
+document.getElementById('applyModelBtn').onclick = async () => {
+  const id=document.getElementById('modelSelect')?.value;
   const prod=document.getElementById('modelProdSelect')?.value;
+  if(id && modeloInstalado(id)){ await ativarModeloIA(id); }
   if(prod && modeloInstalado(prod)){
     MODEL_PRODUCAO=prod; persistirPapeis();
-    monEvento('Modelo de produção definido: '+configModelo(prod).nome+'. Ele carrega na primeira entrega de arquivo.','info');
+    const emp=empresaAtual(); if(emp) saveDB();
+    monEvento('Modelo de produção definido: '+configModelo(prod).nome+'.','info');
   }
-  const id=document.getElementById('modelSelect')?.value;
-  if(id) ativarModeloIA(id); else renderModelUI();
+  renderModelUI();
 };
 document.getElementById('aiModelsTopBtn').onclick = abrirCentralModelos;
 document.getElementById('closeAIModelsBtn').onclick = fecharCentralModelos;
 document.getElementById('resetAllBtn').onclick = () => {
   openModal(`
     <h2>Destruir tudo e recomeçar?</h2>
-    <div class="msub">Isso apaga <b>todas as empresas</b>, equipes, arquivos, métricas, aprovações, histórico e a seleção atual. Também tenta remover do cache do navegador os arquivos dos modelos da IA. Não dá para desfazer.</div>
+    <div class="msub">Isso apaga <b>todas as empresas</b>, equipes, arquivos, métricas, aprovações, histórico e a seleção atual. A chave Groq permanece salva. Não dá para desfazer.</div>
     <div class="modal-actions">
       <button class="btn" id="cancelReset">Cancelar</button>
       <button class="btn primary danger" id="confirmReset">Destruir tudo</button>
@@ -3324,9 +3373,8 @@ document.getElementById('aiRetryBtn')?.addEventListener('click', async () => {
   iaBloqueadaAte=0;
   const b=document.getElementById('aiRetryBtn');
   if(b) b.hidden=true;
-  encerrarWorkerIA();
-  setAIStatus('loading','Reiniciando a IA local','Limpando o motor anterior e tentando novamente…');
-  try{ await carregarIA(); workerFalhas=0; }catch(e){ setAIStatus('error','A IA não conseguiu iniciar',String(e?.message||e)); }
+  setAIStatus('loading','Verificando a API Groq','Testando novamente a conexão…');
+  try{ await carregarIA(); iaPronta=true; workerFalhas=0; }catch(e){ setAIStatus('error','A IA não conseguiu iniciar',String(e?.message||e)); }
 });
 
 /* ============================================================
@@ -3346,8 +3394,7 @@ document.getElementById('monPausarBtn')?.addEventListener('click', ()=>{
 document.getElementById('monReligarBtn')?.addEventListener('click', async ()=>{
   iaBloqueadaAte=0; MON.falhasSeguidas=0;
   monEvento('Reinicio manual do motor solicitado.','aviso');
-  encerrarWorkerIA();
-  try{ await carregarIA(); monEvento('Motor religado manualmente.','ok'); }
+  try{ iaPronta=false; await carregarIA(); monEvento('IA por API religada manualmente.','ok'); }
   catch(e){ monEvento('Reinicio manual falhou: '+(e && e.message || e),'erro'); }
 });
 document.getElementById('monDestravarBtn')?.addEventListener('click', ()=>{
