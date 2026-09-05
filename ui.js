@@ -158,6 +158,8 @@
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
       </div>
       ${mem.length ? `<div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Memória relevante</div>${mem.map(x => `<p class="panel-foot" style="margin:6px 0">${esc(x)}</p>`).join('')}</div>` : ''}
+      <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-head"><span class="panel-label">Log individual</span><span class="chip">últimos eventos</span></div><div class="logbox person-log">${((f.log||[]).slice(-30).reverse()).map(l=>`<div class="log-line ${esc(l.tag||'info')}"><span class="log-ts">${F.hora(l.t)}</span><span class="log-txt">${esc(l.texto)}</span></div>`).join('') || '<div class="empty">Ainda não há eventos individuais.</div>'}</div></div>
+      <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Cuidados e rotina</div><p class="panel-foot">Pausas de recuperação: ${Number(f.cuidados&&f.cuidados.pausa||0)} · Hidratação e pausas são simuladas como hábitos de bem-estar, sem monitoramento invasivo.</p></div>
       <div class="sheet-actions">
         ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
         <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>

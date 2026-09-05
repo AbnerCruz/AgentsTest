@@ -121,6 +121,11 @@ window.S = window.S || {};
       f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
       f.foco = String(f.foco || '').slice(0, 180);
       f.uso = f.uso || { chamadas: 0, tokens: 0 };
+      f.log = Array.isArray(f.log) ? f.log.slice(-120) : [];
+      f.cuidados = f.cuidados && typeof f.cuidados === 'object' ? f.cuidados : {};
+      f.cuidados.ultimo = f.cuidados.ultimo || 0;
+      f.cuidados.agua = Number.isFinite(f.cuidados.agua) ? f.cuidados.agua : 0;
+      f.cuidados.pausa = Number.isFinite(f.cuidados.pausa) ? f.cuidados.pausa : 0;
     });
     e.projetos = Array.isArray(e.projetos) ? e.projetos : [];
     if (!e.projetos.length) {
@@ -237,6 +242,17 @@ window.S = window.S || {};
     gravar();
   }
 
+  function registrarPessoa(agenteId, texto, tag) {
+    const e = atual(); if (!e || !agenteId) return;
+    const f = e.equipe.find(x => x.id === agenteId); if (!f) return;
+    f.log = Array.isArray(f.log) ? f.log : [];
+    f.log.push({ t: Date.now(), texto: String(texto), tag: tag || 'info' });
+    if (f.log.length > 120) f.log.splice(0, f.log.length - 120);
+    registrar(`${f.nome}: ${texto}`, tag || 'info', agenteId);
+    gravar();
+    S.bus.emit('pessoa-log', agenteId);
+  }
+
   function ganharXP(qtd, motivo) {
     const e = atual(); if (!e) return;
     const antes = nivelDe(e.xp);
@@ -251,7 +267,7 @@ window.S = window.S || {};
   }
 
   S.state = {
-    PALETA, carregar, gravar, gravarJa, atual, registrar, ganharXP,
+    PALETA, carregar, gravar, gravarJa, atual, registrar, registrarPessoa, ganharXP,
     nivelDe, progressoNivel, normalizarEstudio, mapearEspecialidade,
     trocar(id) { DB.atual = id; gravarJa(); S.bus.emit('trocou'); },
     remover(id) {

@@ -61,6 +61,8 @@
   }
 
   function pessoa(id) { return rt.find(p => p.id === id) || null; }
+  function logPessoa(p, texto, tag) { if (p && p.id) S.state.registrarPessoa(p.id, texto, tag || 'info'); }
+  function logEscritorio(texto, tag) { S.state.registrar(texto, tag || 'info'); }
   const gerente = () => rt.find(p => p.papel === 'gerente') || null;
 
   function irPara(p, alvo) {
@@ -151,12 +153,23 @@
       else f.energia = clamp(f.energia - 0.015, 0, 100);
       // Humor volta devagar para o meio quando nada acontece.
       f.humor = clamp(f.humor + (f.humor < 60 ? 0.35 : -0.12), 0, 100);
+      const agora = Date.now();
+      f.cuidados = f.cuidados || {};
+      if (rel.expediente && f.energia < 62 && agora - (f.cuidados.ultimo || 0) > 12 * 60 * 1000 && !p.ocupado) {
+        f.cuidados.ultimo = agora; f.cuidados.pausa = (f.cuidados.pausa || 0) + 1;
+        p.estado = 'pausa';
+        const est = f.energia < 42 ? ESTACOES.descanso : ESTACOES.cafe;
+        logPessoa(p, f.energia < 42 ? 'fez uma pausa de recuperação antes de retomar o trabalho.' : 'fez uma pausa curta para água/café e reorganização.', 'bem-estar');
+        irPara(p, est).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou as atividades após a pausa.', 'bem-estar'); }); }, 9000));
+      }
+      if (rel.expediente && agora - (f.cuidados.agua || 0) > 25 * 60 * 1000 && !p.ocupado) {
+        f.cuidados.agua = agora;
+        logPessoa(p, 'fez uma pausa breve para hidratação.', 'bem-estar');
+      }
       if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado) {
         p.estado = 'pausa';
-        irPara(p, ESTACOES[pick(['cafe', 'descanso'])]).then(() => {
-          setTimeout(() => { if (p.estado === 'pausa') { irPara(p, assento(p)).then(() => { p.estado = 'sentado'; }); } }, 9000);
-        });
-        S.state.registrar(`${p.nome} parou para descansar — energia no fim.`, 'info', p.id);
+        logPessoa(p, 'interrompeu o trabalho para recuperação: energia baixa.', 'bem-estar');
+        irPara(p, ESTACOES.descanso).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou o trabalho após recuperação.', 'bem-estar'); }); }, 9000));
       }
     });
     S.bus.emit('equipe');
@@ -315,9 +328,11 @@
     tarefa.status = 'fazendo'; tarefa.para = p.id;
     S.bus.emit('trabalho'); S.bus.emit('equipe');
     S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
+    logPessoa(p, `iniciou a tarefa "${tarefa.titulo}". Conferindo briefing, dependências e materiais já produzidos.`, 'trabalho');
 
     await irPara(p, assento(p));
     p.estado = 'trabalhando';
+    logPessoa(p, `está executando "${tarefa.titulo}" sobre o contexto persistido do projeto.`, 'trabalho');
     const relogio = setInterval(() => { p.progresso = Math.min(0.97, p.progresso + 0.03); }, 400);
 
     let ok = false;
@@ -326,6 +341,7 @@
       if (saida && saida.arquivos.length) {
         const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, { projectId: tarefa.projectId }), p);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
+        logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
         p.ref.pensamento = `Concluí ${tarefa.titulo}. Agora verifico se o que produzi realmente ajuda o produto final e se outra pessoa consegue continuar daqui.`;
         lembrar(p, `Concluí ${tarefa.titulo}; entrega vinculada ao projeto ${tarefa.projectId || 'principal'}.`);
         tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
@@ -341,11 +357,13 @@
         if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
       } else {
         tarefa.status = 'aberta';
+        logPessoa(p, `não conseguiu concluir "${tarefa.titulo}"; deixou a tarefa aberta para recuperação ou revisão.`, 'alerta');
         humor(p, -7, `empaquei em ${tarefa.titulo}`);
         S.state.registrar(`${p.nome} não conseguiu concluir "${tarefa.titulo}".`, 'erro', p.id);
       }
     } catch (err) {
       tarefa.status = 'aberta';
+      logPessoa(p, `encontrou um erro durante "${tarefa.titulo}" e registrou a falha para retomada.`, 'erro');
       S.state.registrar(`${p.nome} travou em "${tarefa.titulo}": ${err && err.message || 'erro'}`, 'erro', p.id);
     } finally {
       clearInterval(relogio);
@@ -486,6 +504,16 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     if (!funcs.length) rec = 'Não há funcionários além da gerente; avaliar contratação para executar produção.';
     e.gerencia.ultimaAvaliacao = agora;
     e.gerencia.recomendacao = rec;
+    // A supervisão gera uma trilha legível, mas sem registrar a mesma coisa a cada ciclo.
+    porPessoa.forEach(x => {
+      const f = x.f; f.log = Array.isArray(f.log) ? f.log : [];
+      const ultimo = Number(f.ultimaSupervisao || 0);
+      if (agora - ultimo > 120000) {
+        f.ultimaSupervisao = agora;
+        const situacao = x.travadas ? `tem ${x.travadas} dependência(s) bloqueando` : x.ativas ? `está executando ${x.ativas} tarefa(s)` : 'está disponível para a próxima etapa';
+        S.state.registrarPessoa(f.id, `supervisão: ${situacao}; energia ${Math.round(f.energia || 0)}/100; ${x.feitas} tarefa(s) concluída(s) no histórico recente.`, x.travadas ? 'alerta' : 'supervisão');
+      }
+    });
     e.gerencia.alertas = alertas.slice(-20);
     g.ref.foco = 'Monitorando desempenho, gargalos e necessidade de equipe';
     g.ref.pensamento = `Acompanho carga, qualidade, dependências e capacidade da equipe. ${rec}`.slice(0,240);
