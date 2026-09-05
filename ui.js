@@ -173,7 +173,7 @@
   /* ============================================================
      Trabalho
      ============================================================ */
-  function pintarTrabalho() { pintarProjetos(); pintarBacklog(); pintarLog(); pintarPendencias(); pintarBadges(); }
+  function pintarTrabalho() { pintarProjetos(); pintarIdeias(); pintarBacklog(); pintarLog(); pintarPendencias(); pintarBadges(); }
 
   function pintarBadges() {
     const e = S.state.atual(); if (!e) return;
@@ -205,6 +205,23 @@
         </div>
       </div>`;
     }).join('') : '<div class="empty">A equipe ainda não criou um projeto.</div>';
+  }
+
+  function pintarIdeias() {
+    const e = S.state.atual(); if (!e) return;
+    const box = $('#ideiasList'); if (!box) return;
+    const ideias = (e.ideias || []).slice(0, 8);
+    box.innerHTML = ideias.length ? ideias.map(i => `
+      <div class="item idea-item">
+        <span class="dot-state ${i.status === 'descartada' ? '' : 'fazendo'}"></span>
+        <div class="item-body">
+          <div class="item-title">${esc(i.titulo)}</div>
+          <div class="item-meta"><span>${F.dataHora(i.t)}</span><span>· ${esc(i.status || 'selecionada')}</span></div>
+          ${i.objetivo ? `<p class="panel-foot">${esc(i.objetivo)}</p>` : ''}
+          ${i.proposta ? `<div class="project-feed"><div>${esc(i.proposta)}</div></div>` : ''}
+          ${(i.participantes||[]).length ? `<div class="item-meta">${i.participantes.map(p=>`<span>${esc(p.nome)}</span>`).join(' · ')}</div>` : ''}
+        </div>
+      </div>`).join('') : '<div class="empty">A equipe ainda não chegou a uma nova iniciativa.</div>';
   }
 
   function pintarBacklog() {
@@ -652,6 +669,7 @@
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
     S.bus.on('reuniao', () => { if (viewAtual === 'reuniao') pintarReuniao(); });
     S.bus.on('negocio', () => { });
+  S.bus.on('ideias', () => { if (viewAtual === 'trabalho') pintarIdeias(); });
     S.bus.on('relogio', () => { pintarRelogio(); });
     S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
     S.bus.on('trocou', () => { S.studio.montar(); pintarTopo(); mostrar(S.state.atual() ? (viewAtual === 'vazio' ? 'estudio' : viewAtual) : 'vazio'); pintarTudo(); });

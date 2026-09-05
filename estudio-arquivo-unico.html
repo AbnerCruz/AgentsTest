@@ -515,6 +515,9 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 
 .person-log{max-height:280px;overflow:auto;padding-right:4px}.person-log .log-line{margin:4px 0}
 
+.idea-item { border-left: 3px solid var(--accent, #E4703E); }
+.idea-item .panel-foot { margin: 6px 0; }
+
 </style>
 <script>
 /* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
@@ -669,6 +672,11 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Plano de trabalho</span><span class="chip" id="backlogChip">0 abertas</span></div>
         <div id="backlogList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Ideias e decisões da equipe</span><span class="chip">descoberta contínua</span></div>
+        <p class="panel-foot">As próximas iniciativas nascem das observações da equipe. Ideias podem ser discutidas, descartadas ou transformadas em projetos e etapas reais.</p>
+        <div id="ideiasList"></div>
       </div>
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Diário do estúdio</span><button class="btn btn-mini" id="limparLogBtn" type="button">Limpar</button></div>

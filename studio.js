@@ -498,6 +498,161 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.state.gravar(); S.bus.emit('negocio');
   }
 
+  /* ============================================================
+     CICLO ESTRATÉGICO DA EQUIPE
+     Ideias não pertencem exclusivamente à gerente. Quando uma etapa
+     termina e não existe outra necessidade concreta, a própria equipe
+     observa o trabalho, levanta oportunidades e escolhe coletivamente
+     uma próxima iniciativa. Um marco de produção concluído libera um
+     novo ciclo; não existe cronômetro de "gerar ideia".
+     ============================================================ */
+  function marcoIdeacao(e) {
+    const feitas = (e.tarefas || []).filter(t => t.status === 'feita').length;
+    const produtos = (e.arquivos || []).filter(a => a.classe === 'produto').length;
+    const projetos = (e.projetos || []).length;
+    return `${feitas}|${produtos}|${projetos}`;
+  }
+
+  function registrarIdeia(ideia) {
+    const e = S.state.atual(); if (!e) return;
+    e.ideias = Array.isArray(e.ideias) ? e.ideias : [];
+    e.ideias.unshift({
+      id: uid('ideia'), t: Date.now(), status: ideia.status || 'selecionada',
+      titulo: String(ideia.titulo || 'Nova oportunidade').slice(0, 180),
+      objetivo: String(ideia.objetivo || '').slice(0, 360),
+      proposta: String(ideia.proposta || '').slice(0, 500),
+      participantes: ideia.participantes || [],
+      projetoId: ideia.projetoId || null
+    });
+    e.ideias = e.ideias.slice(0, 40);
+    S.state.gravar(); S.bus.emit('ideias');
+  }
+
+  function idearLocal() {
+    const e = S.state.atual(); if (!e) return false;
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    if (!projeto) return false;
+    const marco = marcoIdeacao(e);
+    if (e.estrategia && e.estrategia.ultimoMarcoIdeacao === marco) return false;
+    const funcs = rt.filter(p => p.papel === 'func' && p.ref.energia > 25);
+    if (funcs.length < 1) return false;
+    const produtos = e.arquivos.filter(a => a.classe === 'produto');
+    const spec = produtos.length ? {
+      titulo:'Evoluir e integrar o portfólio existente',
+      objetivo:'Criar uma evolução útil a partir dos produtos já produzidos, evitando começar novamente do zero.',
+      brief:'Revisar os produtos existentes e identificar a integração ou melhoria de maior impacto para o projeto.'
+    } : {
+      titulo:'Construir a primeira entrega completa do projeto',
+      objetivo:'Transformar a missão do estúdio em uma primeira entrega concreta e utilizável.',
+      brief:'Definir a estrutura e os requisitos da primeira entrega completa usando o contexto persistido do projeto.'
+    };
+    const participantes = funcs.slice(0,3).map(p => ({id:p.id,nome:p.nome,fala:`Como ${p.cargo}, vou avaliar ${spec.titulo.toLowerCase()} usando o que já existe no projeto.`}));
+    participantes.forEach(x => { const p=rt.find(y=>y.id===x.id); if(p){ registrarReuniao(p.nome,x.fala,'ideia'); logPessoa(p,`participou da ideação da equipe: ${spec.titulo}`,'ideia'); } });
+    registrarIdeia({titulo:spec.titulo, objetivo:spec.objetivo, proposta:spec.brief, participantes, projetoId:projeto.id});
+    registrarReuniao('Equipe',`Decisão coletiva: ${spec.titulo}. ${spec.brief}`,'decisao');
+    const kit = produtos.length ? S.factory.porId('landing') : S.factory.porId('landing');
+    const alvo = funcs.find(p=>p.ref.especialidade===kit.especialidade) || funcs[0];
+    const t=novaTarefa({titulo:`${kit.nome}: ${spec.brief}`,kit:kit.id,briefing:spec.brief,para:alvo.id,projectId:projeto.id,origem:'decisão da equipe'});
+    e.estrategia=e.estrategia||{}; e.estrategia.ultimoMarcoIdeacao=marco; e.estrategia.ultimaIdeia=Date.now();
+    S.state.gravar(); S.bus.emit('reuniao'); return !!t;
+  }
+
+  async function idearComEquipe() {
+    const e = S.state.atual(); if (!e) return false;
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    if (!projeto) return false;
+    const abertas = (e.tarefas || []).filter(t => t.status !== 'feita');
+    const pendentes = (e.arquivos || []).filter(a => ['candidato','prototipo'].includes(a.classe) && !a.avaliado);
+    if (abertas.length || pendentes.length) return false;
+    const marco = marcoIdeacao(e);
+    if (e.estrategia && e.estrategia.ultimoMarcoIdeacao === marco) return false;
+
+    const pessoas = rt.filter(p => p.papel === 'func' && p.ref.energia > 25).slice(0, 3);
+    const g = gerente();
+    if (g && g.ref.energia > 25) pessoas.push(g);
+    if (pessoas.length < 2) return false;
+
+    const contexto = pessoas.map(p => `${p.id}|${p.nome}|${p.cargo}|especialidade=${p.especialidade}|foco=${p.ref.foco||'livre'}|memoria=${(p.ref.memoria||[]).slice(-3).map(x=>typeof x==='string'?x:x.texto).join(' / ')}`).join('\n');
+    const arquivos = (projeto.arquivoIds || []).slice(0,10).map(id => e.arquivos.find(a=>a.id===id)).filter(Boolean)
+      .map(a => `${a.nome}|${a.classe}|q${a.qualidade}|kit=${a.kit}`).join('\n') || 'nenhum';
+    const kits = kitsDisponiveis().map(k => `${k.id}:${k.nome}`).join(', ');
+
+    pessoas.forEach(p => { p.ref.foco = 'Observando oportunidades para o próximo produto/projeto'; p.ref.pensamento = 'Estou procurando uma próxima iniciativa que aproveite o que a equipe já construiu e seja útil ao objetivo do estúdio.'; });
+    const r = await S.ai.perguntar({
+      sistema: `Você é um facilitador de uma equipe real de estúdio. Não trate a gerente como única fonte de ideias: cada participante deve contribuir a partir de sua especialidade e do trabalho existente.
+ESTÚDIO: ${e.nome} | missão=${e.missao} | público=${e.publico}
+PROJETO ATUAL: ${projeto.nome} | objetivo=${projeto.objetivo}
+ARTEFATOS EXISTENTES:\n${arquivos}
+PARTICIPANTES:\n${contexto}
+TIPOS DE ENTREGA DISPONÍVEIS: ${kits}
+A equipe está sem tarefas abertas e sem entregas aguardando revisão. Gere uma conversa curta de descoberta, com 2 ou 3 contribuições individuais e uma decisão coletiva. Não invente dados externos. Priorize evolução, integração ou um novo produto que faça sentido a partir do que já existe.
+RETORNE SOMENTE:
+FALA1_QUEM: <id>
+FALA1: <até 45 palavras>
+FALA2_QUEM: <id>
+FALA2: <até 45 palavras>
+FALA3_QUEM: <id ou vazio>
+FALA3: <até 45 palavras>
+IDEIA: <título da iniciativa, até 12 palavras>
+OBJETIVO: <até 30 palavras>
+DECISAO: <por que a equipe escolheu essa ideia, até 35 palavras>
+PROJETO: <nome curto para novo projeto ou vazio se deve continuar no projeto atual>
+KIT: <id de entrega ou vazio se o planejamento deve começar antes da produção>
+BRIEF: <primeira etapa concreta, até 35 palavras>`,
+      pedido: `Façam a próxima conversa estratégica do estúdio. O ponto de partida é o trabalho real já concluído; não repitam entregas existentes.`,
+      tokens: 650, agente: 'equipe', motivo: 'ideação coletiva'
+    });
+    if (!r) return false;
+
+    const campos = r.campos || {};
+    const participantes = [];
+    ['1','2','3'].forEach(n => {
+      const id = String(campos['fala'+n+'_quem'] || '').trim();
+      const texto = String(campos['fala'+n] || '').trim();
+      const p = pessoas.find(x => x.id === id);
+      if (p && texto) {
+        participantes.push({ id:p.id, nome:p.nome, fala:texto.slice(0,500) });
+        registrarReuniao(p.nome, texto, 'ideia');
+        lembrar(p, `Na conversa da equipe, contribuí com uma oportunidade: ${texto.slice(0,140)}`);
+        logPessoa(p, `contribuiu para a ideação da equipe: ${texto.slice(0,180)}`, 'ideia');
+      }
+    });
+    const titulo = String(campos.ideia || '').trim() || 'Próxima iniciativa do estúdio';
+    const objetivo = String(campos.objetivo || '').trim() || `Avançar a missão do estúdio aproveitando o que já foi produzido em ${projeto.nome}.`;
+    const decisao = String(campos.decisao || '').trim();
+    const projetoNome = String(campos.projeto || '').trim();
+    let destino = projeto;
+    if (projetoNome) {
+      destino = { id: uid('proj'), nome: projetoNome.slice(0,80), objetivo, status:'ativo', criadoEm:Date.now(), tarefaIds:[], arquivoIds:[], atividade:[] };
+      e.projetos.forEach(pr => { if (pr.id !== projeto.id && pr.status === 'ativo') pr.status = 'pausado'; });
+      e.projetos.unshift(destino);
+      S.state.registrar(`A equipe abriu o projeto "${destino.nome}" a partir de uma decisão coletiva.`, 'info');
+    }
+    const kitId = String(campos.kit || '').trim();
+    const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(String(campos.brief || '')));
+    const brief = String(campos.brief || '').trim();
+    registrarIdeia({ titulo, objetivo, proposta: decisao || brief, participantes, projetoId: destino.id });
+    registrarReuniao('Equipe', `Decisão coletiva: ${titulo}. ${decisao || objetivo}`, 'decisao');
+    destino.atividade = destino.atividade || [];
+    destino.atividade.unshift({ t:Date.now(), tipo:'ideia', texto:`Equipe decidiu: ${titulo}.` });
+    if (kit && kit.nivel <= S.state.nivelDe(e.xp)) {
+      const alvo = pessoas.find(p => p.papel === 'func' && p.ref.especialidade === kit.especialidade) || pessoas.find(p => p.papel === 'func');
+      const t = novaTarefa({ titulo:`${kit.nome}: ${brief || kit.desc}`, kit:kit.id, briefing:brief || kit.desc, para:alvo ? alvo.id : null, projectId:destino.id, origem:'decisão da equipe' });
+      if (t) {
+        const q = alvo ? alvo.nome : 'distribuição automática';
+        registrarReuniao('Sistema', `Primeira etapa criada: ${t.titulo} → ${q}.`, 'ordem');
+      }
+    } else {
+      registrarReuniao('Sistema', `A iniciativa "${titulo}" entrou em planejamento; a próxima etapa será definida pela equipe.`, 'planejamento');
+    }
+    e.estrategia = e.estrategia || {};
+    e.estrategia.ultimoMarcoIdeacao = marco;
+    e.estrategia.ultimaIdeia = Date.now();
+    S.state.gravar();
+    S.bus.emit('estudio'); S.bus.emit('reuniao'); S.bus.emit('negocio');
+    return true;
+  }
+
   /* O usuário observa; a equipe decide e distribui o trabalho autonomamente. */
 
   /* A gerente observa a operação continuamente: carga, gargalos, qualidade,
@@ -728,7 +883,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
       if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) await avaliar(g);
-      else if (tarefasAbertas().length < 2) {
+      else if (tarefasAbertas().length === 0 && !candidato) {
+        // Não é um timer: o marco de produção concluído é o gatilho. A equipe inteira participa.
+        if (S.ai.disponivel() && S.ai.reservarAutonomia()) await idearComEquipe();
+        else idearLocal();
+      } else if (tarefasAbertas().length < 2) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) await planejar(g);
         else planejarLocal(g);
       } else monitorarEquipe(g);
@@ -913,7 +1072,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   }
 
   S.studio = {
-    reuniaoFalar, relatorioReuniao, registrarReuniao, gerarRelatorioLocal,
+    reuniaoFalar, relatorioReuniao, registrarReuniao, gerarRelatorioLocal, idearComEquipe,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
