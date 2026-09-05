@@ -544,6 +544,16 @@ let workerReadyResolve = null;
 let workerReadyReject = null;
 let aiGeneration = 0;
 let ultimoSinalWorker = 0;
+let ultimoDiagWorker = null; // { texto, ts } — ultima pista de diagnostico recebida do worker antes de um encerramento abrupto
+let avisoMemoriaMostrado = false;
+function avisarSeMemoriaBaixa(){
+  if(avisoMemoriaMostrado) return;
+  const mem = Number(navigator.deviceMemory||0);
+  if(mem && mem<=4){
+    avisoMemoriaMostrado = true;
+    monEvento(`Este aparelho reporta ~${mem}GB de RAM. Rodar IA local nessa faixa aumenta a chance do sistema encerrar o processo do motor sem aviso — prefira o modelo de 135M e feche outras abas/apps antes de carregar.`,'aviso');
+  }
+}
 let chamadasNaFila = 0;
 let recarregando = false;
 let iaPronta = false;
@@ -607,13 +617,34 @@ let pipeline = null, env = null, runtimeReady = null, TextStreamerCls = null;
 // Um pipeline por modelo, para nao recarregar a cada troca de papel.
 const pipes = new Map(), loadings = new Map();
 const MAX_PIPES = 2;
+// Diagnostico extra: o navegador nem sempre entrega um ErrorEvent util quando
+// o processo do Worker e derrubado (ex.: kill por falta de memoria no Android).
+// Estes listeners tentam mandar uma ultima mensagem ANTES do processo morrer,
+// o que o w.onerror do lado principal sozinho nao consegue garantir.
+self.addEventListener('error', (e)=>{
+  try{ postMessage({type:'worker-diag', kind:'error', message:String(e?.message||''), filename:String(e?.filename||''), lineno:e?.lineno||0, colno:e?.colno||0}); }catch(_){}
+});
+self.addEventListener('unhandledrejection', (e)=>{
+  try{ const r=e?.reason; postMessage({type:'worker-diag', kind:'unhandledrejection', message:String(r?.message||r||'')}); }catch(_){}
+});
+// Heartbeat continuo: mesmo durante o import() da biblioteca ou a compilacao
+// do WASM (fases sem mensagens de progresso proprias), isso mantem o relogio
+// de "ultimo sinal" do lado principal atualizado, ajudando a distinguir
+// travamento de encerramento abrupto do processo.
+setInterval(()=>{ try{ postMessage({type:'alive'}); }catch(_){} }, 4000);
 async function initRuntime(source, allowRemote=false){
   if(runtimeReady) return runtimeReady;
   runtimeReady=(async()=>{
     // Importamos sempre a URL real da biblioteca. Fora do navegador servido por
     // uma origem http(s) isto falha; e importar um Blob quebra a resolucao dos
     // binarios .wasm do ONNX. Offline quem entrega estes arquivos e o Service Worker.
-    const mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
+    let mod;
+    try{
+      mod=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/dist/transformers.min.js');
+    }catch(e){
+      postMessage({type:'worker-diag', kind:'import-error', message:String(e?.message||e)});
+      throw e;
+    }
     pipeline=mod.pipeline; env=mod.env; TextStreamerCls=mod.TextStreamer||null;
     env.allowRemoteModels=!!allowRemote; env.allowLocalModels=false; env.useBrowserCache=true; env.useWasmCache=true;
     try{ if(env.backends?.onnx?.wasm){
@@ -881,6 +912,14 @@ function criarWorkerIA(){
       const p=workerPendentes.get(m.id); if(p && typeof p.tocar==='function') p.tocar();
       return;
     }
+    if(m.type==='alive'){ return; } // so serve para atualizar ultimoSinalWorker acima
+    if(m.type==='worker-diag'){
+      const rotulo = m.kind==='import-error' ? 'Falha ao importar a biblioteca do motor' : (m.kind==='unhandledrejection' ? 'Promessa rejeitada sem tratamento dentro do motor' : 'Erro interno do motor');
+      const detalhe = [m.message, m.filename?`arquivo: ${m.filename}`:'', m.lineno?`linha: ${m.lineno}`:''].filter(Boolean).join(' · ') || 'sem detalhe adicional';
+      ultimoDiagWorker = { texto: `${rotulo}: ${detalhe}`, ts: Date.now() };
+      monEvento('Diagnóstico do motor: '+ultimoDiagWorker.texto,'aviso');
+      return;
+    }
     if(m.type==='result' || m.type==='error'){
       const p=workerPendentes.get(m.id); if(!p) return;
       workerPendentes.delete(m.id);
@@ -889,7 +928,21 @@ function criarWorkerIA(){
   };
   w.onerror = e => {
     if(epoch !== aiGeneration || w !== workerIA) return;
-    const detalhe = [e?.message, e?.filename ? `arquivo: ${e.filename}` : '', e?.lineno ? `linha: ${e.lineno}` : '', e?.colno ? `coluna: ${e.colno}` : ''].filter(Boolean).join(' · ') || 'Worker encerrado sem ErrorEvent detalhado. Isso pode ser falha do runtime/ONNX, erro de módulo do Worker ou encerramento do processo; não vou atribuir automaticamente a falta de memória.';
+    let detalhe = [e?.message, e?.filename ? `arquivo: ${e.filename}` : '', e?.lineno ? `linha: ${e.lineno}` : '', e?.colno ? `coluna: ${e.colno}` : ''].filter(Boolean).join(' · ');
+    if(!detalhe){
+      // O ErrorEvent veio vazio. Se recebemos uma pista do worker nos ultimos
+      // segundos (worker-diag), ela e mais confiavel que qualquer suposicao.
+      if(ultimoDiagWorker && (Date.now()-ultimoDiagWorker.ts) < 8000){
+        detalhe = ultimoDiagWorker.texto;
+      } else {
+        const gap = ultimoSinalWorker ? Math.round((Date.now()-ultimoSinalWorker)/1000) : null;
+        const mem = Number(navigator.deviceMemory||0);
+        const pistaMem = mem && mem<=4 ? ` O aparelho reporta ~${mem}GB de RAM, o que é compatível com um encerramento por falta de memória.` : '';
+        detalhe = gap!=null && gap<3
+          ? `Worker encerrado sem ErrorEvent detalhado, mas o motor estava responsivo até ${gap}s atrás — condizente com o sistema derrubando o processo de repente (kill por RAM), não com um travamento gradual.${pistaMem}`
+          : `Worker encerrado sem ErrorEvent detalhado. Isso pode ser falha do runtime/ONNX, erro de módulo do Worker ou encerramento do processo; não vou atribuir automaticamente a falta de memória.${pistaMem}`;
+      }
+    }
     const err = new Error(detalhe);
     for(const [id,p] of workerPendentes){ p.reject(err); workerPendentes.delete(id); }
     if(workerReadyReject) workerReadyReject(err);
@@ -914,6 +967,7 @@ async function carregarIA(){
   if(pipelineIA && workerIA && iaPronta) return true;
   if(Date.now() < iaBloqueadaAte) throw new Error('A IA local está temporariamente pausada após uma falha no navegador. Toque em “Tentar novamente” para uma nova tentativa.');
   if(carregandoIA) return carregandoIA;
+  avisarSeMemoriaBaixa();
   carregandoIA=(async()=>{
     await prepararRuntimeOffline();
     setAIStatus('loading','Preparando o motor de IA',`${configModelo().nome} · carregando em segundo plano.`,null);
