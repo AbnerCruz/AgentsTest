@@ -628,6 +628,57 @@ async function load(modelId, dtype, runtimeSource, allowRemote=false){
 }
 self.onmessage = async (ev)=>{
   const msg=ev.data||{};
+  if(msg.type==='download') {
+    try {
+      // DOWNLOAD e PREPARACAO sao deliberadamente separados de load().
+      // Aqui nao importamos Transformers.js nem criamos uma sessao ONNX:
+      // apenas baixamos os arquivos do modelo para o cache. Isso evita que
+      // o celular tente alocar centenas de MB de RAM durante o download.
+      const modelId=msg.modelId;
+      if(!modelId) throw new Error('Modelo nao informado.');
+      const api='https://huggingface.co/api/models/'+modelId;
+      const metaResp=await fetch(api,{cache:'no-store'});
+      if(!metaResp.ok) throw new Error('Nao foi possivel consultar o modelo ('+metaResp.status+').');
+      const meta=await metaResp.json();
+      const files=(meta.siblings||[]).map(x=>x.rfilename).filter(Boolean);
+      const pequenos=['config.json','tokenizer.json','tokenizer_config.json','special_tokens_map.json','generation_config.json','chat_template.jinja','merges.txt','vocab.json'];
+      const escolhidos=files.filter(f=>pequenos.includes(f));
+      const onnx=files.filter(f=>/\.onnx$/i.test(f));
+      const d=String(msg.dtype||'q8').toLowerCase();
+      function score(f){
+        const x=f.toLowerCase(); let s=0;
+        if(d==='q4f16' && /q4f16/.test(x)) s+=100;
+        if(d==='q4' && /q4(\.|_|$)/.test(x)) s+=100;
+        if(d==='q8' && /q8(\.|_|$)/.test(x)) s+=100;
+        if(d==='q8' && /quantized/.test(x)) s+=70;
+        if(d==='q8' && /int8|uint8/.test(x)) s+=50;
+        if(/\/model\.onnx$|^model\.onnx$/.test(x)) s+=10;
+        if(/^onnx\//.test(x)) s+=5;
+        return s;
+      }
+      onnx.sort((a,b)=>score(b)-score(a));
+      if(!onnx.length) throw new Error('Este modelo nao possui arquivo ONNX no repositorio.');
+      escolhidos.push(onnx[0]);
+      const unique=[...new Set(escolhidos)];
+      const cache=('caches' in self)?await caches.open('ia-modelos-v1'):null;
+      if(!cache) throw new Error('Armazenamento de cache indisponivel neste navegador.');
+      for(let i=0;i<unique.length;i++){
+        const f=unique[i];
+        const url='https://huggingface.co/'+modelId+'/resolve/main/'+f;
+        const existente=await cache.match(url,{ignoreVary:true});
+        if(existente){ postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:true}); continue; }
+        const r=await fetch(url);
+        if(!r.ok) throw new Error('Falha ao baixar '+f+' ('+r.status+').');
+        // Guardamos na chave canonica que o Transformers.js normalmente usa.
+        // O Service Worker tambem pode manter sua propria copia, sem exigir
+        // que o modelo seja carregado em RAM durante o download.
+        await cache.put(url,r.clone());
+        postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:false});
+      }
+      postMessage({type:'download-ready',modelId,files:unique.length});
+    } catch(e){ postMessage({type:'download-error',modelId:msg.modelId,error:String(e?.message||e)}); }
+    return;
+  }
   if(msg.type==='load') { try { await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); } catch(e){} return; }
   if(msg.type==='generate'){
     // Heartbeat de reserva: mesmo se o streamer abaixo nao existir nesta
@@ -699,7 +750,21 @@ function criarWorkerIA(){
     if(m.type==='progress'){
       const p=m.data||{};
       const frac = typeof p.progress==='number' ? p.progress : null;
-      setAIStatus('loading', 'Baixando/preparando a IA', frac==null ? 'O modelo está sendo preparado neste navegador.' : `${Math.round(frac)}%`, frac);
+      setAIStatus('loading', 'Preparando o motor de IA', frac==null ? 'O modelo está sendo preparado para execução.' : `${Math.round(frac)}%`, frac);
+      return;
+    }
+    if(m.type==='download-progress'){
+      const pct=m.total ? Math.round((m.done/m.total)*100) : 0;
+      setAIStatus('loading','Baixando modelo (sem executar IA)',`${m.file||'arquivo'} · ${m.done}/${m.total} arquivos${m.cached?' · já estava no cache':''}`,pct);
+      return;
+    }
+    if(m.type==='download-ready'){
+      setAIStatus('idle','Download concluído ✓',`${configModelo(m.modelId).nome} foi salvo para uso. A IA ainda NÃO foi executada. Toque em “Ativar” quando quiser carregar o modelo.`);
+      return;
+    }
+    if(m.type==='download-error'){
+      const err=new Error(m.error||'Falha no download do modelo.');
+      setAIStatus('error','Falha no download do modelo',err.message);
       return;
     }
     if(m.type==='threads'){
@@ -2327,13 +2392,15 @@ function renderModelManager(){
   const sum=document.getElementById('activeModelSummary');
   if(!list) return;
   const ativo=configModelo();
-  if(sum) sum.textContent = modeloInstalado(ativo.id) ? `${ativo.nome} · ${ativo.tamanho} · ativo e pronto para uso.` : 'Nenhum modelo ativo. Baixe um modelo abaixo.';
+  if(sum) sum.textContent = modeloInstalado(ativo.id) ? `${ativo.nome} · ${ativo.tamanho} · baixado e ativo para execução.` : 'Nenhum modelo ativo. Baixe um modelo abaixo.';
+  const note=document.getElementById('modelDownloadNote');
+  if(note) note.textContent='Importante: Baixar modelo apenas salva os arquivos. A IA só ocupa RAM e começa a executar quando você tocar em “Ativar e executar”.';
   const gpu=(navigator.gpu && typeof navigator.gpu.requestAdapter==='function');
   const od=document.getElementById('offlineDiag'); if(od) od.textContent=`Offline: ${runtimeOfflineSource ? 'runtime preparado ✓' : 'runtime ainda não preparado'} · Worker: ${typeof Worker!=='undefined'?'disponível ✓':'indisponível'} · WebAssembly: ${typeof WebAssembly!=='undefined'?'disponível ✓':'indisponível'} · WebGPU: ${gpu?'detectado ✓':'não detectado'} · 135M: WASM/q8 · Internet atual: ${navigator.onLine?'sim':'não'}`;
   list.innerHTML=Object.entries(MODELOS).map(([key,m])=>{
     const installed=modeloInstalado(m.id), active=m.id===modeloSelecionado && installed, downloading=modelosBaixando.has(m.id);
     const safeId='model_'+key;
-    const status=downloading ? 'BAIXANDO' : installed ? (active?'ATIVO':'INATIVO') : 'NÃO INSTALADO';
+    const status=downloading ? 'BAIXANDO' : installed ? (active?'ATIVO':'BAIXADO · DESLIGADO') : 'NÃO INSTALADO';
     const statusClass=downloading?'tag-info':active?'tag-ok':installed?'tag-info':'tag-pend';
     return `<div class="card" style="padding:12px;">
       <div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;">
@@ -2343,8 +2410,8 @@ function renderModelManager(){
       <div class="stage-note" style="margin-top:6px;">${escapeHtml(m.detalhe)}</div>
       <div class="stage-note" style="margin-top:3px;">Modelo: ${escapeHtml(m.id)}</div>
       <div class="modal-actions" style="margin-top:9px;">
-        ${!installed ? `<button class="btn small primary" data-model-action="download" data-model-id="${escapeHtml(m.id)}" data-model-key="${safeId}" ${downloading?'disabled':''}>${downloading?'Baixando…':'Baixar e instalar'}</button>` : ''}
-        ${installed && !active ? `<button class="btn small" data-model-action="activate" data-model-id="${escapeHtml(m.id)}">Ativar</button>` : ''}
+        ${!installed ? `<button class="btn small primary" data-model-action="download" data-model-id="${escapeHtml(m.id)}" data-model-key="${safeId}" ${downloading?'disabled':''}>${downloading?'Baixando…':'Baixar modelo'}</button>` : ''}
+        ${installed && !active ? `<button class="btn small" data-model-action="activate" data-model-id="${escapeHtml(m.id)}">Ativar e executar</button>` : ''}
         ${installed ? `<button class="btn small danger" data-model-action="uninstall" data-model-id="${escapeHtml(m.id)}" ${active?'disabled title="Ative outro modelo antes de desinstalar este."':''}>Desinstalar</button>` : ''}
       </div>
     </div>`;
@@ -2373,32 +2440,44 @@ function renderModelManager(){
 
 async function baixarModeloIA(id){
   const m=configModelo(id);
-  if(modeloInstalado(id)) return ativarModeloIA(id);
+  if(modeloInstalado(id)){
+    setAIStatus('idle','Modelo já baixado',`${m.nome} está instalado. O download não inicia a IA. Use “Ativar” para executar.`);
+    renderModelManager();
+    return;
+  }
+  if(modelosBaixando.has(id)) return;
   try{
     modelosBaixando.add(id); renderModelManager();
-    setAIStatus('loading','Preparando pacote offline',`${m.nome} · primeiro uso precisa de internet para baixar runtime + modelo. Depois poderá funcionar sem internet.`,0);
-    renderModelManager();
+    // IMPORTANTE: este caminho nao chama carregarIA(), nao cria pipeline e nao
+    // tenta executar o modelo. O download acontece isoladamente no Worker.
+    setAIStatus('loading','Baixando modelo (sem executar IA)',`${m.nome} · os arquivos serão guardados no cache. Você poderá ativá-lo depois.`,0);
     await prepararRuntimeOffline();
-    // O mesmo motor usado pela aplicação é carregado aqui de propósito:
-    // concluir este carregamento é a confirmação prática de que o modelo
-    // está disponível para uso no navegador.
-    encerrarWorkerIA();
-    await carregarIAComModelo(id);
+    const w=criarWorkerIA();
+    await new Promise((resolve,reject)=>{
+      const onDownloadReady=ev=>{ if(ev.modelId===id) resolve(true); };
+      const onDownloadError=ev=>{ if(ev.modelId===id) reject(new Error(ev.error||'Falha no download.')); };
+      // O fluxo de mensagens normal já atualiza a interface; estes listeners
+      // existem apenas para encerrar a promessa do download.
+      const old=w.onmessage;
+      w.addEventListener('message',function handler(ev){
+        const d=ev.data||{};
+        if(d.type==='download-ready' && d.modelId===id){ w.removeEventListener('message',handler); resolve(true); }
+        if(d.type==='download-error' && d.modelId===id){ w.removeEventListener('message',handler); reject(new Error(d.error||'Falha no download.')); }
+      });
+      w.postMessage({type:'download',modelId:id,dtype:m.dtype});
+    });
     marcarModeloInstalado(id);
     modelosBaixando.delete(id);
-    // O modelo recem-baixado ja fica carregado: derrubar o worker aqui obrigava
-    // um segundo carregamento completo e derrubava quem estivesse esperando.
-    modeloSelecionado=id; MODEL_DECISAO=id;
-    if(!modeloInstalado(MODEL_PRODUCAO)) MODEL_PRODUCAO=id;
-    persistirPapeis();
-    const emp=empresaAtual(); if(emp) emp.modeloIA=id;
-    persistirModelos();
     try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
-    setAIStatus('ready','Modelo instalado ✓',`${m.nome} está baixado e ativo. Pronto para uso.`);
+    setAIStatus('idle','Download concluído ✓',`${m.nome} está instalado, mas permanece desligado. Isso é intencional: baixar e executar são etapas separadas.`);
     renderModelManager(); renderModelUI();
+    // Nao deixamos o worker de download virar o motor da IA. Ele e encerrado
+    // aqui para liberar qualquer memoria temporaria antes da ativacao.
+    encerrarWorkerIA();
   }catch(err){
     modelosBaixando.delete(id);
-    setAIStatus('error','Falha ao instalar modelo',String(err?.message||err));
+    encerrarWorkerIA();
+    setAIStatus('error','Falha no download do modelo',String(err?.message||err));
     renderModelManager();
   }
 }
@@ -3196,12 +3275,9 @@ document.addEventListener('visibilitychange', ()=>{
   setInterval(()=>{ if(document.getElementById('view-motor')?.classList.contains('active')) renderMonitor(); }, 900);
   requestAnimationFrame(loop);
 
-  // O motor sobe junto com o app: antes ele so era carregado na primeira
-  // chamada de um agente, e qualquer falha ali passava despercebida.
-  if(empresaAtual() && modeloInstalado(modeloSelecionado) && await runtimeOfflinePronto()){
-    monEvento('Ligando o motor da IA automaticamente na abertura.','info');
-    carregarIA().then(()=>monEvento('Motor pronto para a equipe trabalhar.','ok'))
-                .catch(e=>monEvento('Motor nao subiu na abertura: '+(e && e.message || e),'erro'));
+  // O motor NÃO sobe automaticamente. Download, ativacao e execucao sao etapas separadas.
+  if(empresaAtual() && modeloInstalado(modeloSelecionado)){
+    monEvento('Modelo baixado, mas motor desligado. Abra IA / Modelos e toque em “Ativar e executar”.','info');
   }
 })();
 </script>
