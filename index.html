@@ -445,6 +445,7 @@ let workerFalhas = 0;
 let workerReadyResolve = null;
 let workerReadyReject = null;
 let aiGeneration = 0;
+let ultimoSinalWorker = 0;
 let iaPronta = false;
 let iaTentativaEmAndamento = false; let iaBloqueadaAte = 0;
 const workerPendentes = new Map();
@@ -575,16 +576,15 @@ function encerrarWorkerIA(){
 function criarWorkerIA(){
   encerrarWorkerIA();
   const epoch = aiGeneration;
-  // Use um Worker Blob como caminho principal. No Chrome Android, um HTML
-  // aberto a partir de content://downloads/... não consegue resolver com
-  // segurança um worker relativo (./ai-worker.js). O Blob evita essa origem problemática. O código do Transformers.js é preparado uma vez
-  // e depois entregue ao worker a partir do armazenamento local, sem CDN durante a execução offline.
+  // O worker nasce de um Blob, mas importa a biblioteca da URL real do CDN;
+  // offline quem entrega esse arquivo é o Service Worker.
   const blob = new Blob([WORKER_CODE], {type:'text/javascript'});
   workerUrl = URL.createObjectURL(blob);
   const w = new Worker(workerUrl, {type:'module'});
   workerIA = w;
   w.onmessage = ev => {
     if(epoch !== aiGeneration || w !== workerIA) return;
+    ultimoSinalWorker = Date.now();
     const m=ev.data||{};
     if(m.type==='progress'){
       const p=m.data||{};
@@ -652,12 +652,17 @@ async function carregarIA(){
       await new Promise((resolve,reject)=>{
         workerReadyResolve=resolve; workerReadyReject=reject;
         w.postMessage({type:'load', modelId:modeloSelecionado, dtype:configModelo().dtype, runtimeSource: runtimeOfflineSource, allowRemote: !modeloInstalado(modeloSelecionado)});
-        setTimeout(()=>{
-          if(!pipelineIA && workerReadyReject){
-            workerReadyReject(new Error('O motor local não iniciou dentro de 120 segundos. Em celulares, o primeiro carregamento pode ser demorado; tente novamente em IA / Modelos.'));
+        // Em vez de um prazo fixo, vigiamos a inatividade: enquanto o worker
+        // enviar progresso do download, o carregamento continua livremente.
+        ultimoSinalWorker = Date.now();
+        const vigia = setInterval(()=>{
+          if(pipelineIA || !workerReadyReject){ clearInterval(vigia); return; }
+          if(Date.now() - ultimoSinalWorker > 180000){
+            clearInterval(vigia);
+            workerReadyReject(new Error('O motor local ficou 3 minutos sem responder. Verifique a conexão e tente novamente em IA / Modelos.'));
             workerReadyResolve=null; workerReadyReject=null;
           }
-        },120000);
+        },5000);
       });
       iaPronta=true;
       iaBloqueadaAte=0;
@@ -1693,7 +1698,7 @@ function renderModelManager(){
       await prepararRuntimeOffline();
       encerrarWorkerIA();
       const w=criarWorkerIA();
-      await new Promise((resolve,reject)=>{ workerReadyResolve=resolve; workerReadyReject=reject; w.postMessage({type:'load',modelId:modeloSelecionado,dtype:configModelo().dtype,runtimeSource:runtimeOfflineSource,allowRemote:false}); setTimeout(()=>{ if(!pipelineIA && workerReadyReject){ workerReadyReject(new Error('O teste offline não terminou em 45 segundos.')); workerReadyResolve=null; workerReadyReject=null; } },120000); });
+      await new Promise((resolve,reject)=>{ workerReadyResolve=resolve; workerReadyReject=reject; w.postMessage({type:'load',modelId:modeloSelecionado,dtype:configModelo().dtype,runtimeSource:runtimeOfflineSource,allowRemote:false}); ultimoSinalWorker=Date.now(); const vg=setInterval(()=>{ if(pipelineIA || !workerReadyReject){ clearInterval(vg); return; } if(Date.now()-ultimoSinalWorker>180000){ clearInterval(vg); workerReadyReject(new Error('O teste offline ficou 3 minutos sem resposta.')); workerReadyResolve=null; workerReadyReject=null; } },5000); });
       setAIStatus('ready','OFFLINE confirmado ✓',`${configModelo().nome} carregou sem permitir acesso remoto. Agora você pode desligar a internet e testar uma ordem.`);
       try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
     }catch(e){ setAIStatus('error','OFFLINE não confirmado',String(e?.message||e)); }
