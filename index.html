@@ -411,9 +411,11 @@
       </div>
       <div class="card">
         <h3>Modelo desta empresa</h3>
-        <div class="form-row"><label for="modelSelect">Modelo instalado e ativo</label><select class="field-input" id="modelSelect"></select></div>
-        <div class="stage-note" id="modelDetail">Baixe os modelos na área IA / Modelos. Aqui você apenas escolhe um que já esteja instalado.</div>
-        <button class="btn small" id="applyModelBtn">Usar neste momento</button>
+        <div class="form-row"><label for="modelSelect">Modelo principal (decisões, conversas, gestão)</label><select class="field-input" id="modelSelect"></select></div>
+        <div class="form-row"><label for="modelProdSelect">Modelo de produção (escreve os arquivos entregues)</label><select class="field-input" id="modelProdSelect"></select></div>
+        <div class="stage-note" id="modelDetail">Baixe os modelos na área IA / Modelos. Aqui você apenas escolhe entre os instalados.</div>
+        <div class="stage-note">O de decisão é acionado o tempo todo e só precisa de respostas curtas: um modelo pequeno serve e mantém o escritório rápido. O de produção é chamado poucas vezes, mas escreve o material final — vale um modelo maior. Se você escolher dois modelos diferentes, ambos ficam na memória; em aparelho apertado, deixe os dois iguais.</div>
+        <button class="btn small" id="applyModelBtn">Aplicar modelos</button>
       </div>
       <div class="card">
         <h3>Recomeçar do zero</h3>
@@ -472,8 +474,24 @@ try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados
 if(!Array.isArray(modelosInstalados)) modelosInstalados=[];
 function configModelo(id=modeloSelecionado){ return Object.values(MODELOS).find(m => m.id===id) || MODELOS.recomendado; }
 const MODEL_LOCAL = MODEL_PADRAO;
-let MODEL_BARATO = modeloSelecionado;
-let MODEL_GERENTE = modeloSelecionado;
+/* Dois papeis de modelo, com pesos diferentes:
+   DECISAO  - chamado o tempo todo, respostas curtas em formato fixo.
+   PRODUCAO - chamado poucas vezes, escreve o arquivo que o cliente recebe. */
+let MODEL_DECISAO = localStorage.getItem('modelo-ia-decisao') || modeloSelecionado;
+let MODEL_PRODUCAO = localStorage.getItem('modelo-ia-producao') || modeloSelecionado;
+let MODEL_BARATO = MODEL_DECISAO;
+let MODEL_GERENTE = MODEL_DECISAO;
+function modeloDoTipo(tipo){
+  const alvo = tipo === 'conteudo' ? MODEL_PRODUCAO : MODEL_DECISAO;
+  return modeloInstalado(alvo) ? alvo : modeloSelecionado;
+}
+function persistirPapeis(){
+  try{
+    localStorage.setItem('modelo-ia-decisao', MODEL_DECISAO);
+    localStorage.setItem('modelo-ia-producao', MODEL_PRODUCAO);
+  }catch(e){}
+  MODEL_BARATO = MODEL_DECISAO; MODEL_GERENTE = MODEL_DECISAO;
+}
 const NOME_CURTO = Object.fromEntries(Object.values(MODELOS).map(m => [m.id, m.nome]));
 function persistirModelos(){ try{ localStorage.setItem('modelos-ia-instalados', JSON.stringify(modelosInstalados)); localStorage.setItem('modelo-ia-ativo', modeloSelecionado); }catch(e){} }
 function modeloInstalado(id){ return modelosInstalados.includes(id); }
@@ -560,7 +578,10 @@ async function runtimeOfflinePronto(){
    principal e o WASM podia congelar toda a interface durante a geração.
    Agora o escritório continua animado enquanto a fila neural trabalha. */
 const WORKER_CODE = `
-let pipeline = null, env = null, pipe = null, loading = null, activeModel = null, runtimeReady = null;
+let pipeline = null, env = null, runtimeReady = null;
+// Um pipeline por modelo, para nao recarregar a cada troca de papel.
+const pipes = new Map(), loadings = new Map();
+const MAX_PIPES = 2;
 async function initRuntime(source, allowRemote=false){
   if(runtimeReady) return runtimeReady;
   runtimeReady=(async()=>{
@@ -588,22 +609,44 @@ async function escolherDevice(modelId){
   return 'wasm';
 }
 async function load(modelId, dtype, runtimeSource, allowRemote=false){
-  if(pipe && activeModel===modelId) return pipe;
-  if(loading) return loading;
-  loading=(async()=>{
+  if(pipes.has(modelId)) return pipes.get(modelId);
+  if(loadings.has(modelId)) return loadings.get(modelId);
+  const pr=(async()=>{
     await initRuntime(runtimeSource, allowRemote);
     const device=await escolherDevice(modelId);
     postMessage({type:'device',device});
     const x=await pipeline('text-generation', modelId, {device, dtype, session_options: device==='wasm' ? {executionMode:'sequential', enableCpuMemArena:false, enableMemPattern:false, graphOptimizationLevel:'all'} : undefined, progress_callback:(p)=>postMessage({type:'progress',data:p})});
-    pipe=x; activeModel=modelId; postMessage({type:'ready',modelId,device}); return x;
-  })().catch(e=>{ pipe=null; activeModel=null; postMessage({type:'load-error',error:String(e?.message||e)}); throw e; }).finally(()=>{loading=null;});
-  return loading;
+    // Memoria de celular e curta: guardamos no maximo dois modelos vivos.
+    if(pipes.size >= MAX_PIPES){
+      const antigo = pipes.keys().next().value;
+      const velho = pipes.get(antigo); pipes.delete(antigo);
+      try{ if(velho && velho.dispose) await velho.dispose(); }catch(e){}
+      postMessage({type:'evict', modelId:antigo});
+    }
+    pipes.set(modelId,x); postMessage({type:'ready',modelId,device}); return x;
+  })().catch(e=>{ postMessage({type:'load-error',error:String(e?.message||e),modelId}); throw e; })
+     .finally(()=>{ loadings.delete(modelId); });
+  loadings.set(modelId,pr);
+  return pr;
 }
 self.onmessage = async (ev)=>{
   const msg=ev.data||{};
   if(msg.type==='load') { try { await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); } catch(e){} return; }
   if(msg.type==='generate'){
-    try{ const p=await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote); const result=await p(msg.messages,{max_new_tokens:msg.maxTokens||128,do_sample:false,return_full_text:false}); postMessage({type:'result',id:msg.id,result}); }
+    try{
+      const p=await load(msg.modelId,msg.dtype,msg.runtimeSource,msg.allowRemote);
+      // Greedy puro (do_sample:false) em modelo minusculo costuma emitir o token
+      // de fim na primeira posicao e devolver texto vazio. Amostragem resolve.
+      const result=await p(msg.messages,{
+        max_new_tokens: msg.maxTokens||128,
+        do_sample: true,
+        temperature: msg.temperatura || 0.7,
+        top_p: 0.9,
+        repetition_penalty: 1.12,
+        return_full_text: false
+      });
+      postMessage({type:'result',id:msg.id,result});
+    }
     catch(e){ postMessage({type:'error',id:msg.id,error:String(e?.message||e)}); }
   }
 };
@@ -649,6 +692,10 @@ function criarWorkerIA(){
     if(m.type==='threads'){
       MOTOR_THREADS = m.threads;
       monEvento(`Motor usando ${m.threads} thread(s) de CPU${m.isolado?' (modo turbo ativo)':' — modo turbo desligado'}.`, m.isolado?'ok':'aviso');
+      return;
+    }
+    if(m.type==='evict'){
+      monEvento('Memoria curta: modelo '+(NOME_CURTO[m.modelId]||m.modelId)+' foi descarregado para dar lugar ao outro.','aviso');
       return;
     }
     if(m.type==='device'){
@@ -769,7 +816,7 @@ async function limparCacheModelos(){
   runtimeOfflineSource=null;
   modelosInstalados=[];
   modeloSelecionado=MODEL_PADRAO;
-  MODEL_BARATO=MODEL_PADRAO; MODEL_GERENTE=MODEL_PADRAO;
+  MODEL_DECISAO=MODEL_PADRAO; MODEL_PRODUCAO=MODEL_PADRAO; persistirPapeis();
   DB={empresas:[],atual:null,logGlobal:[]};
   try{ localStorage.removeItem(STORE_KEY); }catch(e){}
   selectedAgentId=null;
@@ -846,6 +893,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   const sysText=String(system||'').slice(0,corte);
   const userTextSafe=String(userText||'').slice(0,corte);
   const messages=[{role:'system',content:sysText},{role:'user',content:userTextSafe}];
+  const modeloDaChamada = modeloDoTipo(tipo);
   chamadasNaFila++;
   const inicioGeracao = Date.now();
   const tetoMon = 20000 + limite*1800;
@@ -857,7 +905,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   });
   try{
     const trabalho = filaIA.catch(()=>{}).then(async () => {
-      return await new Promise((resolve,reject)=>{
+      const enviar = (msgs, temperatura) => new Promise((resolve,reject)=>{
         const id=++workerSeq;
         if(!workerIA || !iaPronta){ reject(new Error('Motor de IA indisponível ou ainda carregando.')); return; }
         // O prazo so comeca quando chega a vez desta chamada na fila. Antes,
@@ -871,8 +919,16 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
           resolve:v=>{ clearTimeout(t); resolve(v); },
           reject:e=>{ clearTimeout(t); reject(e); }
         });
-        workerIA.postMessage({type:'generate',id,modelId:modeloSelecionado,dtype:configModelo().dtype,messages,maxTokens:limite,runtimeSource:runtimeOfflineSource,allowRemote:false});
+        workerIA.postMessage({type:'generate',id,modelId:modeloDaChamada,dtype:configModelo(modeloDaChamada).dtype,messages:msgs,maxTokens:limite,temperatura,runtimeSource:runtimeOfflineSource,allowRemote:false});
       });
+      let bruto = await enviar(messages, 0.7);
+      if(!extrairTextoGerado(bruto).trim()){
+        // Modelo pequeno costuma ignorar o papel "system" e devolver vazio.
+        // Segunda tentativa com tudo em uma mensagem so e mais temperatura.
+        monEvento(`${nomeDeAgente(agentId)}: resposta veio vazia; tentando de novo com o pedido em bloco unico.`,'aviso');
+        bruto = await enviar([{role:'user',content:sysText+'\n\n'+userTextSafe}], 0.95);
+      }
+      return bruto;
     });
     filaIA = trabalho.catch(()=>{});
     const result = await trabalho;
@@ -1045,7 +1101,8 @@ function renderMonitor(){
   const cel = (t,v) => `<div class="mon-cell"><b>${t}</b><span>${escapeHtml(v)}</span></div>`;
   box.innerHTML =
     cel('Motor', est.txt) +
-    cel('Modelo', configModelo().nome) +
+    cel('Decisão', configModelo(MODEL_DECISAO).nome) +
+    cel('Produção', configModelo(MODEL_PRODUCAO).nome) +
     cel('Na fila', String(chamadasNaFila)) +
     cel('Ultima resposta', desdeConclusao==null ? 'nenhuma nesta sessao' : 'ha '+monTempo(desdeConclusao)) +
     cel('Ok/incompl/erro', `${MON.chamadas.filter(c=>c.status==='ok').length}/${MON.chamadas.filter(c=>c.status==='cortado').length}/${MON.chamadas.filter(c=>c.status!=='ok'&&c.status!=='cortado').length}`) +
@@ -1060,7 +1117,7 @@ function renderMonitor(){
       const pct = Math.min(100, Math.round(dec/(a.teto||60000)*100));
       ativaBox.innerHTML = `<div class="mon-live"><b>${escapeHtml(a.agente)}</b> — ${escapeHtml(a.motivo||'gerando')} · ${monTempo(dec)} de ate ${monTempo(a.teto)} (${pct}%)<div style="height:5px;background:#0e1a12;border-radius:3px;margin-top:6px;overflow:hidden;"><div style="height:100%;width:${pct}%;background:#5FA855;"></div></div></div>`;
     } else {
-      ativaBox.innerHTML = `<div class="mon-live vazio">Nenhuma geracao em andamento. ${motorPausado?'A equipe esta pausada por voce.':'Os agentes decidem a cada 8–25s se vao acionar a IA.'}</div>`;
+      ativaBox.innerHTML = `<div class="mon-live vazio">Nenhuma geracao em andamento. ${motorPausado?'A equipe esta pausada por voce.':'Os agentes decidem a cada 2,5–15s se vao acionar a IA.'}</div>`;
     }
   }
 
@@ -2208,8 +2265,17 @@ function renderModelUI(){
     sel.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===escolhido?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
     sel.disabled=!disponiveis.length;
   }
+  const selP=document.getElementById('modelProdSelect');
+  if(selP){
+    const disponiveis=Object.values(MODELOS).filter(m=>modeloInstalado(m.id));
+    selP.innerHTML=disponiveis.length ? disponiveis.map(m=>`<option value="${m.id}" ${m.id===MODEL_PRODUCAO?'selected':''}>${escapeHtml(m.nome)}</option>`).join('') : '<option value="">Nenhum modelo instalado</option>';
+    selP.disabled=!disponiveis.length;
+  }
   const m=configModelo(escolhido);
-  if(detail) detail.textContent=modeloInstalado(m.id) ? `${m.tamanho} · ${m.detalhe} · Este será o modelo usado por esta empresa.` : 'Nenhum modelo instalado. Abra IA / Modelos para baixar um.';
+  const mp=configModelo(MODEL_PRODUCAO);
+  if(detail) detail.textContent=modeloInstalado(m.id)
+    ? `Decisão: ${m.nome} (${m.tamanho}). Produção: ${mp.nome} (${mp.tamanho}).`
+    : 'Nenhum modelo instalado. Abra IA / Modelos para baixar um.';
   renderModelManager();
 }
 
@@ -2291,7 +2357,9 @@ async function baixarModeloIA(id){
     modelosBaixando.delete(id);
     // O modelo recem-baixado ja fica carregado: derrubar o worker aqui obrigava
     // um segundo carregamento completo e derrubava quem estivesse esperando.
-    modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
+    modeloSelecionado=id; MODEL_DECISAO=id;
+    if(!modeloInstalado(MODEL_PRODUCAO)) MODEL_PRODUCAO=id;
+    persistirPapeis();
     const emp=empresaAtual(); if(emp) emp.modeloIA=id;
     persistirModelos();
     try{ localStorage.setItem(OFFLINE_READY_KEY,'1'); }catch(e){}
@@ -2315,7 +2383,9 @@ async function ativarModeloIA(id){
   if(!modeloInstalado(id)) return;
   if(carregandoIA){ try{ await carregandoIA; }catch(e){} }
   encerrarWorkerIA();
-  modeloSelecionado=id; MODEL_BARATO=id; MODEL_GERENTE=id;
+  modeloSelecionado=id; MODEL_DECISAO=id;
+  if(!modeloInstalado(MODEL_PRODUCAO)) MODEL_PRODUCAO=id;
+  persistirPapeis();
   const emp=empresaAtual(); if(emp) emp.modeloIA=id;
   persistirModelos();
   setAIStatus('loading','Ativando modelo',`${configModelo().nome} · preparando para uso…`,null);
@@ -2361,7 +2431,7 @@ function renderAll(){
   }
   document.getElementById('brandName').textContent = emp.nome;
   document.getElementById('brandSub').textContent = `${emp.ramo} · ${emp.equipe.length} pessoas`;
-  if(emp.modeloIA && modeloInstalado(emp.modeloIA)){ modeloSelecionado=emp.modeloIA; MODEL_BARATO=emp.modeloIA; MODEL_GERENTE=emp.modeloIA; }
+  if(emp.modeloIA && modeloInstalado(emp.modeloIA)){ modeloSelecionado=emp.modeloIA; MODEL_DECISAO=emp.modeloIA; if(!modeloInstalado(MODEL_PRODUCAO)) MODEL_PRODUCAO=emp.modeloIA; persistirPapeis(); }
   document.getElementById('cfgNome').value = emp.nome;
   document.getElementById('cfgRamo').value = emp.ramo;
   document.getElementById('cfgMissao').value = emp.missao;
@@ -2974,8 +3044,13 @@ document.getElementById('saveCfgBtn').onclick = () => {
   saveDB(); renderAll(); addLog('Configuração da empresa atualizada.', 'info');
 };
 document.getElementById('applyModelBtn').onclick = () => {
+  const prod=document.getElementById('modelProdSelect')?.value;
+  if(prod && modeloInstalado(prod)){
+    MODEL_PRODUCAO=prod; persistirPapeis();
+    monEvento('Modelo de produção definido: '+configModelo(prod).nome+'. Ele carrega na primeira entrega de arquivo.','info');
+  }
   const id=document.getElementById('modelSelect')?.value;
-  if(id) ativarModeloIA(id);
+  if(id) ativarModeloIA(id); else renderModelUI();
 };
 document.getElementById('aiModelsTopBtn').onclick = abrirCentralModelos;
 document.getElementById('closeAIModelsBtn').onclick = fecharCentralModelos;
