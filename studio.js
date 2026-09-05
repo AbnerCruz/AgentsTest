@@ -430,6 +430,70 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
   /* O usuário observa; a equipe decide e distribui o trabalho autonomamente. */
 
+  /* ============================================================
+     Sala de reuniões — canal persistente entre você e a equipe.
+     Uma chamada barata por intervenção; o contexto é rico e a saída curta.
+     ============================================================ */
+  function contextoReuniao() {
+    const e = S.state.atual(); if (!e) return '';
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    const mensagens = (e.reuniao && e.reuniao.mensagens || []).slice(-14).map(m => `[${m.quem}] ${m.texto}`).join('\n') || 'Nenhuma conversa anterior.';
+    const tarefas = e.tarefas.slice(0, 14).map(t => { const q = t.para ? (e.equipe.find(x => x.id === t.para) || {}).nome : 'não atribuído'; return `${t.status.toUpperCase()} | ${t.titulo} | responsável=${q} | handoff=${t.handoff || '—'}`; }).join('\n') || 'Nenhuma tarefa.';
+    const arquivos = e.arquivos.slice(0, 14).map(a => `${a.nome} | ${a.classe} | v${a.versao || 1} | q${a.qualidade || 0} | autor=${a.autor}`).join('\n') || 'Nenhum artefato.';
+    const equipe = e.equipe.map(f => `${f.id} | ${f.nome} | ${f.cargo} | ${f.especialidade} | energia=${Math.round(f.energia || 0)} | foco=${f.foco || 'livre'} | pensamento=${f.pensamento || '—'}`).join('\n');
+    return `ESTÚDIO\n${e.nome} | ramo=${e.ramo} | missão=${e.missao} | público=${e.publico}\n\nPROJETO ATIVO\n${projeto ? `${projeto.nome} | objetivo=${projeto.objetivo} | id=${projeto.id}` : 'nenhum'}\n\nEQUIPE\n${equipe}\n\nTRABALHO ATUAL\n${tarefas}\n\nARTEFATOS E PRODUTOS PERSISTENTES\n${arquivos}\n\nCONVERSA RECENTE DA SALA\n${mensagens}`.slice(0, 12500);
+  }
+
+  function registrarReuniao(quem, texto, tipo) {
+    const e = S.state.atual(); if (!e) return;
+    e.reuniao = e.reuniao || { mensagens: [], relatorios: [] };
+    e.reuniao.mensagens.push({ id: S.util.uid('m'), t: Date.now(), quem: String(quem), texto: String(texto).slice(0, 1200), tipo: tipo || 'fala' });
+    if (e.reuniao.mensagens.length > 120) e.reuniao.mensagens.splice(0, e.reuniao.mensagens.length - 120);
+    S.state.gravar(); S.bus.emit('reuniao');
+  }
+
+  function gerarRelatorioLocal(e) {
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    const abertas = e.tarefas.filter(t => t.status !== 'feita').length;
+    const feitas = e.tarefas.filter(t => t.status === 'feita').length;
+    const produtos = e.arquivos.filter(a => a.classe === 'produto').length;
+    const recentes = e.log.slice(-5).map(x => x.texto).join(' | ');
+    return `${projeto ? projeto.nome : 'Projeto principal'}: ${feitas} tarefas concluídas, ${abertas} em aberto, ${produtos} produtos finais persistidos. Últimos acontecimentos: ${recentes || 'nenhum registrado'}.`;
+  }
+
+  function relatorioReuniao() {
+    const e = S.state.atual(); if (!e) return '';
+    const rel = gerarRelatorioLocal(e);
+    e.reuniao = e.reuniao || { mensagens: [], relatorios: [] };
+    e.reuniao.relatorios.unshift({ t: Date.now(), texto: rel });
+    e.reuniao.relatorios = e.reuniao.relatorios.slice(0, 20);
+    registrarReuniao('Relatório', rel, 'relatorio');
+    return rel;
+  }
+
+  async function reuniaoFalar(texto) {
+    const e = S.state.atual(); const msg = String(texto || '').trim();
+    if (!e || !msg) return { ok: false, erro: 'Digite uma mensagem.' };
+    registrarReuniao('Você', msg, 'usuario');
+    const g = gerente();
+    if (!S.ai.pronta()) { registrarReuniao(g ? g.nome : 'Equipe', 'Recebi a orientação. A conversa ficou registrada; conecte a IA para transformar ordens em trabalho.', 'resposta'); return { ok: true, local: true }; }
+    const projeto = e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
+    const ids = e.equipe.map(x => `${x.id}=${x.nome}`).join('; ');
+    const r = await S.ai.perguntar({
+      sistema: `Você coordena uma reunião real de uma pequena equipe. O usuário é o dono e fala diretamente com os funcionários. Não é um jogo. Responda como conversa curta, concreta e profissional.\n\n${contextoReuniao()}\n\nFUNCIONÁRIOS: ${ids}\n\nREGRAS: não invente fatos; use o trabalho persistente como verdade; reconheça o que já existe; se o usuário der uma ordem, transforme-a em tarefas executáveis; não crie contratos, clientes ou encomendas; produtos finais devem ser consumíveis pelo público.\n\nRETORNE SOMENTE:\nFALA1_QUEM: <id>\nFALA1: <até 45 palavras>\nFALA2_QUEM: <id ou vazio>\nFALA2: <até 45 palavras>\nFALA3_QUEM: <id ou vazio>\nFALA3: <até 45 palavras>\nORDEM1_KIT: <kit ou vazio>\nORDEM1_PARA: <id ou vazio>\nORDEM1_BRIEF: <até 28 palavras>\nORDEM1_PROJETO: <id ou vazio>\nORDEM2_KIT: <kit ou vazio>\nORDEM2_PARA: <id ou vazio>\nORDEM2_BRIEF: <até 28 palavras>\nORDEM2_PROJETO: <id ou vazio>\nRELATORIO: <sim ou não>`,
+      pedido: `Mensagem do dono: ${msg}\nProjeto atual: ${projeto ? projeto.nome + ' (' + projeto.id + ')' : 'nenhum'}. Escolha quem realmente precisa responder. Se for conversa ou feedback, não crie tarefas. Se houver ordem clara, crie no máximo duas tarefas e aproveite artefatos existentes.`,
+      tokens: 520, agente: 'sala de reuniões', motivo: 'reunião'
+    });
+    if (!r) { registrarReuniao(g ? g.nome : 'Equipe', 'Tive uma falha ao consultar a equipe. A orientação ficou registrada e pode ser retomada.', 'resposta'); return { ok: false, erro: 'A IA não respondeu.' }; }
+    const c=r.campos||{}, byId=id=>e.equipe.find(x=>x.id===String(id||'').trim())||null; let falas=0, ordens=0;
+    ['1','2','3'].forEach(n=>{ const pessoa=byId(c['fala'+n+'_quem']); const texto=String(c['fala'+n]||'').trim(); if(pessoa&&texto){ registrarReuniao(pessoa.nome,texto,'resposta'); pessoa.pensamento=texto.slice(0,220); pessoa.memoria=(pessoa.memoria||[]).concat({texto:`Na reunião: ${msg.slice(0,110)} → ${texto.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }});
+    ['1','2'].forEach(n=>{ const kit=S.factory.porId(String(c['ordem'+n+'_kit']||'').trim()); const para=byId(c['ordem'+n+'_para']); const brief=String(c['ordem'+n+'_brief']||'').trim(); const projetoId=String(c['ordem'+n+'_projeto']||'').trim()||(projeto&&projeto.id); if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t){ordens++; registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?` → ${para.nome}`:' → distribuição automática'}.`,'ordem');}}});
+    if(c.relatorio===true){ const rel=gerarRelatorioLocal(e); e.reuniao.relatorios.unshift({t:Date.now(),texto:rel}); e.reuniao.relatorios=e.reuniao.relatorios.slice(0,20); registrarReuniao('Relatório',rel,'relatorio'); }
+    if(!falas&&!ordens) registrarReuniao(g?g.nome:'Equipe','Entendi. Vamos manter o foco no trabalho que já está em andamento e retomar isso quando houver uma decisão concreta.','resposta');
+    S.state.gravar(); S.bus.emit('reuniao'); S.bus.emit('equipe'); S.bus.emit('trabalho');
+    return {ok:true,falas,ordens};
+  }
+
   /* ---------- contratação ---------- */
   function custoContratacao(e) { return 600 + (e.equipe.length - 1) * 350; }
   function contratar(nome, especialidade) {
@@ -681,6 +745,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   }
 
   S.studio = {
+    reuniaoFalar, relatorioReuniao, registrarReuniao, gerarRelatorioLocal,
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,

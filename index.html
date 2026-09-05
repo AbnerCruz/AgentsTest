@@ -63,6 +63,10 @@
       <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
       <span>Estúdio</span>
     </button>
+    <button class="nav-item" data-view="reuniao" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4.5A2.5 2.5 0 0 1 4 13.5z"/><path d="M8 8h8M8 11.5h5"/></svg>
+      <span>Reunião</span>
+    </button>
     <button class="nav-item" data-view="trabalho" type="button">
       <svg viewBox="0 0 24 24"><path d="M4 7h11M4 12h16M4 17h8"/><path d="m17 15 2 2 3-4"/></svg>
       <span>Trabalho</span>
@@ -117,6 +121,34 @@
         <div class="team" id="teamList"></div>
       </div>
       <div class="panel" id="xpPanel"></div>
+    </section>
+
+    <!-- REUNIÃO -->
+    <section class="view" id="v-reuniao">
+      <div class="meeting-room panel">
+        <div class="meeting-room-head">
+          <div>
+            <span class="panel-label">Sala de reuniões</span>
+            <h1>Conversa direta com a equipe</h1>
+            <p class="panel-foot">Debata ideias, alinhe o projeto, dê ordens, peça feedbacks e solicite relatórios. Tudo fica registrado no histórico do estúdio.</p>
+          </div>
+          <div class="meeting-table" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="meeting-people" id="meetingPeople"></div>
+      </div>
+      <div class="panel meeting-chat">
+        <div class="panel-head"><span class="panel-label">Ata viva</span><span class="chip">persistente</span></div>
+        <div class="meeting-messages" id="meetingMessages"></div>
+        <div class="meeting-actions">
+          <button class="btn btn-mini" id="pedirRelatorioBtn" type="button">Pedir relatório</button>
+          <button class="btn btn-mini" id="pedirFeedbackBtn" type="button">Pedir feedback</button>
+          <button class="btn btn-mini" id="limparReuniaoBtn" type="button">Limpar conversa</button>
+        </div>
+        <form class="meeting-composer" id="meetingForm">
+          <textarea id="meetingInput" rows="3" placeholder="Fale com a equipe. Ex.: Quero que o site atual seja atualizado com todos os produtos já publicados e que a Bia revise o texto."></textarea>
+          <div class="meeting-send"><span class="hint">Uma intervenção usa uma chamada de decisão; a equipe recebe o contexto do projeto antes de responder.</span><button class="btn btn-primary" id="meetingSend" type="submit">Enviar à reunião</button></div>
+        </form>
+      </div>
     </section>
 
     <!-- TRABALHO -->

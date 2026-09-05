@@ -41,6 +41,7 @@
     if (view === 'motor') pintarMotor();
     if (view === 'entregas') { pintarArquivos(); }
     if (view === 'trabalho') pintarTrabalho();
+    if (view === 'reuniao') pintarReuniao();
   }
 
   /* ============================================================
@@ -505,6 +506,33 @@
   }
 
   /* ============================================================
+     Sala de reuniões
+     ============================================================ */
+  function pintarReuniao() {
+    const e=S.state.atual(); if(!e) return;
+    const r=e.reuniao||{mensagens:[],relatorios:[]};
+    const pessoas=e.equipe||[];
+    const mp=$('#meetingPeople');
+    if(mp) mp.innerHTML=pessoas.map(f=>`<div class="meeting-person"><span class="avatar" style="background:${esc(f.cor)}">${esc(f.nome.slice(0,2).toUpperCase())}</span><span><b>${esc(f.nome)}</b><small>${esc(f.cargo)} · ${f.foco?esc(f.foco):'disponível'}</small></span></div>`).join('');
+    const box=$('#meetingMessages');
+    if(!box) return;
+    const msgs=(r.mensagens||[]).slice(-80);
+    box.innerHTML=msgs.length?msgs.map(m=>`<div class="meeting-msg ${m.tipo==='usuario'?'mine':''} ${m.tipo==='relatorio'?'system':''}"><div class="who">${esc(m.quem)}</div><div class="txt">${esc(m.texto)}</div><div class="time">${F.hora(m.t)}</div></div>`).join(''):'<div class="empty">A sala está vazia. Comece uma conversa com a equipe.</div>';
+    box.scrollTop=box.scrollHeight;
+  }
+
+  async function enviarReuniao(texto) {
+    const input=$('#meetingInput'), btn=$('#meetingSend');
+    if(!String(texto||'').trim()) return;
+    btn.disabled=true; btn.textContent='A equipe está conversando…';
+    try {
+      const r=await S.studio.reuniaoFalar(texto);
+      if(r && r.erro) toast(r.erro,'erro');
+    } catch(err){ toast(err.message||'Falha na reunião.','erro'); }
+    finally { btn.disabled=false; btn.textContent='Enviar à reunião'; pintarReuniao(); if(input) { input.value=''; input.focus(); } }
+  }
+
+  /* ============================================================
      Ligações
      ============================================================ */
   function ligar() {
@@ -515,6 +543,11 @@
     $('#pulseBtn').onclick = () => mostrar('motor');
     $('#sheetClose').onclick = fecharFolha;
     $('#sheetBackdrop').onclick = ev => { if (ev.target === $('#sheetBackdrop')) fecharFolha(); };
+
+    $('#meetingForm').onsubmit = ev => { ev.preventDefault(); enviarReuniao($('#meetingInput').value); };
+    $('#pedirRelatorioBtn').onclick = () => enviarReuniao('Apresente um relatório objetivo do estado atual do projeto, do que já foi produzido, do que está pendente e do próximo passo recomendado.');
+    $('#pedirFeedbackBtn').onclick = () => enviarReuniao('Quero feedback da equipe: o que está funcionando, o que está bloqueando o produto final e o que devemos melhorar agora?');
+    $('#limparReuniaoBtn').onclick = () => { const e=S.state.atual(); if(e){ e.reuniao=e.reuniao||{mensagens:[],relatorios:[]}; e.reuniao.mensagens=[]; S.state.gravarJa(); pintarReuniao(); toast('Conversa da sala limpa.'); } };
 
     $('#contratarBtn').onclick = dialogoContratar;
     $('#floor').onclick = ev => {
@@ -575,6 +608,7 @@
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
     S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
+    S.bus.on('reuniao', () => { if (viewAtual === 'reuniao') pintarReuniao(); });
     S.bus.on('negocio', () => { });
     S.bus.on('relogio', () => { pintarRelogio(); });
     S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
@@ -585,7 +619,7 @@
   function pintarTudo() {
     pintarTopo(); pintarRelogio();
     if (!S.state.atual()) return;
-    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor();
+    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
   }
 
   /* ---------- início ---------- */
@@ -606,7 +640,7 @@
     }
   }
 
-  S.ui = { toast, folha, fecharFolha, mostrar, pintarTudo };
+  S.ui = { toast, folha, fecharFolha, mostrar, pintarTudo, pintarReuniao };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', iniciar);
   else iniciar();
 })(window.S);

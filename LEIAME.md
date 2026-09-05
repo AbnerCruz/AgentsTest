@@ -55,3 +55,7 @@ O chão do estúdio é uma representação visual dos agentes: deslocamento, tra
 - A IA é chamada apenas quando uma decisão ou produção realmente precisa dela.
 
 Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que os modelos Qwen disponíveis; o GPT-OSS 120B continua sendo a escolha forte para produção. Os modelos Qwen 3.6/3.8 ficam disponíveis como alternativas, mas são mais caros e por isso não são usados automaticamente.
+
+
+## Sala de reuniões
+A versão v5 adiciona uma sala persistente para conversa direta com a equipe. Mensagens, relatórios e ordens ficam registrados no estúdio. Ordens claras podem virar até duas tarefas no projeto ativo usando o modelo de decisão econômico. A sala envia contexto amplo do projeto e mantém a saída curta para reduzir custo.
