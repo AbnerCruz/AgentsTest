@@ -3,7 +3,7 @@
    (pagina, biblioteca de IA, binarios WASM e pesos do modelo) passa a
    ser servido do cache local. */
 
-const CACHE_APP = 'app-v1';
+const CACHE_APP = 'app-v2';
 const CACHE_RUNTIME = 'ia-runtime-v1';
 const CACHE_MODELOS = 'ia-modelos-v1';
 
