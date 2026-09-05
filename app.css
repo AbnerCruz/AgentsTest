@@ -472,13 +472,3 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .callout.warn{border-left-color:var(--gold);}
 .callout.bad{border-left-color:var(--rust);}
 .danger-zone{border-color:rgba(201,85,63,.28);}
-
-/* Memória e foco do agente */
-.thought-card,.memory-box{border:1px solid var(--line);background:var(--surf-2);border-radius:var(--r);padding:12px;margin-top:10px}
-.thought-card p{margin-top:6px;line-height:1.45}
-.thought-card small{display:block;color:var(--ink-3);margin-top:7px;font-size:11px}
-.memory-box{padding:0;overflow:hidden}
-.memory-box .panel-head{padding:10px 12px;border-bottom:1px solid var(--line)}
-.memory-row{display:flex;gap:9px;padding:9px 12px;border-bottom:1px solid var(--line-soft);font-size:13px}
-.memory-row:last-child{border-bottom:0}
-.memory-type{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-3);min-width:68px;padding-top:2px}

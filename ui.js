@@ -123,14 +123,11 @@
     const e = S.state.atual();
     const feitas = e.tarefas.filter(t => t.para === id && t.status === 'feita').length;
     const esp = S.studio.ESPECIALIDADES.find(x => x.id === p.especialidade);
+    const mem = (f.memoria || []).map(m => typeof m === 'string' ? m : m.texto).filter(Boolean).slice(-8);
     folha(`
       <h2>${esc(p.nome)}</h2>
       <p class="sub">${esc(p.cargo)} · ${esc(esp ? esp.desc : '')}</p>
-      <div class="thought-card">
-        <span class="panel-label">Foco atual</span>
-        <p>${esc(f.focoAtual || 'Aguardando a próxima etapa do projeto.')}</p>
-        <small>Resumo operacional — não expõe raciocínio interno privado.</small>
-      </div>
+      <div class="panel" style="margin:12px 0;padding:12px"><div class="panel-label">Foco atual</div><p class="panel-foot">${esc(f.pensamento || 'Observando como contribuir com o produto e com a equipe.')}</p></div>
       <div class="stats">
         <div class="stat"><span>Energia</span><b>${Math.round(f.energia)}/100</b></div>
         <div class="stat"><span>Humor</span><b>${Math.round(f.humor)}/100</b></div>
@@ -138,14 +135,7 @@
         <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
       </div>
-      <div class="memory-box">
-        <div class="panel-head"><span class="panel-label">Memória de trabalho</span><span class="chip">${(f.memoria || []).length} registros</span></div>
-        ${(f.memoria || []).slice().reverse().slice(0, 8).map(m => {
-          const texto = typeof m === 'string' ? m : m.texto;
-          const tipo = typeof m === 'string' ? 'episódio' : (m.tipo || 'episódio');
-          return `<div class="memory-row"><span class="memory-type">${esc(tipo)}</span><span>${esc(texto)}</span></div>`;
-        }).join('') || '<p class="panel-foot">Ainda não há lembranças relevantes.</p>'}
-      </div>
+      ${mem.length ? `<div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Memória relevante</div>${mem.map(x => `<p class="panel-foot" style="margin:6px 0">${esc(x)}</p>`).join('')}</div>` : ''}
       <div class="sheet-actions">
         ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
         <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>
@@ -364,6 +354,7 @@
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
     $('#modeloDecisaoSel').innerHTML = opcoes('decisao');
     $('#modeloProducaoSel').innerHTML = opcoes('producao');
+    $('#modeloRevisaoSel').innerHTML = opcoes('revisao');
     $('#ritmoSel').value = S.ai.cfg.ritmo;
 
     const o = S.ai.orcamento();
@@ -543,7 +534,7 @@
     $('#salvarIABtn').onclick = () => {
       try {
         const digitada = $('#apiKeyInput').value.trim();
-        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value);
+        S.ai.salvarCfg(digitada ? digitada : undefined, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value, $('#modeloRevisaoSel').value);
         $('#apiKeyInput').value = '';
         toast('Configuração salva.', 'ok');
         pintarMotor();
@@ -552,7 +543,7 @@
     $('#testarIABtn').onclick = async () => {
       const b = $('#testarIABtn'); b.disabled = true; b.textContent = 'testando…';
       try {
-        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value);
+        if ($('#apiKeyInput').value.trim()) S.ai.salvarCfg($('#apiKeyInput').value, $('#modeloDecisaoSel').value, $('#modeloProducaoSel').value, $('#ritmoSel').value, $('#modeloRevisaoSel').value);
         const r = await S.ai.testar();
         toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }

@@ -14,9 +14,11 @@
   const K_USO = 'groq-usage-v1';
 
   const MODELOS = [
-    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · rápido e barato', nota: 'O mais em conta. ~$0,075 entrada / $0,30 saída por milhão de tokens. Ótimo para decisões curtas.' },
-    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · forte', nota: 'Ainda barato (~$0,15 / $0,60 por milhão). Melhor redação — bom para produção.' },
-    { id: 'qwen/qwen3.6-27b', nome: 'Qwen 3.6 27B · raciocínio', nota: 'Mais caro (~$0,60 / $3,00 por milhão), mas raciocina melhor em tarefas mais difíceis.' }
+    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
+    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · produção', nota: '$0,15 entrada / $0,60 saída por 1M. 500 t/s. Melhor escolha para criar produtos finais complexos.' },
+    { id: 'qwen/qwen3.8-27b', nome: 'Qwen 3.8 27B · raciocínio', nota: '$0,80 entrada / $4,00 saída por 1M. Mais caro; útil como alternativa de raciocínio/revisão.' },
+    { id: 'qwen/qwen3.6-27b', nome: 'Qwen 3.6 27B · raciocínio', nota: '$0,60 entrada / $3,00 saída por 1M. Alternativa de raciocínio, não recomendada para chamadas frequentes.' },
+    { id: 'openai/gpt-oss-safeguard-20b', nome: 'GPT-OSS Safeguard 20B · segurança', nota: '$0,075 entrada / $0,30 saída por 1M. Especializado em classificação de segurança; não é a escolha principal para produção.' }
   ];
 
   /* A Groq decomissionou os antigos Llama (llama-3.1-8b-instant e
@@ -48,11 +50,12 @@
   const REF_DIARIA = { requisicoes: 1000, tokens: 200000 };
 
   const cfg = Object.assign(
-    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', ritmo: 'normal' },
+    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b', ritmo: 'normal' },
     S.local.json(K_CFG, {})
   );
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
+  cfg.revisao = migrarModelo(cfg.revisao);
   S.local.setJson(K_CFG, cfg);
   let chave = S.local.get(K_CHAVE, '') || '';
 
@@ -179,8 +182,8 @@
     const q = usoHoje();
     if (q.requisicoes >= REF_DIARIA.requisicoes) throw new Error('Referência diária local de requisições atingida.');
 
-    const modelo = tipo === 'conteudo' ? cfg.producao : cfg.decisao;
-    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1400 : 320), 120, tipo === 'conteudo' ? 3000 : 900);
+    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'revisao' ? cfg.revisao : cfg.decisao);
+    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1000);
     // GPT-OSS na Groq responde melhor com tudo no papel "user".
     const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
 
@@ -193,8 +196,8 @@
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave },
         body: JSON.stringify({
           model: modelo, messages: mensagens,
-          max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.6 : 0.3,
-          stream: false, reasoning_effort: 'low'
+          max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
+          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
         })
       });
       let dados = null;
@@ -275,7 +278,7 @@
   /* novaChave === undefined significa "mantenha a que já está salva".
      String vazia significa "remova". Sem essa distinção, salvar só para
      trocar o ritmo apagaria a chave do usuário. */
-  function salvarCfg(novaChave, decisao, producao, ritmo) {
+  function salvarCfg(novaChave, decisao, producao, ritmo, revisao) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
       if (k && !/^gsk_[A-Za-z0-9_-]{10,}$/.test(k)) throw new Error('A chave da Groq começa com gsk_ e é bem mais longa. Confira o que foi colado.');
@@ -283,6 +286,7 @@
     }
     if (MODELOS.some(m => m.id === decisao)) cfg.decisao = decisao;
     if (MODELOS.some(m => m.id === producao)) cfg.producao = producao;
+    if (MODELOS.some(m => m.id === revisao)) cfg.revisao = revisao;
     if (RITMOS[ritmo]) cfg.ritmo = ritmo;
     if (chave) S.local.set(K_CHAVE, chave); else S.local.del(K_CHAVE);
     S.local.setJson(K_CFG, cfg);

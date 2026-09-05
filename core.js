@@ -113,16 +113,8 @@ window.S = window.S || {};
       f.humor = Number.isFinite(f.humor) ? f.humor : 68;
       f.entregas = Number(f.entregas) || 0;
       f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-12) : [];
-      f.memoria.forEach(m => {
-        if (typeof m === 'string') return;
-        m.texto = String(m.texto || '').slice(0, 180);
-        m.tipo = m.tipo || 'episodio';
-        m.quando = Number(m.quando) || Date.now();
-        m.importancia = Number(m.importancia) || 1;
-      });
-      f.memoriaPerfil = Array.isArray(f.memoriaPerfil) ? f.memoriaPerfil.slice(0, 5) : [];
-      f.focoAtual = String(f.focoAtual || 'Aguardando a próxima etapa do projeto.').slice(0, 220);
-      f.projetoAtual = f.projetoAtual || null;
+      f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
+      f.foco = String(f.foco || '').slice(0, 180);
       f.uso = f.uso || { chamadas: 0, tokens: 0 };
     });
     e.projetos = Array.isArray(e.projetos) ? e.projetos : [];
@@ -139,8 +131,7 @@ window.S = window.S || {};
       pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
       pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
     });
-    e.contratos = []; // legado: contratos/encomendas não participam da simulação.
-    e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
+    e.contratos = []; // contratos/encomendas pertencem ao modo antigo e não participam mais da simulação.
 
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
     e.tarefas.forEach(t => {

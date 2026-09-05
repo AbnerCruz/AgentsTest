@@ -1,59 +1,8 @@
-# Estúdio — simulação autônoma de equipe com memória e projetos persistentes
+# Estúdio — simulação de equipe com projetos persistentes
 
-Um ambiente virtual em que agentes trabalham autonomamente dentro de projetos contínuos. O usuário observa a equipe, os processos e os produtos; não precisa aceitar contratos, encomendar entregas ou ficar clicando para jogar.
+Um ambiente virtual em que agentes de IA trabalham autonomamente dentro de projetos contínuos. O usuário observa a equipe, os processos e os artefatos; não precisa aceitar contratos, encomendar entregas ou ficar jogando.
 
-## Memória dos funcionários
-
-Cada funcionário mantém uma memória local em camadas:
-- **memória episódica**: acontecimentos e handoffs relevantes;
-- **memória por projeto**: experiências ligadas ao projeto em que trabalhou;
-- **foco atual**: resumo operacional do que está tentando realizar;
-- **importância**: lembranças mais úteis recebem prioridade.
-
-A memória é limitada e compacta. Em vez de enviar todo o histórico para a IA, o simulador seleciona poucos registros relevantes, mantendo custo e latência baixos.
-
-A interface do funcionário mostra o **foco operacional atual** e sua memória. Ela não expõe raciocínio interno privado; mostra apenas o estado mental operacional que é seguro e útil para observação.
-
-## Princípios de trabalho
-
-Os agentes são orientados a verificar continuamente duas coisas:
-1. esta etapa contribui para o produto final?
-2. esta etapa deixa algo útil para a equipe continuar?
-
-O sistema evita começar do zero quando já existe um artefato utilizável.
-
-## Produtos
-
-Uma produção aprovada pela validação estrutural vira **produto final utilizável**, e não um rascunho público. O arquivo deve ser completo, sem placeholders e pronto para consumo/publicação.
-
-Quando um produto novo entra em um projeto que já possui site, o site recebe automaticamente uma etapa de atualização para incorporar o novo produto.
-
-## Trabalho em equipe
-
-As tarefas possuem projeto, dependências e handoffs persistentes. Os agentes:
-- reutilizam arquivos e versões anteriores;
-- recebem contexto das etapas anteriores;
-- registram handoffs;
-- podem conversar sobre a continuidade do trabalho;
-- não duplicam deliberadamente trabalho já feito.
-
-As conversas sociais são locais e determinísticas, sem chamadas de IA, para evitar gasto desnecessário.
-
-## Economia
-
-Há no máximo uma chamada autônoma de IA por ciclo. A memória enviada à IA é compacta, a decisão usa modelo barato e a produção usa o modelo configurado para conteúdo.
-
-O simulador não usa IA para cada movimento, conversa visual ou animação. Isso mantém a experiência fluida e barata.
-
-## Persistência
-
-Projetos, tarefas, dependências, arquivos, versões, handoffs, memória dos funcionários, foco atual, XP e histórico ficam no `localStorage` do navegador.
-
-## XP
-
-XP continua existindo como experiência acumulada do estúdio. Não é moeda, missão, contrato ou obrigação de jogar.
-
-## Execução
+## Como rodar
 
 Qualquer servidor estático serve. No GitHub Pages basta subir a pasta inteira e apontar para a raiz. Localmente:
 
@@ -65,7 +14,44 @@ Depois abra `http://localhost:8000`.
 
 Para ativar a equipe, entre em **Motor** e configure uma chave da Groq. A chave fica apenas no `localStorage` do navegador.
 
+## O que é persistente
+
+- Projetos, objetivos e histórico de atividade.
+- Tarefas e dependências entre etapas.
+- Arquivos produzidos, versões, qualidade, autoria e projeto de origem.
+- Handoffs entre agentes.
+- A equipe consulta os artefatos anteriores antes de produzir a próxima etapa.
+- Quando um novo produto é publicado, um projeto que já possui um site pode criar autonomamente uma tarefa para integrar o produto ao site.
+
+## Trabalho em equipe
+
+A gerente mantém o projeto e decide as próximas etapas. Agentes recebem tarefas conforme sua especialidade e podem trabalhar sobre entregas anteriores. Uma etapa pode depender de outra, e cada entrega deixa um handoff persistente para quem assumir a sequência.
+
+## Produção
+
+A IA escreve o conteúdo estruturado; o navegador monta os arquivos finais com gabaritos determinísticos. Isso mantém HTML, CSV, SVG e Markdown válidos e reduz o consumo de tokens.
+
+## XP
+
+XP continua existindo apenas como uma medida de experiência acumulada do estúdio. Ele não é usado como moeda, contrato, missão ou obrigação de jogar.
+
+## Simulação visual
+
+O chão do estúdio é uma representação visual dos agentes: deslocamento, trabalho, pausas e conversas são simulados. A energia foi ajustada para acompanhar o tempo real, evitando exaustão instantânea.
+
 ## Arquivos
 
-- `index.html` — versão modular recomendada.
-- `estudio-arquivo-unico.html` — versão independente, com CSS e JavaScript embutidos.
+`index.html` é a versão modular recomendada. `estudio-arquivo-unico.html` é uma versão independente para uso simples.
+
+
+## IA — arquitetura econômica
+
+- **Pré-produção/coordenação:** GPT-OSS 20B por padrão, com contexto detalhado e saída curta.
+- **Produção:** GPT-OSS 120B por padrão, reservado para criar o produto final.
+- **Revisão:** modelo econômico separado para validações curtas.
+- O contexto enviado inclui projeto, tarefa, memória relevante do agente, equipe, artefatos anteriores, produtos publicados, etapas e eventos recentes.
+- O contexto é limitado por caracteres para evitar crescimento infinito, mas é deliberadamente mais rico que versões anteriores.
+- Movimentação, animações e interações sociais simples não usam IA.
+- A IA é chamada apenas quando uma decisão ou produção realmente precisa dela.
+
+Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que os modelos Qwen disponíveis; o GPT-OSS 120B continua sendo a escolha forte para produção. Os modelos Qwen 3.6/3.8 ficam disponíveis como alternativas, mas são mais caros e por isso não são usados automaticamente.

@@ -660,24 +660,16 @@ Sem numeração, sem markdown.`;
       cargo: agente ? agente.cargo : 'produção',
       briefing: String(op.briefing || kit.desc).slice(0, 420),
       projectId: op.projectId || null,
-      projeto: contextoProjeto(e, op.projectId),
-      memoria: agente && agente.ref ? (agente.ref.memoria || []).slice(-5) : [],
-      focoAtual: agente && agente.ref ? agente.ref.focoAtual : ''
+      projeto: contextoProjeto(e, op.projectId)
     };
 
     let campos = null, bruto = '', viaIA = false;
     if (S.ai.pronta()) {
       try {
         const r = await S.ai.chamar({
-          sistema: kit.instrucao(ctx) + `
-
-PRINCÍPIOS DE TRABALHO: Você está em um projeto contínuo. Verifique se esta etapa contribui para o produto final e para a equipe. Use os artefatos existentes como base. Não invente dados que não estejam no contexto.
-FOCO ATUAL: ${String(ctx.focoAtual || '').slice(0, 220)}
-MEMÓRIA RELEVANTE: ${ctx.memoria.map(m => typeof m === 'string' ? m : m.texto).join(' | ').slice(0, 700)}`,
-          pedido: contextoCurto(e) + contextoProjetoPrompt(ctx.projeto) + `
-
-REQUISITO DE ENTREGA: o arquivo produzido deve ser completo, utilizável diretamente pelo público e pronto para consumo/publicação. Não entregue placeholders, rascunhos ou instruções para terminar depois. Se houver produto/catálogo anterior, preserve e integre seus dados reais.`, 
-          tipo: 'conteudo', tokens: kit.tokens,
+          sistema: kit.instrucao(ctx),
+          pedido: contextoDetalhado(e, op, agente, ctx.projeto),
+          tipo: 'conteudo', tokens: Math.max(1500, kit.tokens || 1500),
           agente: ctx.autor, motivo: 'produzir ' + kit.nome
         });
         campos = S.ai.campos(r.texto);
@@ -696,9 +688,7 @@ REQUISITO DE ENTREGA: o arquivo produzido deve ser completo, utilizável diretam
        de qualidade para deixar claro que não passou pela produção da IA. */
     const bruta = aferir(kit, campos, arquivos, agente);
     const qualidade = viaIA ? bruta : Math.min(36, bruta);
-    // Produção validada pela IA é uma entrega pública utilizável; a pontuação
-    // permanece como diagnóstico, não como mecânica de jogo.
-    const classe = viaIA && qualidade >= 60 ? 'produto' : (!viaIA ? 'esboco' : 'prototipo');
+    const classe = !viaIA ? 'esboco' : qualidade >= 72 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
     return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
   }
 
@@ -723,13 +713,34 @@ REQUISITO DE ENTREGA: o arquivo produzido deve ser completo, utilizável diretam
     return `\nPROJETO PERSISTENTE: ${projeto.nome}\nOBJETIVO: ${projeto.objetivo}\nETAPAS:\n${tarefas || 'nenhuma'}\nARTEFATOS:\n${arquivos || 'nenhum'}`;
   }
 
-  /* Contexto curto de propósito: quanto menor, mais barata a chamada. */
+  /* Contexto detalhado, mas controlado. A entrada é deliberadamente mais rica
+     que o output: na Groq o input do GPT-OSS 20B custa muito menos que a saída,
+     e contexto preciso reduz retrabalho, alucinação e necessidade de novas chamadas. */
+  function contextoDetalhado(e, op, agente, projeto) {
+    const projetoReal = (e.projetos || []).find(p => p.id === (op.projectId || '')) ||
+      (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0];
+    const tarefa = (e.tarefas || []).find(t => t.id === op.taskId) || null;
+    const mem = agente && Array.isArray(agente.memoria) ? agente.memoria : [];
+    const memoria = mem.slice(-10).map(m => typeof m === 'string' ? m : m.texto).filter(Boolean)
+      .map((x,i) => `${i + 1}. ${x}`).join('\n') || 'Nenhuma memória registrada.';
+    const equipe = (e.equipe || []).map(f =>
+      `${f.nome} | ${f.cargo} | especialidade=${f.especialidade} | energia=${Math.round(f.energia || 0)} | foco=${f.foco || 'disponível'} | pensamento=${f.pensamento || '—'}`
+    ).join('\n');
+    const arquivos = ((projeto && projeto.arquivoIds) || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
+      .slice(0, 9).map(a => `### ${a.nome} | ${a.classe} | v${a.versao || 1} | qualidade=${a.qualidade || 0}\n${String(a.conteudo || '').slice(0, 1250)}`).join('\n\n') || 'Nenhum artefato anterior.';
+    const tarefas = ((projeto && projeto.tarefaIds) || []).map(id => e.tarefas.find(t => t.id === id)).filter(Boolean)
+      .slice(0, 12).map(t => `${t.status.toUpperCase()} | ${t.titulo} | responsável=${t.para || 'não atribuído'} | handoff=${t.handoff || 'nenhum'}`).join('\n') || 'Nenhuma etapa registrada.';
+    const produtos = (e.arquivos || []).filter(a => a.classe === 'produto').slice(0, 8)
+      .map(a => `${a.nome} v${a.versao || 1} | ${a.tipo} | projeto=${a.projectId || 'principal'} | qualidade=${a.qualidade || 0}`).join('\n') || 'Nenhum produto publicado.';
+    const eventos = (e.log || []).slice(-8).map(l => `${new Date(l.t || Date.now()).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} — ${l.texto}`).join('\n') || 'Nenhum evento recente.';
+    const objetivo = projetoReal ? projetoReal.objetivo : e.missao;
+    const briefing = String(op.briefing || '').slice(0, 900);
+    return `CONTEXTO OPERACIONAL COMPLETO — NÃO INVENTE FATOS\n\nESTÚDIO\nNome: ${e.nome}\nRamo: ${e.ramo}\nMissão: ${e.missao}\nPúblico: ${e.publico}\nTom: ${e.tom}\n\nPROJETO PERSISTENTE\nNome: ${projetoReal ? projetoReal.nome : 'Projeto principal'}\nObjetivo: ${objetivo}\nBriefing da etapa: ${briefing}\n\nTAREFA ATUAL\n${tarefa ? `${tarefa.titulo} | status=${tarefa.status} | handoff=${tarefa.handoff || 'nenhum'}` : 'A tarefa deve ser inferida apenas do briefing e do projeto.'}\n\nMEMÓRIA DO FUNCIONÁRIO — use para manter continuidade\n${memoria}\n\nEQUIPE E CONTEXTO SOCIAL\n${equipe}\n\nARTEFATOS EXISTENTES — evolua o que já existe quando fizer sentido\n${arquivos}\n\nPRODUTOS JÁ PUBLICADOS — produtos finais devem continuar consumíveis pelo público\n${produtos}\n\nETAPAS DO PROJETO\n${tarefas}\n\nEVENTOS RECENTES\n${eventos}\n\nCRITÉRIO CENTRAL\nO trabalho precisa contribuir explicitamente para um produto final utilizável pelo público. Preserve dados, conteúdo e decisões anteriores. Não substitua um produto existente por um rascunho sem necessidade. Se depender do trabalho de outra pessoa, incorpore esse trabalho. Entregue algo completo, não uma ideia, promessa ou placeholder.`.slice(0, 11500);
+  }
+
   function contextoCurto(e) {
-    const publicados = (e.arquivos || []).filter(a => a.classe === 'produto').slice(0, 4).map(a => a.nome);
-    const ultimos = (e.log || []).slice(-3).map(l => l.texto).join(' | ');
     const projeto = (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0];
-    const ativos = projeto ? (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).map(a => `${a.nome} (${a.classe})`).join(', ') : '';
-    return `Contexto persistente: projeto ${projeto ? projeto.nome : 'principal'}; objetivo: ${projeto ? projeto.objetivo : e.missao}. Artefatos existentes: ${ativos || 'nenhum'}. Publicados: ${publicados.length ? publicados.join(', ') : 'nada'}. Últimos eventos: ${ultimos || 'nenhum'}. Preserve e evolua o que já existe; não comece do zero sem motivo.`;
+    return `Projeto=${projeto ? projeto.nome : 'principal'}; objetivo=${projeto ? projeto.objetivo : e.missao}; preserve e evolua artefatos existentes.`;
   }
 
   function camposDeContingencia(kit, ctx) {
