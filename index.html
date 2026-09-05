@@ -662,18 +662,55 @@ self.onmessage = async (ev)=>{
       const unique=[...new Set(escolhidos)];
       const cache=('caches' in self)?await caches.open('ia-modelos-v1'):null;
       if(!cache) throw new Error('Armazenamento de cache indisponivel neste navegador.');
+      // Progresso por BYTES, nao apenas por quantidade de arquivos. Assim um
+      // arquivo ONNX de ~100 MB nao fica parecendo travado em 1/8.
+      const tamanhos=[]; let totalBytes=0; let bytesProntos=0;
+      for(const f of unique){
+        const u='https://huggingface.co/'+modelId+'/resolve/main/'+f;
+        const ex=await cache.match(u,{ignoreVary:true});
+        if(ex){ const n=Number(ex.headers.get('content-length')||0); tamanhos.push(n); totalBytes+=n; }
+        else tamanhos.push(0);
+      }
       for(let i=0;i<unique.length;i++){
         const f=unique[i];
         const url='https://huggingface.co/'+modelId+'/resolve/main/'+f;
         const existente=await cache.match(url,{ignoreVary:true});
-        if(existente){ postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:true}); continue; }
+        if(existente){
+          const n=tamanhos[i]||0; bytesProntos+=n;
+          postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:true,bytes:bytesProntos,totalBytes});
+          continue;
+        }
         const r=await fetch(url);
         if(!r.ok) throw new Error('Falha ao baixar '+f+' ('+r.status+').');
-        // Guardamos na chave canonica que o Transformers.js normalmente usa.
-        // O Service Worker tambem pode manter sua propria copia, sem exigir
-        // que o modelo seja carregado em RAM durante o download.
-        await cache.put(url,r.clone());
-        postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:false});
+        const contentLength=Number(r.headers.get('content-length')||0);
+        if(contentLength && !tamanhos[i]){ tamanhos[i]=contentLength; totalBytes+=contentLength; }
+        const inicio=bytesProntos;
+        let respostaCache=r;
+        if(r.body && typeof r.body.tee==='function'){
+          const [cacheStream,progressStream]=r.body.tee();
+          respostaCache=new Response(cacheStream,{headers:r.headers,status:r.status,statusText:r.statusText});
+          const reader=progressStream.getReader();
+          let atual=0;
+          // Le a segunda ponta do stream so para atualizar a barra; nao
+          // acumulamos os pedacos em memoria.
+          const monitor=(async()=>{
+            try{
+              while(true){
+                const x=await reader.read();
+                if(x.done) break;
+                atual+=x.value?.byteLength||0;
+                postMessage({type:'download-progress',modelId,done:i,total:unique.length,file:f,cached:false,bytes:inicio+atual,totalBytes,arquivoBytes:atual,arquivoTotal:contentLength});
+              }
+            }catch(e){}
+          })();
+          await cache.put(url,respostaCache);
+          await monitor;
+          bytesProntos=inicio+atual;
+        }else{
+          await cache.put(url,respostaCache.clone ? respostaCache.clone() : respostaCache);
+          bytesProntos += contentLength;
+        }
+        postMessage({type:'download-progress',modelId,done:i+1,total:unique.length,file:f,cached:false,bytes:bytesProntos,totalBytes,arquivoBytes:tamanhos[i]||contentLength,arquivoTotal:tamanhos[i]||contentLength});
       }
       postMessage({type:'download-ready',modelId,files:unique.length});
     } catch(e){ postMessage({type:'download-error',modelId:msg.modelId,error:String(e?.message||e)}); }
@@ -754,8 +791,12 @@ function criarWorkerIA(){
       return;
     }
     if(m.type==='download-progress'){
-      const pct=m.total ? Math.round((m.done/m.total)*100) : 0;
-      setAIStatus('loading','Baixando modelo (sem executar IA)',`${m.file||'arquivo'} · ${m.done}/${m.total} arquivos${m.cached?' · já estava no cache':''}`,pct);
+      const pct = m.totalBytes ? Math.max(0,Math.min(100,Math.round((m.bytes/m.totalBytes)*100))) : (m.total ? Math.round((m.done/m.total)*100) : 0);
+      const mb=v=>typeof v==='number' && isFinite(v) ? (v/1048576).toFixed(v>=104857600?0:1)+' MB' : '';
+      const detalhe = m.totalBytes
+        ? `${m.file||'arquivo'} · ${mb(m.bytes)} / ${mb(m.totalBytes)}${m.arquivoTotal ? ` · arquivo: ${mb(m.arquivoBytes||0)} / ${mb(m.arquivoTotal)}`:''}${m.cached?' · já estava no cache':''}`
+        : `${m.file||'arquivo'} · ${m.done}/${m.total} arquivos${m.cached?' · já estava no cache':''}`;
+      setAIStatus('loading','Baixando modelo (sem executar IA)',detalhe,pct);
       return;
     }
     if(m.type==='download-ready'){
