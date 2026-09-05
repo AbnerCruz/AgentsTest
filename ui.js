@@ -414,17 +414,26 @@
   function pintarMotor() {
     const e = S.state.atual();
     const st = S.ai.estado;
-    $('#conexaoChip').textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
-    $('#pausarBtn').textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
+    // O painel do Motor pode existir em uma versão de shell diferente
+    // durante uma atualização do GitHub Pages/service worker. Nunca assuma
+    // que um elemento existe: uma pintura da UI não pode derrubar o app.
+    const chip = $('#conexaoChip');
+    const pausar = $('#pausarBtn');
     const apiKeyInput = $('#apiKeyInput');
+    const msg = $('#conexaoMsg');
+    if (chip) chip.textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
+    if (pausar) pausar.textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
     if (apiKeyInput && !apiKeyInput.value && S.ai.temChave()) apiKeyInput.placeholder = S.ai.chaveMascarada();
-    $('#conexaoMsg').textContent = st.detalhe || '';
+    if (msg) msg.textContent = st.detalhe || '';
 
-    const opcoes = sel => S.ai.MODELOS.map(m =>
+    const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
-    $('#modeloDecisaoSel').innerHTML = opcoes('decisao');
-    $('#modeloProducaoSel').innerHTML = opcoes('producao');
-    $('#modeloRevisaoSel').innerHTML = opcoes('revisao');
+    const decisao = $('#modeloDecisaoSel');
+    const producao = $('#modeloProducaoSel');
+    const revisao = $('#modeloRevisaoSel');
+    if (decisao) decisao.innerHTML = opcoes('decisao');
+    if (producao) producao.innerHTML = opcoes('producao');
+    if (revisao) revisao.innerHTML = opcoes('revisao');
 
     const o = S.ai.orcamento();
     const h = o.headers;
@@ -665,13 +674,15 @@
     const pausarBtn = $('#pausarBtn');
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
 
-    $('#fecharEstudioBtn').onclick = () => {
+    const fecharEstudioBtn = $('#fecharEstudioBtn');
+    if (fecharEstudioBtn) fecharEstudioBtn.onclick = () => {
       const e = S.state.atual(); if (!e) return;
       confirmar('Fechar ' + e.nome + '?', 'Some com a equipe, os projetos e todos os arquivos deste estúdio. Exporte o .zip antes se quiser guardar as entregas.', () => {
         S.state.remover(e.id); toast('Estúdio fechado.');
       });
     };
-    $('#zerarTudoBtn').onclick = () => {
+    const zerarTudoBtn = $('#zerarTudoBtn');
+    if (zerarTudoBtn) zerarTudoBtn.onclick = () => {
       confirmar('Apagar tudo?', 'Remove todos os estúdios e o histórico. A chave da API continua salva.', () => {
         S.state.apagarTudo(); toast('Base limpa.');
       });
