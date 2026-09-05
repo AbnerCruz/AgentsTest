@@ -295,11 +295,14 @@
       <div id="groqApiStatus" class="stage-note" style="margin-top:8px;"></div>
       <div class="modal-actions" style="margin-top:8px;"><button class="btn small" id="aiGenerationTestBtn">Testar geração: OK</button></div>
       <div class="card" style="margin-top:10px;padding:12px;">
-        <div style="font-weight:700;">Consumo e limite da API</div>
-        <div id="groqQuotaBox" class="stage-note" style="margin-top:6px;">Aguardando uma chamada para ler os limites da Groq.</div>
+        <div style="font-weight:700;">Limite REAL da API</div>
+        <div id="groqQuotaBox" class="stage-note" style="margin-top:6px;">Aguardando uma resposta da Groq para sincronizar os limites reais.</div>
         <div id="groqQuotaRows" style="margin-top:7px;"></div>
-        <div class="stage-note" style="margin-top:7px;">O app lê os cabeçalhos de limite da Groq quando disponíveis e soma os tokens usados nas respostas. O contador diário local é uma estimativa; a Groq é a fonte oficial do limite.</div>
-        <button class="btn small" id="groqResetUsageBtn" style="margin-top:8px;">Zerar contador local</button>
+        <div class="modal-actions" style="margin-top:8px;">
+          <button class="btn small" id="groqSyncQuotaBtn">Sincronizar limite agora</button>
+          <button class="btn small" id="groqResetUsageBtn">Zerar contador local</button>
+        </div>
+        <div class="stage-note" style="margin-top:7px;">Os números marcados como <b>REAL</b> vêm dos cabeçalhos HTTP enviados pela Groq na última resposta. O relógio é atualizado localmente a cada segundo. A sincronização manual faz uma chamada à API e, portanto, consome 1 requisição. O consumo diário do app é apenas um contador local; os limites exatos da sua organização são os da Groq.</div>
       </div>
     </div>
     <div id="modelManagerList" hidden></div>
@@ -504,31 +507,89 @@ function salvarGroqConfig(){
   renderGroqQuota();
   return true;
 }
+function duracaoHeaderMs(valor){
+  const s=String(valor||'').trim();
+  if(!s) return null;
+  let total=0, achou=false;
+  const re=/(\d+(?:\.\d+)?)\s*(ms|s|m|h|d)/gi;
+  let m;
+  while((m=re.exec(s))){
+    achou=true;
+    const n=Number(m[1]);
+    const u=m[2].toLowerCase();
+    total += u==='ms' ? n : u==='s' ? n*1000 : u==='m' ? n*60000 : u==='h' ? n*3600000 : n*86400000;
+  }
+  if(achou) return Math.max(0,total);
+  const n=Number(s.replace(',','.'));
+  return Number.isFinite(n) ? n*1000 : null;
+}
+function formatarContagemMs(ms){
+  if(ms==null) return '—';
+  const n=Math.max(0,Math.ceil(ms/1000));
+  if(n<60) return `${n}s`;
+  const m=Math.floor(n/60), s=n%60;
+  if(m<60) return `${m}min ${String(s).padStart(2,'0')}s`;
+  const h=Math.floor(m/60), mm=m%60;
+  return `${h}h ${String(mm).padStart(2,'0')}min`;
+}
 function lerHeadersQuota(resp){
   const h=n=>resp.headers.get(n), q=quotaHoje();
-  q.last={limitRequests:Number(h('x-ratelimit-limit-requests')||0)||null,remainingRequests:Number(h('x-ratelimit-remaining-requests')||0)||null,resetRequests:h('x-ratelimit-reset-requests')||null,limitTokens:Number(h('x-ratelimit-limit-tokens')||0)||null,remainingTokens:Number(h('x-ratelimit-remaining-tokens')||0)||null,resetTokens:h('x-ratelimit-reset-tokens')||null,at:Date.now()};
+  const now=Date.now();
+  const resetRequests=h('x-ratelimit-reset-requests')||null;
+  const resetTokens=h('x-ratelimit-reset-tokens')||null;
+  q.last={
+    limitRequests:Number(h('x-ratelimit-limit-requests')||0)||null,
+    remainingRequests:Number(h('x-ratelimit-remaining-requests')||0)||null,
+    resetRequests,
+    resetRequestsMs:duracaoHeaderMs(resetRequests),
+    limitTokens:Number(h('x-ratelimit-limit-tokens')||0)||null,
+    remainingTokens:Number(h('x-ratelimit-remaining-tokens')||0)||null,
+    resetTokens,
+    resetTokensMs:duracaoHeaderMs(resetTokens),
+    retryAfter:h('retry-after')||null,
+    at:now
+  };
   persistirQuota(); renderGroqQuota();
+}
+function valorRealComCountdown(valor,resetValor,at){
+  if(valor==null) return '—';
+  const ms=duracaoHeaderMs(resetValor);
+  if(ms==null || !at) return numFmt(valor);
+  return `${numFmt(valor)} <small>· reset em ${formatarContagemMs(ms-(Date.now()-at))}</small>`;
 }
 function registrarUsoGroq(model,usage){
   const q=quotaHoje(); q.requests++;
   q.inputTokens += Number(usage?.prompt_tokens ?? usage?.input_tokens ?? 0)||0; q.outputTokens += Number(usage?.completion_tokens ?? usage?.output_tokens ?? 0)||0;
   q.totalTokens += Number(usage?.total_tokens ?? ((usage?.prompt_tokens||0)+(usage?.completion_tokens||0)))||0;
+  q.lastModel=String(model||'desconhecido');
   const key=String(model||'desconhecido'); q.model[key]=q.model[key]||{requests:0,tokens:0,input:0,output:0};
   q.model[key].requests++; q.model[key].tokens += Number(usage?.total_tokens||0)||0; q.model[key].input += Number(usage?.prompt_tokens||usage?.input_tokens||0)||0; q.model[key].output += Number(usage?.completion_tokens||usage?.output_tokens||0)||0;
   persistirQuota(); renderGroqQuota();
 }
 function renderGroqQuota(){
   const box=document.getElementById('groqQuotaBox'), rows=document.getElementById('groqQuotaRows'); if(!box||!rows) return;
-  const q=quotaHoje(), h=q.last||{}; const rLim=h.limitRequests||GROQ_FREE_DEFAULT.rpd, rRem=h.remainingRequests;
-  const rUsed=rRem!=null && h.limitRequests ? Math.max(0,h.limitRequests-rRem) : q.requests; const tLim=h.limitTokens||GROQ_FREE_DEFAULT.tpm, tRem=h.remainingTokens;
-  const tUsedMinute=tRem!=null && h.limitTokens ? Math.max(0,h.limitTokens-tRem) : null; const dailyPct=Math.min(100,(q.totalTokens/GROQ_FREE_DEFAULT.tpd)*100); const reqPct=Math.min(100,(rUsed/rLim)*100);
-  box.innerHTML=`Hoje: <b>${numFmt(q.requests)}</b> chamadas · <b>${numFmt(q.totalTokens)}</b> tokens (${dailyPct.toFixed(1)}% da referência de ${numFmt(GROQ_FREE_DEFAULT.tpd)} tokens/dia).`;
-  rows.innerHTML=`<div class="row"><span>Requisições restantes</span><span class="val">${rRem!=null?numFmt(rRem):'—'} / ${numFmt(rLim)} <small>(${reqPct.toFixed(1)}% usado)</small></span></div>
-  <div class="row"><span>Tokens usados hoje</span><span class="val">${numFmt(q.totalTokens)} / ${numFmt(GROQ_FREE_DEFAULT.tpd)}</span></div>
-  <div class="row"><span>Tokens nesta janela</span><span class="val">${tRem!=null?`${numFmt(tUsedMinute)} / ${numFmt(tLim)} usados · ${numFmt(tRem)} restantes`:'aguardando cabeçalho da Groq'}</span></div>
-  <div class="row"><span>Entrada / saída hoje</span><span class="val">${numFmt(q.inputTokens)} / ${numFmt(q.outputTokens)}</span></div>
-  <div class="row"><span>Próximo reset de requisições</span><span class="val">${escapeHtml(h.resetRequests||'a Groq informará na próxima resposta')}</span></div>
-  <div class="row"><span>Modo de uso</span><span class="val">máximo · decisões 20B / produção 120B</span></div>`;
+  const q=quotaHoje(), h=q.last||{};
+  const synced=h.at ? Math.max(0,Date.now()-h.at) : null;
+  const stale=!h.at || synced>5*60*1000;
+  const rLim=h.limitRequests, rRem=h.remainingRequests, tLim=h.limitTokens, tRem=h.remainingTokens;
+  const rUsed=rRem!=null && rLim ? Math.max(0,rLim-rRem) : null;
+  const tUsedMinute=tRem!=null && tLim ? Math.max(0,tLim-tRem) : null;
+  const dailyPct=Math.min(100,(q.totalTokens/GROQ_FREE_DEFAULT.tpd)*100);
+  const atualizado=h.at ? `última confirmação ${Math.floor(synced/1000)}s atrás` : 'ainda não sincronizado';
+  box.innerHTML=h.at
+    ? `<b style="color:#4caf80;">● REAL</b> · ${atualizado}${stale?' · <b>recomenda-se sincronizar</b>':''}`
+    : `<b>○ aguardando sincronização REAL</b> · ainda não recebemos os headers da Groq`;
+  rows.innerHTML=`
+  <div class="row"><span>Requisições hoje — REAL</span><span class="val">${rRem!=null?`${numFmt(rRem)} restantes / ${numFmt(rLim)} RPD`:'—'}</span></div>
+  <div class="row"><span>Uso local calculado</span><span class="val">${numFmt(q.requests)} chamadas · ${numFmt(q.totalTokens)} tokens</span></div>
+  <div class="row"><span>Tokens/minuto — REAL</span><span class="val">${tRem!=null?`${numFmt(tRem)} restantes / ${numFmt(tLim)} TPM`:'—'}</span></div>
+  <div class="row"><span>Consumo desta janela — REAL</span><span class="val">${tUsedMinute!=null?`${numFmt(tUsedMinute)} usados`:'—'}</span></div>
+  <div class="row"><span>Reset de requisições — REAL</span><span class="val">${h.resetRequests?formatarContagemMs(duracaoHeaderMs(h.resetRequests)-(Date.now()-(h.at||Date.now()))):'—'}</span></div>
+  <div class="row"><span>Reset de tokens — REAL</span><span class="val">${h.resetTokens?formatarContagemMs(duracaoHeaderMs(h.resetTokens)-(Date.now()-(h.at||Date.now()))):'—'}</span></div>
+  <div class="row"><span>Entrada / saída hoje — local</span><span class="val">${numFmt(q.inputTokens)} / ${numFmt(q.outputTokens)}</span></div>
+  <div class="row"><span>Referência diária local</span><span class="val">${numFmt(q.totalTokens)} / ${numFmt(GROQ_FREE_DEFAULT.tpd)} tokens (${dailyPct.toFixed(1)}%)</span></div>
+  <div class="row"><span>Último modelo usado</span><span class="val">${escapeHtml(q.lastModel||'—')}</span></div>
+  ${h.retryAfter?`<div class="row"><span>Retry-After</span><span class="val">${escapeHtml(h.retryAfter)}</span></div>`:''}`;
 }
 
 try { modelosInstalados = JSON.parse(localStorage.getItem('modelos-ia-instalados') || '[]'); } catch(e) { modelosInstalados=[]; }
@@ -1109,7 +1170,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   const modeloDaChamada = modeloDoTipo(tipo);
   const qAtual=quotaHoje();
   const mq=qAtual.model?.[modeloDaChamada] || {requests:0,tokens:0};
-  if(mq.tokens >= GROQ_FREE_DEFAULT.tpd || mq.requests >= GROQ_FREE_DEFAULT.rpd) throw new Error(`Limite diário local atingido para ${configModelo(modeloDaChamada).nome}.`);
+  if(mq.tokens >= GROQ_FREE_DEFAULT.tpd || mq.requests >= GROQ_FREE_DEFAULT.rpd) throw new Error(`Contador local de segurança atingiu a referência diária de ${configModelo(modeloDaChamada).nome}. O limite oficial deve ser confirmado pelos headers da Groq.`);
   const conteudo = tipo === 'conteudo';
   // GPT-OSS na Groq recomenda instruções no papel user. Também precisa de
   // folga para os tokens de raciocínio; limites muito baixos podem terminar
@@ -1125,7 +1186,7 @@ async function chamarAPI(system, userText, maxTokens, model, agentId, tipo='deci
   try{
     setAIStatus('loading','IA processando…',`${API_PROVIDER} · ${modeloDaChamada}`,null);
     const fazerRequisicao = async (maxOut) => {
-      const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:maxOut,temperature:0.35,stream:false,reasoning_effort:'low',include_reasoning:false,service_tier:'auto'})});
+      const resp=await fetch(GROQ_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+groqApiKey},body:JSON.stringify({model:modeloDaChamada,messages,max_completion_tokens:maxOut,temperature:0.35,stream:false,reasoning_effort:'low',include_reasoning:false})});
       let data=null; try{data=await resp.json();}catch(e){}
       lerHeadersQuota(resp);
       // Toda tentativa consome cota; registramos inclusive respostas sem texto/erros com usage.
@@ -2574,10 +2635,22 @@ function renderModelManager(){
     }catch(e){ setAIStatus('error','Conexão falhou',String(e?.message||e)); }
     finally{testConn.disabled=false;renderModelManager();}
   };
+  const syncQ=document.getElementById('groqSyncQuotaBtn');
+  if(syncQ) syncQ.onclick=async()=>{
+    if(!groqApiKey){ setAIStatus('error','API não configurada','Informe sua chave Groq antes de sincronizar o limite.'); return; }
+    syncQ.disabled=true; syncQ.textContent='Sincronizando…';
+    try{
+      await chamarAPI('Responda apenas com OK.','Sincronização dos limites reais.',64,modeloSelecionado,'diag','diag');
+      setAIStatus('ready','Limite sincronizado ✓','Os headers reais da Groq foram atualizados.');
+    }catch(e){ setAIStatus('error','Não foi possível sincronizar',String(e?.message||e)); }
+    finally{ syncQ.disabled=false; syncQ.textContent='Sincronizar limite agora'; renderModelManager(); }
+  };
   const resetQ=document.getElementById('groqResetUsageBtn');
   if(resetQ) resetQ.onclick=()=>{ groqQuota={date:new Date().toISOString().slice(0,10),requests:0,inputTokens:0,outputTokens:0,totalTokens:0,last:null,model:{}}; persistirQuota(); renderGroqQuota(); };
 }
 
+
+setInterval(()=>{ if(groqQuota?.last?.at) renderGroqQuota(); },1000);
 
 function atualizarProgressoDownloadUI(id, info){
   progressoDownloads.set(id, info||{});
