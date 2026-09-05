@@ -1860,7 +1860,7 @@ function renderBacklog(){
    Tudo isto roda em JavaScript puro, sem consultar a IA — o modelo local
    so entra quando o agente precisa FALAR (ideia, opiniao, desabafo).
    ============================================================ */
-const LIMITE = { fome:75, sede:70, energia:25, humorBaixo:30 };
+const LIMITE = { fome:82, sede:82, energia:10, humorBaixo:30 };
 
 function persistirVitais(rt){
   const emp=empresaAtual(); if(!emp) return;
@@ -1875,8 +1875,7 @@ function lembrar(rt, texto){
   persistirVitais(rt);
 }
 function ajustarHumor(rt, delta, motivo){
-  const v=rt.vitais;
-  const antes=v.humor;
+  const v=rt.vitais, antes=v.humor;
   v.humor=Math.max(0,Math.min(100,v.humor+delta));
   if(motivo && Math.abs(delta)>=8){
     lembrar(rt, `${delta>0?'Fiquei melhor':'Fiquei chateado'}: ${motivo}`);
@@ -1886,51 +1885,61 @@ function ajustarHumor(rt, delta, motivo){
 }
 function afinidadeCom(rt, outroId){ return Number(rt.afinidade[outroId] ?? 0); }
 function mudarAfinidade(rt, outroId, delta){
-  rt.afinidade[outroId]=Math.max(-100,Math.min(100, afinidadeCom(rt,outroId)+delta));
+  rt.afinidade[outroId]=Math.max(-100,Math.min(100,afinidadeCom(rt,outroId)+delta));
   persistirVitais(rt);
 }
 function estaDesmaiado(rt){ return Date.now() < (rt.desmaiadoAte||0); }
 
-/* Relogio biologico: uma passagem a cada 6s para todo mundo. */
+/* O relógio biológico é REAL, não acelerado junto com o relógio econômico.
+   A empresa pode operar 60x mais rápido para fins financeiros, mas uma pessoa
+   não fica biologicamente exausta em poucos minutos reais. */
+let ultimoTickVitais=Date.now();
 function tickVitais(){
   const emp=empresaAtual(); if(!emp) return;
+  const agora=Date.now();
+  const dtMin=Math.max(0,Math.min(2,(agora-ultimoTickVitais)/60000));
+  ultimoTickVitais=agora;
+  if(dtMin<=0) return;
   for(const rt of runtime){
-    const v=rt.vitais; if(!v) continue;
-    if(estaDesmaiado(rt)) continue;
+    const v=rt.vitais; if(!v || estaDesmaiado(rt)) continue;
     const trabalhando = rt.state==='acting' || rt.thinking;
-    v.fome  = Math.min(100, v.fome + (trabalhando?0.9:0.5));
-    v.sede  = Math.min(100, v.sede + (trabalhando?1.2:0.7));
-    v.energia = Math.max(0, v.energia - (trabalhando?1.1:0.35));
-    let pressao=0;
-    if(v.fome>LIMITE.fome) pressao+=0.5;
-    if(v.sede>LIMITE.sede) pressao+=0.5;
-    if(v.energia<LIMITE.energia) pressao+=0.7;
-    if(pressao) ajustarHumor(rt,-pressao);
-    else if(v.humor<60) ajustarHumor(rt,0.2);
-    if(v.energia<=0 && !estaDesmaiado(rt)) desmaiar(rt);
+    const emPausa = rt.state==='sitting' && !rt.currentTask;
+    v.fome=Math.min(100,v.fome + (dtMin*(trabalhando?0.11:0.035)));
+    v.sede=Math.min(100,v.sede + (dtMin*(trabalhando?0.15:0.05)));
+    v.energia=Math.max(0,v.energia - (dtMin*(trabalhando?0.22:0.055)));
+    if(emPausa && v.energia<70) v.energia=Math.min(100,v.energia+dtMin*0.04);
+    if(v.fome>LIMITE.fome) ajustarHumor(rt,-dtMin*0.15,'fome');
+    if(v.sede>LIMITE.sede) ajustarHumor(rt,-dtMin*0.18,'sede');
+    if(v.energia<LIMITE.energia) ajustarHumor(rt,-dtMin*0.25,'cansaço');
+    else if(v.humor<60) ajustarHumor(rt,dtMin*0.04);
+    /* Desmaio é último recurso: energia zerada por vários minutos, não uma
+       consequência de cinco minutos de animação. */
+    if(v.energia<=0){
+      rt.energiaZeradaDesde=rt.energiaZeradaDesde||agora;
+      if(agora-rt.energiaZeradaDesde>=10*60000) desmaiar(rt);
+    }else rt.energiaZeradaDesde=0;
   }
   renderAgentCards();
 }
 
 async function desmaiar(rt){
-  rt.desmaiadoAte=Date.now()+45000;
+  if(estaDesmaiado(rt)) return;
+  rt.desmaiadoAte=Date.now()+5*60000;
   rt.forced=true; rt.state='acting'; rt.icon='💫'; rt.thinking=false; rt.currentTask=null;
-  addLog(`${rt.name} DESMAIOU de exaustão. Vai ficar fora por um tempo.`,'pend',rt.id);
-  lembrar(rt,'Desmaiei de cansaço no meio do expediente.');
+  addLog(`${rt.name} teve um mal-estar por exaustão e ficará afastado por 5 minutos.`,'pend',rt.id);
+  lembrar(rt,'Tive um mal-estar por exaustão.');
   const colega=runtime.find(r=>r.id!==rt.id && !estaDesmaiado(r) && !r.forced);
   if(colega){
     colega.forced=true;
-    await moveTo(colega, {x:rt.pos.x-34,y:rt.pos.y});
+    await moveTo(colega,{x:rt.pos.x-34,y:rt.pos.y});
     colega.state='talking'; colega.bubbleText='Você está bem?';
-    addLog(`${colega.name} largou o que estava fazendo para socorrer ${rt.name}.`,'info',colega.id);
-    mudarAfinidade(rt, colega.id, 18); mudarAfinidade(colega, rt.id, 8);
-    lembrar(rt, `${colega.name} me socorreu quando desmaiei.`);
-    await sleep(2500); colega.bubbleText=null; colega.state='sitting'; colega.forced=false;
+    addLog(`${colega.name} interrompeu o trabalho para verificar ${rt.name}.`,'info',colega.id);
+    await sleep(1800); colega.bubbleText=null; colega.state='sitting'; colega.forced=false;
   }
-  await sleep(Math.max(0, rt.desmaiadoAte-Date.now()));
-  rt.vitais.energia=40; rt.vitais.fome=Math.min(rt.vitais.fome,60); rt.vitais.humor=Math.max(rt.vitais.humor,35);
-  rt.icon=null; rt.state='sitting'; rt.forced=false;
-  addLog(`${rt.name} voltou a si e retomou o expediente.`,'ok',rt.id);
+  await sleep(Math.max(0,rt.desmaiadoAte-Date.now()));
+  rt.vitais.energia=55; rt.vitais.fome=Math.min(rt.vitais.fome,60); rt.vitais.sede=Math.min(rt.vitais.sede,60); rt.vitais.humor=Math.max(rt.vitais.humor,40);
+  rt.icon=null; rt.state='sitting'; rt.forced=false; rt.energiaZeradaDesde=0;
+  addLog(`${rt.name} voltou ao trabalho após o afastamento.`,'ok',rt.id);
   persistirVitais(rt);
 }
 
@@ -1965,7 +1974,7 @@ const CONVERSAS_RUINS=['Você mexeu no meu arquivo.','Assim não dá pra trabalh
 
 async function interacaoSocial(rt,token){
   while(token===autonomyToken){
-    await sleep(20000+Math.floor(Math.random()*25000));
+    await sleep(90000+Math.floor(Math.random()*90000));
     if(token!==autonomyToken||rt.forced||estaDesmaiado(rt)) continue;
     const outros=runtime.filter(r=>r.id!==rt.id && !r.forced && !estaDesmaiado(r));
     if(!outros.length) continue;
@@ -2095,15 +2104,14 @@ async function fazerPausa(rt,tipo){
 }
 
 async function autonomiaAmbiente(rt,token){
-  const atividades=[{state:'thinking',icon:'💭',ms:2200},{state:'working',icon:'📝',ms:3200},{state:'working',icon:'💻',ms:2800},{state:'sitting',icon:null,ms:4200}];
-  let i=Math.floor(Math.random()*atividades.length);
+  /* Sem tarefa real, o funcionário não finge trabalhar. Pode ficar sentado,
+     pensar brevemente ou ir a uma necessidade física, mas nunca gera trabalho
+     ou resultado econômico sozinho. */
   while(token===autonomyToken){
-    if(rt.forced){await sleep(700);continue;}
-    const a=atividades[i++%atividades.length]; rt.state=a.state==='working'?'acting':a.state; rt.icon=a.icon;
-    if(a.state==='thinking') rt.thinking=true; await sleep(a.ms); rt.thinking=false; rt.icon=null;
-    if(token!==autonomyToken)return;
-    if(!rt.forced&&Math.random()<.45){const spots=[FURNITURE.think.pos,FURNITURE.drink.pos];if(Math.random()<.22)await moveTo(rt,spots[Math.floor(Math.random()*spots.length)]);if(!rt.forced)await moveTo(rt,seatOf(rt));}
-    rt.state='sitting'; await sleep(900+Math.floor(Math.random()*1800));
+    if(rt.forced || estaDesmaiado(rt)){ await sleep(1200); continue; }
+    if(rt.currentTask || rt.thinking || rt.state==='acting'){ await sleep(1200); continue; }
+    if(rt.state!=='sitting'){ await moveTo(rt,seatOf(rt)); rt.state='sitting'; }
+    await sleep(8000);
   }
 }
 
@@ -2112,7 +2120,7 @@ async function autonomiaAmbiente(rt,token){
    chamada de IA por entrega, em vez de cinco. */
 async function autonomiaDecisao(rt,token){
   while(token===autonomyToken){
-    await sleep(2500+Math.floor(Math.random()*3500));
+    await sleep(12000+Math.floor(Math.random()*8000));
     if(motorPausado) continue;
     if(token!==autonomyToken||rt.forced||estaDesmaiado(rt)) continue;
     const emp=empresaAtual(); if(!emp) continue;
@@ -2231,7 +2239,7 @@ CORRECAO: <o que falta, ate 14 palavras, ou vazio>`;
 
 async function autonomiaGerente(manager,token){
   while(token===autonomyToken){
-    await sleep(9000+Math.floor(Math.random()*6000));
+    await sleep(60000+Math.floor(Math.random()*30000));
     if(motorPausado) continue;
     if(token!==autonomyToken||manager.forced) continue;
     if(chamadasNaFila>0) continue;
@@ -3266,7 +3274,7 @@ function normalizarNegocio(emp){
       visitas:Number(old.visitas)||0, seguidores:Number(old.seguidores)||0, leads:0,
       preco:p.preco, custoUnitario:p.custo, capacidadeDia:p.capacidadeDia,
       exposicao:0, reputacao:50, qualidade:0, conversao:0, producao:0,
-      ultimoPedidoEm:0, ultimoCustoEm:Date.now(), historico:[]
+      ultimoPedidoEm:0, ultimoCustoEm:Date.now(), gastoMarketing:0, historico:[]
     };
   }
   const n=emp.negocio;
@@ -3289,6 +3297,7 @@ function normalizarNegocio(emp){
   if(!Number.isFinite(n.visitas)) n.visitas=Number(old.visitas)||0;
   if(!Number.isFinite(n.seguidores)) n.seguidores=Number(old.seguidores)||0;
   if(!Number.isFinite(n.leads)) n.leads=0;
+  if(!Number.isFinite(n.gastoMarketing)) n.gastoMarketing=0;
   return n;
 }
 function classeNegocio(f){ return normalizarClasseArquivo(f?.escopo==='produto' ? 'produto-final' : (f?.classe || f?.classificacao || 'esboco')); }
@@ -3311,40 +3320,46 @@ function aplicarModeloMercado(emp){
   let dt=Math.max(0,Math.min(300000,agora-(n.ultimaApuracao||agora)));
   if(dt<1000) return false;
   n.ultimaApuracao=agora;
-  const horas=dt/1000/60; // 1 min real = 1 h de negócio
+  const horas=dt/1000/60; // 1 segundo real = 1 minuto de negócio
   const minutosAntes=n.minutosSimulados||0;
   n.minutosSimulados=minutosAntes+horas*60;
   const pres=analisarPresencaMercado(emp);
   n.qualidade=pres.qualidade;
-  if(!pres.oferta){
-    sincronizarMetricasLegadas(emp); return false;
-  }
-  // Exposição nasce do que a empresa realmente publicou. Sem oferta, não há tráfego.
-  const alcanceHora = (0.25 + pres.marketing*1.25) * (0.65 + n.reputacao/200);
+  if(!pres.oferta){ sincronizarMetricasLegadas(emp); return false; }
+
+  /* Funil comercial: tráfego -> lead -> pedido. A demanda nova de cada
+     intervalo é calculada apenas sobre as visitas novas, nunca sobre o estoque
+     inteiro de leads. Isso evita explosões artificiais de vendas. */
+  const reputacaoFator=0.75+(n.reputacao/200);
+  const alcanceHora=(0.35 + pres.marketing*0.9)*reputacaoFator;
   const visitasNovas=Math.floor(horas*alcanceHora);
   if(visitasNovas>0) n.visitas+=visitasNovas;
   n.exposicao += horas*alcanceHora;
   const qualidadeFator=n.qualidade/100;
-  const conversaoBase=pres.marketing>=3?0.035:0.018;
-  n.conversao=Math.max(0.005,Math.min(0.12,conversaoBase*(0.55+qualidadeFator)));
-  const novosLeads=Math.floor(visitasNovas*n.conversao);
-  n.leads+=novosLeads;
+  const conversaoLead=Math.max(0.005,Math.min(0.08,(pres.marketing>=3?0.025:0.012)*(0.65+qualidadeFator)));
+  const leadsNovos=Math.floor(visitasNovas*conversaoLead);
+  n.leads+=leadsNovos;
+  n.conversao=visitasNovas>0 ? (leadsNovos/visitasNovas) : n.conversao;
+
+  /* Parte dos leads vira pedido no mesmo período; a taxa é explícita e
+     conservadora. O restante permanece como pipeline para períodos seguintes. */
+  const taxaFechamento=Math.max(0.05,Math.min(0.35,0.10+qualidadeFator*0.12+(pres.marketing>=3?0.03:0)));
+  const pedidosDemanda=Math.floor(leadsNovos*taxaFechamento);
   const capacidadeHora=Math.max(0,n.capacidadeDia/24);
-  const pedidosPossiveis=Math.floor(horas*capacidadeHora);
-  const pedidosPorDemanda=Math.floor(n.leads*0.25)-n.pedidos;
-  const pedidosNovos=Math.max(0,Math.min(pedidosPossiveis,pedidosPorDemanda));
+  const pedidosCapacidade=Math.floor(horas*capacidadeHora);
+  const pedidosNovos=Math.max(0,Math.min(pedidosCapacidade,pedidosDemanda));
   if(pedidosNovos>0){
     n.pedidos+=pedidosNovos; n.clientes+=pedidosNovos;
     const receita=pedidosNovos*n.preco;
-    const custo=pedidosNovos*n.custoUnitario;
-    n.receita+=receita; n.custos+=custo; n.caixa+=receita-custo;
-    n.producao+=pedidosNovos;
-    n.reputacao=Math.min(90,n.reputacao+pedidosNovos*0.15);
-    n.ultimoPedidoEm=agora;
-    addLog(`Mercado: ${pedidosNovos} pedido(s) realizado(s) a partir de ${visitasNovas} nova(s) visita(s).`, 'ok');
+    const custoDireto=pedidosNovos*n.custoUnitario;
+    n.receita+=receita; n.custos+=custoDireto; n.caixa+=receita-custoDireto;
+    n.producao+=pedidosNovos; n.ultimoPedidoEm=agora;
+    n.reputacao=Math.min(90,n.reputacao+pedidosNovos*0.08);
+    addLog(`Mercado: ${pedidosNovos} pedido(s) convertido(s) de ${leadsNovos} lead(s) novo(s).`,'ok');
   }
-  // Custos de operação só correm no expediente (08:00–18:00 do tempo simulado).
-  // Fora dele a empresa pode receber pedidos, mas não queima folha como se todos estivessem trabalhando.
+
+  /* Folha + custos fixos: reconhecidos somente durante o expediente simulado.
+     Isso é despesa operacional, separada do custo direto da venda. */
   const empHoras=(emp.equipe||[]).reduce((sum,f)=>sum+(ECONOMIA_V1.salarioHora[f.cargo]||12),0);
   let horasExpediente=0;
   const passos=Math.max(1,Math.ceil(horas*60));
@@ -3356,7 +3371,7 @@ function aplicarModeloMercado(emp){
   const custoOperacional=(ECONOMIA_V1.custoFixoHora+empHoras)*horasExpediente;
   if(custoOperacional>0){ n.custos+=custoOperacional; n.caixa-=custoOperacional; }
   sincronizarMetricasLegadas(emp);
-  return visitasNovas>0 || pedidosNovos>0 || custoOperacional>0;
+  return visitasNovas>0 || leadsNovos>0 || pedidosNovos>0 || custoOperacional>0;
 }
 function sincronizarMetricasLegadas(emp){
   const n=normalizarNegocio(emp); if(!n) return;
@@ -3377,21 +3392,36 @@ function registrarImpactoMercado(emp, arquivo){
 function fmtBRL(v){ return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:2}); }
 function renderEconomia(emp){
   const n=normalizarNegocio(emp); if(!n) return '';
-  const lucro=n.receita-n.custos;
-  const margem=n.receita>0?(lucro/n.receita*100):0;
+  const lucroBruto=n.receita-(n.pedidos*n.custoUnitario);
+  const opex=Math.max(0,n.custos-(n.pedidos*n.custoUnitario));
+  const lucroOperacional=n.receita-n.custos;
+  const margemBruta=n.receita>0?(lucroBruto/n.receita*100):0;
+  const margemOperacional=n.receita>0?(lucroOperacional/n.receita*100):0;
+  const ticket=n.pedidos>0?n.receita/n.pedidos:0;
+  const cac=n.clientes>0?(n.gastoMarketing||0)/n.clientes:0;
+  const burnMensal=Math.max(0,opex)*730/Math.max(1,n.minutosSimulados/60);
+  const runway=burnMensal>0?n.caixa/burnMensal:Infinity;
   return `<div class="economia-card">
-    <div class="economia-title">Modelo econômico causal <span>sem sorteio</span></div>
+    <div class="economia-title">Indicadores financeiros e comerciais</div>
     <div class="economia-grid">
       <div><b>Caixa</b><strong>${fmtBRL(n.caixa)}</strong></div>
       <div><b>Receita</b><strong>${fmtBRL(n.receita)}</strong></div>
-      <div><b>Custos</b><strong>${fmtBRL(n.custos)}</strong></div>
-      <div><b>Lucro</b><strong>${fmtBRL(lucro)}</strong></div>
+      <div><b>CMV / custo direto</b><strong>${fmtBRL(n.pedidos*n.custoUnitario)}</strong></div>
+      <div><b>Lucro bruto</b><strong>${fmtBRL(lucroBruto)}</strong></div>
+      <div><b>Despesas operacionais</b><strong>${fmtBRL(opex)}</strong></div>
+      <div><b>Lucro operacional</b><strong>${fmtBRL(lucroOperacional)}</strong></div>
+      <div><b>Margem bruta</b><strong>${margemBruta.toFixed(1)}%</strong></div>
+      <div><b>Margem operacional</b><strong>${margemOperacional.toFixed(1)}%</strong></div>
+      <div><b>Ticket médio</b><strong>${fmtBRL(ticket)}</strong></div>
+      <div><b>Visitas → leads</b><strong>${n.visitas?((n.leads/n.visitas)*100).toFixed(2):'0.00'}%</strong></div>
+      <div><b>Leads → pedidos</b><strong>${n.leads?((n.pedidos/n.leads)*100).toFixed(2):'0.00'}%</strong></div>
+      <div><b>Conversão visita → pedido</b><strong>${n.visitas?((n.pedidos/n.visitas)*100).toFixed(2):'0.00'}%</strong></div>
+      <div><b>CAC</b><strong>${n.clientes?fmtBRL(cac):'—'}</strong></div>
+      <div><b>Burn mensal</b><strong>${fmtBRL(burnMensal)}</strong></div>
+      <div><b>Runway</b><strong>${Number.isFinite(runway)?runway.toFixed(1)+' meses':'∞'}</strong></div>
       <div><b>Clientes</b><strong>${Math.floor(n.clientes)}</strong></div>
-      <div><b>Leads</b><strong>${Math.floor(n.leads)}</strong></div>
-      <div><b>Conversão</b><strong>${(n.conversao*100).toFixed(2)}%</strong></div>
-      <div><b>Margem</b><strong>${margem.toFixed(1)}%</strong></div>
     </div>
-    <div class="stage-note">Hipóteses atuais: preço ${fmtBRL(n.preco)}, custo unitário ${fmtBRL(n.custoUnitario)}, capacidade ${n.capacidadeDia}/dia, capital inicial ${fmtBRL(n.capitalInicial)}. A IA não escolhe números de vendas.</div>
+    <div class="stage-note">São métricas empresariais calculadas a partir do funil e do caixa do simulador. CAC só aparece quando houver gasto de marketing registrado. Hipóteses: preço ${fmtBRL(n.preco)}, custo direto ${fmtBRL(n.custoUnitario)}, capacidade ${n.capacidadeDia}/dia.</div>
   </div>`;
 }
 
@@ -3399,9 +3429,13 @@ function renderMetrics(){
   const emp = empresaAtual(); if(!emp) return;
   normalizarNegocio(emp); aplicarModeloMercado(emp); const n=emp.negocio; const m=emp.metricas;
   const items = [
+    {v:fmtBRL(n.receita||0), l:'receita acumulada'},
+    {v:fmtBRL(n.caixa||0), l:'caixa disponível'},
+    {v:Math.floor(n.clientes||0), l:'clientes conquistados'},
+    {v:Math.floor(n.leads||0), l:'leads no funil'},
     {v:Math.floor(n.pedidos||0), l:'pedidos realizados'},
-    {v:Math.floor(n.visitas||0), l:'visitas no site'},
-    {v:Math.floor(n.leads||0), l:'leads gerados'},
+    {v:((n.visitas||0)>0?((n.pedidos/n.visitas)*100):0).toFixed(2)+'%', l:'conversão visitante → pedido'},
+    {v:fmtBRL(n.receita>0?n.receita/n.pedidos:0), l:'ticket médio'},
     {v:Math.floor(m.tarefas||0), l:'tarefas concluídas'},
   ];
   document.getElementById('metricsGrid').innerHTML = items.map(i =>
