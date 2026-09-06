@@ -206,3 +206,6 @@ A versão estática inclui `agency.js` no Service Worker e usa o cache `estudio-
 - Cliques no cenário identificam pessoas e objetos.
 - Modelo econômico: agentes usam o modelo de decisão econômico; o maestro estratégico usa o modelo robusto configurado.
 - A prioridade continua sendo baixo custo, baixa frequência de chamadas e nenhum trabalho fictício quando a IA está indisponível.
+
+## v41 — sem qualidade artificial
+A nota numérica de qualidade foi removida do fluxo de produção, publicação e mercado. O sistema agora usa validação objetiva de entrega (completude estrutural, campos essenciais e ausência de placeholders). Receita entra somente por vendas no mercado simulado; publicar um arquivo não gera prêmio automático. O produto principal da editora é uma obra vendável completa, enquanto site, catálogo e anúncios são derivados dela.

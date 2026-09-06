@@ -44,7 +44,7 @@
       texto: [
         `EMPRESA: ${e.nome} | ramo: ${e.ramo} | missão: ${e.missao} | público: ${e.publico} | tom: ${e.tom}`,
         `PROJETO: ${pr ? pr.nome : 'nenhum'} | objetivo: ${pr ? pr.objetivo : e.missao} | status: ${pr ? pr.status : 'sem projeto'}`,
-        `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}, q${a.qualidade||0}]`).join('; ') : 'nenhum'}`,
+        `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}]`).join('; ') : 'nenhum'}`,
         `TRABALHO ABERTO: ${tarefas.length ? tarefas.map(t => `${t.id}:${t.titulo}[${t.status}, responsável=${t.para||'livre'}, base=${t.baseArquivoId||'nenhuma'}]`).join('; ') : 'nenhum'}`,
         `CAPACIDADES DE PRODUÇÃO: ${(() => { try { const n = S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99; return (S.factory.disponiveis(n)||[]).map(k => `${k.id}:${k.nome}[${k.especialidade}]`).join('; ') || 'nenhuma'; } catch (_) { return 'indisponíveis'; } })()}`,
         `EQUIPE: ${equipeContexto(e)}`,
@@ -63,6 +63,11 @@
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
     const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','reorganizar','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
+    // A gerente é um papel executivo: uma decisão dela precisa mover a operação.
+    // Se o modelo devolver estudo/planejamento/espera sem uma dependência real,
+    // convertemos a intenção em criação de trabalho; a etapa seguinte escolhe o
+    // kit e o responsável com base no estado real.
+    if (ctx && ctx.executivo && ['estudar','planejar','esperar'].includes(acao)) acao = 'criar_tarefa';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
     const para = String(c.para || '').trim();
@@ -77,6 +82,7 @@
       objeto: max(c.objeto, 40),
       especialidade: max(c.especialidade, 40),
       projetoId: ctx.projeto ? ctx.projeto.id : '',
+      executivo: !!(ctx && ctx.executivo),
       em: agora()
     };
   }
@@ -89,6 +95,7 @@
     if (!S.ai.disponivel()) return null;
 
     const ctx = contexto(e, p);
+    ctx.executivo = p.papel === 'gerente';
     p._agencia.ultima = agora();
     p.ref.foco = 'observando a empresa e deliberando';
     p.ref.pensamento = 'Estou olhando o objetivo, o trabalho existente e o que já foi construído antes de escolher uma ação.';
@@ -98,11 +105,11 @@
 
 ${ctx.texto}
 
-Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados acima e por suas capacidades. Você pode escolher uma ação diferente a cada ciclo. Não há ordem obrigatória de produção. Não crie uma tarefa só para manter o escritório ocupado.
+Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados acima e por suas capacidades. Você pode escolher uma ação diferente a cada ciclo. Não há ordem obrigatória de produção. Não crie uma tarefa só para manter o escritório ocupado. Para a gerente, porém, uma decisão operacional deve sempre terminar em uma ação executável.
 
 Pense profundamente antes de decidir. Compare o valor das alternativas, observe dependências, procure oportunidades de melhorar o que já existe e considere se outra pessoa precisa ser envolvida. O resultado persistido deve ser apenas a decisão operacional, nunca seu raciocínio privado passo a passo.
 
-Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, construir, esperar.
+Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, construir, reorganizar, esperar.
 - executar_tarefa: escolha uma tarefa aberta que realmente combine com você.
 - criar_tarefa: crie trabalho concreto que seja consequência do estado atual, preferindo evolução ou integração de algo existente.
 - revisar: examine uma entrega ou problema existente; só use se houver algo concreto para revisar.
@@ -114,9 +121,10 @@ Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, 
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, escolha obrigatoriamente uma capacidade de produção listada em CAPACIDADES DE PRODUÇÃO e use o id exato dela. O kit é uma ferramenta, não um roteiro. Prefira evoluir um artefato existente quando isso trouxer valor.
-REGRA DE FLUXO: se existe projeto ativo e TRABALHO ABERTO está 'nenhum', a empresa precisa avançar: escolha criar_tarefa e defina uma entrega concreta. Não escolha estudar, revisar ou esperar apenas porque o contexto ainda é pequeno.
+REGRA DE FLUXO: se existe projeto ativo e TRABALHO ABERTO está 'nenhum', a empresa precisa avançar: escolha criar_tarefa e defina uma entrega concreta. Se já existe uma tarefa aberta, prefira executar_tarefa. Não escolha estudar, revisar ou esperar apenas porque o contexto ainda é pequeno.
 REGRA DE CONCRETUDE: revisar só é válido quando BASE aponta para um artefato real; estudar só é válido quando existe uma lacuna de conhecimento concreta que bloqueia uma ação posterior; esperar só é válido quando há uma dependência real ou quando outra pessoa precisa agir primeiro.
 Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
+${p.papel === 'gerente' ? `REGRA EXECUTIVA: você é a gerente. Seu ciclo só termina quando uma consequência operacional é encaminhada. Se houver uma tarefa aberta, execute/delegue. Se não houver, crie uma tarefa produtiva. Não responda apenas "esperar", "estudar" ou "planejar" sem transformar isso em trabalho. Se não existir produto final no projeto, priorize o produto principal (kit obra) antes de materiais de divulgação.` : ''}
 
 Retorne SOMENTE:
 ACAO: <uma das ações>
@@ -170,7 +178,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
     const sistema = `Você é o maestro estratégico da empresa ${e.nome}. Missão: ${e.missao}. Público: ${e.publico}. Ramo: ${e.ramo}.
 Projeto: ${pr?pr.nome:'nenhum'} — ${pr?pr.objetivo:e.missao}
 Tarefas abertas: ${abertas.map(t=>t.titulo).join(' | ')||'nenhuma'}
-Produtos finais: ${produtos.map(a=>`${a.nome} q${a.qualidade}`).join(' | ')||'nenhum'}
+Produtos finais: ${produtos.map(a=>`${a.nome}`).join(' | ')||'nenhum'}
 Equipe: ${pessoas}
 Caixa: ${(e.negocio&&e.negocio.caixa!=null)?e.negocio.caixa:'indisponível'}.
 

@@ -323,19 +323,19 @@ ${texto || '## Introdução\n\nConteúdo em elaboração.'}
       vende: 'É o produto de verdade. Tudo o mais (site, catálogo, anúncio) existe para apresentá-lo.',
       tokens: 2600,
       instrucao(ctx) {
-        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Produza A OBRA PRINCIPAL deste negócio, em português do Brasil.
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Produza O PRODUTO PRINCIPAL VENDÁVEL deste negócio, em português do Brasil.
 Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Missão: ${ctx.missao}. Tom: ${ctx.tom}.
 Pedido: ${ctx.briefing}
 
 Isto NÃO é material de divulgação. Não escreva página de vendas, anúncio, catálogo, e-mail ou plano. Escreva a obra em si, aquilo que o cliente consome ou compra.
-Se o negócio escreve livros, entregue capítulo ou conto completo. Se ensina, entregue a aula ou o módulo. Se faz software, entregue a documentação funcional. Se presta serviço, entregue o material que o cliente recebe.
+Se o negócio é uma editora, entregue uma obra curta completa e vendável, não apenas um capítulo isolado. Se ensina, entregue um módulo/aula completo. Se faz software, entregue uma especificação funcional utilizável. Se presta serviço, entregue o material final que o cliente recebe. A entrega precisa ter valor por si só e poder ser publicada sem prometer trabalho futuro.
 
 Comece com estas linhas:
 TITULO: <título da obra, até 12 palavras>
 FORMATO: <o que é: capítulo, conto, aula, guia, manual...>
 SINOPSE: <até 30 palavras>
 ---
-Depois escreva a obra completa em Markdown, com começo, meio e fim. Entre 700 e 1200 palavras. Conteúdo real e acabado, não esboço, não índice, não promessa do que será feito.`;
+Depois escreva a obra completa em Markdown, com começo, meio e fim. Entre 1200 e 1800 palavras. Conteúdo real e acabado, não esboço, não índice, não promessa do que será feito.`;
       },
       obrigatorios: ['titulo', 'formato'],
       montar(c, ctx, bruto) {
@@ -666,40 +666,29 @@ Sem numeração, sem markdown.`;
   const disponiveis = nivel => KITS.filter(k => k.nivel <= (nivel || 1));
 
   /* ============================================================
-     Aferição de qualidade — checagem estrutural, não opinião da IA.
+     Validação real — sem nota artificial.
+     Um produto não fica melhor porque recebeu 93/100. O sistema só verifica
+     evidências objetivas: campos essenciais, conteúdo suficiente, ausência de
+     placeholders e existência de uma entrega utilizável.
      ============================================================ */
-  function aferir(kit, campos, arquivos, agente) {
-    let nota = 34;
+  function validar(kit, campos, arquivos) {
     const obrig = kit.obrigatorios || [];
-    if (obrig.length) {
-      const presentes = obrig.filter(k => String(campos[k] || '').trim().length > 2).length;
-      nota += (presentes / obrig.length) * 26;
-    } else nota += 20;
-
-    const total = arquivos.reduce((s, a) => s + a.conteudo.length, 0);
-    nota += clamp(total / 220, 0, 16);
-
-    const suspeito = obrig.some(k => temPlaceholder(campos[k]));
-    if (suspeito) nota -= 16;
-
-    if (typeof kit.checarExtra === 'function') {
-      try { nota += kit.checarExtra(campos, arquivos) || 0; } catch (e) {}
-    } else nota += 8;
-
-    if (agente) {
-      if (agente.especialidade === kit.especialidade) nota += 8;
-      else if (agente.papel === 'gerente') nota += 2;
-      else nota -= 4;
-      nota += ((agente.humor || 60) - 55) / 8;
-      if ((agente.energia || 80) < 25) nota -= 8;
-    }
-    return Math.round(clamp(nota, 8, 100));
+    const faltantes = obrig.filter(k => String(campos[k] || '').trim().length <= 2);
+    const placeholders = obrig.filter(k => temPlaceholder(campos[k]));
+    const conteudos = (arquivos || []).map(a => String(a.conteudo || '').trim());
+    const vazios = conteudos.filter(x => x.length < 80).length;
+    const palavras = conteudos.reduce((n, x) => n + x.split(/\s+/).filter(Boolean).length, 0);
+    const problemas = [];
+    if (faltantes.length) problemas.push(`faltam campos essenciais: ${faltantes.join(', ')}`);
+    if (placeholders.length) problemas.push(`há placeholders em: ${placeholders.join(', ')}`);
+    if (!arquivos || !arquivos.length) problemas.push('nenhum arquivo foi produzido');
+    if (vazios) problemas.push(`${vazios} arquivo(s) têm conteúdo insuficiente`);
+    const pronto = !problemas.length;
+    return { pronto, faltantes, placeholders, palavras, problemas };
   }
 
   /* ============================================================
-     Produção — uma chamada de IA por entrega. Se a IA não estiver
-     disponível, o gabarito ainda produz um arquivo real e utilizável,
-     só que genérico; ele nasce como esboço.
+     Produção — uma chamada de IA por entrega. Sem IA não há produção.
      ============================================================ */
   async function produzir(op) {
     const e = S.state.atual();
@@ -715,7 +704,7 @@ Sem numeração, sem markdown.`;
       projeto: contextoProjeto(e, op.projectId)
     };
 
-    let campos = null, bruto = '', viaIA = false;
+    let campos = null, bruto = '';
     if (!S.ai.disponivel()) return null;
     if (S.ai.pronta()) {
       try {
@@ -727,29 +716,25 @@ Sem numeração, sem markdown.`;
         });
         campos = S.ai.campos(r.texto);
         bruto = S.ai.corpo(r.texto);
-        viaIA = Object.keys(campos).length > 0 || bruto.length > 40;
-      } catch (err) { /* cai no gabarito local */ }
+      } catch (err) { return null; }
     }
-    if (!campos || !Object.keys(campos).length) campos = camposDeContingencia(kit, ctx);
+    if (!campos || !Object.keys(campos).length) return null;
 
     let arquivos;
     try { arquivos = kit.montar(campos, ctx, bruto) || []; }
     catch (err) { console.error('Falha ao montar', kit.id, err); return null; }
     if (!arquivos.length) return null;
 
-    /* Sem IA o arquivo é real, mas genérico: nasce como esboço e com teto
-       de qualidade para deixar claro que não passou pela produção da IA. */
-    const bruta = aferir(kit, campos, arquivos, agente);
-    const qualidade = viaIA ? bruta : Math.min(36, bruta);
-    const classe = !viaIA ? 'esboco' : qualidade >= 82 ? 'candidato' : qualidade >= 50 ? 'prototipo' : 'esboco';
-    return { arquivos, qualidade, classe, viaIA, kit: kit.id, campos };
+    const validacao = validar(kit, campos, arquivos);
+    const classe = validacao.pronto ? 'candidato' : 'prototipo';
+    return { arquivos, classe, viaIA: true, kit: kit.id, campos, validacao };
   }
 
   function contextoProjeto(e, projectId) {
     const projeto = (e.projetos || []).find(p => p.id === projectId) || (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0];
     if (!projeto) return { nome: 'Projeto principal', objetivo: e.missao, arquivos: [], tarefas: [] };
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).slice(0, 10)
-      .map(a => ({ id: a.id, nome: a.nome, tipo: a.tipo, classe: a.classe, qualidade: a.qualidade, conteudo: String(a.conteudo).slice(0, 1800) }));
+      .map(a => ({ id: a.id, nome: a.nome, tipo: a.tipo, classe: a.classe, validacao: a.validacao, conteudo: String(a.conteudo).slice(0, 1800) }));
     const tarefas = (projeto.tarefaIds || []).map(id => e.tarefas.find(t => t.id === id)).filter(Boolean).slice(0, 10)
       .map(t => ({ id: t.id, titulo: t.titulo, status: t.status, handoff: t.handoff || '' }));
     return { id: projeto.id, nome: projeto.nome, objetivo: projeto.objetivo, arquivos, tarefas };
@@ -758,7 +743,7 @@ Sem numeração, sem markdown.`;
   function contextoProjetoPrompt(projeto) {
     if (!projeto) return '';
     const arquivos = (projeto.arquivos || []).slice(0, 5).map(a =>
-      `ARQUIVO ${a.nome} [${a.classe}, q${a.qualidade}]\n${String(a.conteudo || '').slice(0, 700)}`
+      `ARQUIVO ${a.nome} [${a.classe}]\n${String(a.conteudo || '').slice(0, 700)}`
     ).join('\n');
     const tarefas = (projeto.tarefas || []).slice(0, 5).map(t =>
       `${t.status.toUpperCase()}: ${t.titulo}${t.handoff ? ` | ${t.handoff}` : ''}`
@@ -781,11 +766,11 @@ Sem numeração, sem markdown.`;
       return `${f.nome} | ${f.cargo} | especialidade=${f.especialidade} | energia=${Math.round(f.energia || 0)} | foco=${f.foco || 'disponível'} | pensamento=${f.pensamento || '—'} | personalidade=${(p.tracos||[]).join(', ')} | comunicação=${p.comunicacao||'direta'} | prioridades=${p.prioridades||'qualidade e utilidade'} | colaboração=${p.colaboracao||'handoff claro'}`;
     }).join('\n');
     const arquivos = ((projeto && projeto.arquivoIds) || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
-      .slice(0, 9).map(a => `### ${a.nome} | ${a.classe} | v${a.versao || 1} | qualidade=${a.qualidade || 0}\n${String(a.conteudo || '').slice(0, 1250)}`).join('\n\n') || 'Nenhum artefato anterior.';
+      .slice(0, 9).map(a => `### ${a.nome} | ${a.classe} | v${a.versao || 1} | ${a.validacao?.pronto ? 'estrutura completa' : 'em trabalho'}\n${String(a.conteudo || '').slice(0, 1250)}`).join('\n\n') || 'Nenhum artefato anterior.';
     const tarefas = ((projeto && projeto.tarefaIds) || []).map(id => e.tarefas.find(t => t.id === id)).filter(Boolean)
       .slice(0, 12).map(t => `${t.status.toUpperCase()} | ${t.titulo} | responsável=${t.para || 'não atribuído'} | handoff=${t.handoff || 'nenhum'}`).join('\n') || 'Nenhuma etapa registrada.';
     const produtos = (e.arquivos || []).filter(a => a.classe === 'produto').slice(0, 8)
-      .map(a => `${a.nome} v${a.versao || 1} | ${a.tipo} | projeto=${a.projectId || 'principal'} | qualidade=${a.qualidade || 0}`).join('\n') || 'Nenhum produto publicado.';
+      .map(a => `${a.nome} v${a.versao || 1} | ${a.tipo} | projeto=${a.projectId || 'principal'} | ${a.validacao?.pronto ? 'estrutura completa' : 'em trabalho'}`).join('\n') || 'Nenhum produto publicado.';
     const eventos = (e.log || []).slice(-8).map(l => `${new Date(l.t || Date.now()).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})} — ${l.texto}`).join('\n') || 'Nenhum evento recente.';
     const objetivo = projetoReal ? projetoReal.objetivo : e.missao;
     const briefing = String(op.briefing || '').slice(0, 900);

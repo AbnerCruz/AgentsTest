@@ -93,7 +93,7 @@
     const e=S.state.atual(); if(!e) return '';
     const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
     const tarefas=e.tarefas.filter(t=>t.status!=='feita').slice(0,6).map(t=>`${t.titulo} | ${t.status} | responsável=${(e.equipe.find(x=>x.id===t.para)||{}).nome||'livre'}`).join('\n')||'sem tarefas abertas';
-    const arquivos=e.arquivos.slice(0,8).map(x=>`${x.nome} | ${x.classe} | q${x.qualidade}`).join('\n')||'sem entregas recentes';
+    const arquivos=e.arquivos.slice(0,8).map(x=>`${x.nome} | ${x.classe} | ${x.validacao?.pronto ? 'estrutura completa' : 'em trabalho'}`).join('\n')||'sem entregas recentes';
     return `Projeto: ${projeto?projeto.nome:'principal'} | objetivo=${projeto?projeto.objetivo:e.missao}\nTarefas abertas:\n${tarefas}\nEntregas recentes:\n${arquivos}\n\n${perfilTexto(a)}\n\n${perfilTexto(b)}`.slice(0,7000);
   }
 
@@ -223,7 +223,7 @@
       const arq = {
         id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
         classe: meta.classe || 'esboco', kit: meta.kit || 'legado', projectId: meta.projectId || (e.projetos[0] && e.projetos[0].id),
-        qualidade: meta.qualidade == null ? 50 : meta.qualidade,
+        validacao: meta.validacao || null,
         // A linhagem identifica O QUE é o produto, não como o arquivo foi
         // batizado. Derivar do nome permitia que a IA escolhesse outro nome
         // e o mesmo produto fosse publicado de novo como v1.
@@ -239,7 +239,7 @@
     if (e.arquivos.length > 90) e.arquivos.length = 90;
     if (p && p.ref) p.ref.entregas = (p.ref.entregas || 0) + 1;
     S.state.registrar(
-      `${p ? p.nome : 'A equipe'} entregou ${salvos.map(a => a.nome).join(', ')} · qualidade ${meta.qualidade}.`,
+      `${p ? p.nome : 'A equipe'} entregou ${salvos.map(a => a.nome).join(', ')}${meta.validacao?.pronto ? ' · entrega estruturalmente completa' : ' · entrega ainda requer trabalho'}.`,
       'ok', p ? p.id : null);
     S.state.ganharXP(8 * salvos.length);
     S.state.gravar();
@@ -264,7 +264,7 @@
     a.editadoEm = Date.now();
     a.quando = S.fmt.dataHora();
     a.versaoEdicao = Number(a.versaoEdicao || 0) + 1;
-    a.qualidade = Math.min(Number(a.qualidade || 50), 69);
+    a.validacao = null;
     if (a.classe === 'candidato') a.classe = 'prototipo';
     a.avaliado = false;
     S.state.registrar(`${a.nome} foi editado em produção e voltou para revisão.`, 'info');
@@ -368,26 +368,9 @@
         }
       }
     }
-    // Economia produtiva: cada produto final gera uma recompensa verificável.
-    // Não é uma venda aleatória; é o valor de conclusão do produto dentro da simulação.
-    const qualidade = clamp(Number(produto.qualidade)||0, 0, 100);
-    const recompensa = Math.round(140 + qualidade * 8.5);
-    const poolComissao = Math.round(recompensa * 0.25);
-    const task = produto.taskId ? e.tarefas.find(t => t.id === produto.taskId) : null;
-    const ids = [];
-    [produto.autor && e.equipe.find(f=>f.nome===produto.autor)?.id, task && task.para, ...(task && task.contributors || [])].forEach(id=>{ if(id && !ids.includes(id)){ const f=e.equipe.find(x=>x.id===id); if(f && f.papel!=='gerente') ids.push(id); }});
-    const contribs = ids.length ? ids : (produto.autor ? [e.equipe.find(f=>f.nome===produto.autor)?.id].filter(Boolean) : []);
-    const cada = contribs.length ? Math.round(poolComissao/contribs.length*100)/100 : 0;
-    e.negocio = S.market.normalizar(e);
-    e.negocio.receitaProdutos = Number(e.negocio.receitaProdutos||0) + recompensa;
-    e.negocio.caixa += recompensa - poolComissao;
-    e.recompensas.unshift({t:Date.now(),produtoId:produto.id,produto:produto.nome,valor:recompensa,qualidade,comissao:poolComissao});
-    if(e.recompensas.length>80)e.recompensas=e.recompensas.slice(0,80);
-    contribs.forEach(id=>{ const f=e.equipe.find(x=>x.id===id); if(!f)return; f.comissaoTotal=Number(f.comissaoTotal||0)+cada; f.comissoes=(f.comissoes||0)+cada; e.comissoes.unshift({t:Date.now(),agente:id,nome:f.nome,produtoId:produto.id,valor:cada}); });
-    e.negocio.historico=e.negocio.historico||[];
-    S.state.registrar(`Produto final ${produto.nome}: +${S.fmt.brl(recompensa)} para a empresa e ${S.fmt.brl(poolComissao)} distribuídos como comissão entre quem contribuiu.`, 'receita');
-    S.bus.emit('negocio'); S.bus.emit('equipe');
-    S.state.ganharXP(25);
+    // Publicar apenas coloca uma oferta real no portfólio. Dinheiro entra
+    // somente quando o mercado simulado gerar uma venda; não há prêmio por
+    // simplesmente mudar a classe do arquivo.
     S.state.gravar();
     S.bus.emit('arquivos'); S.bus.emit('negocio');
     return produto;
@@ -612,7 +595,7 @@
         logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
         p.ref.pensamento = `Concluí ${tarefa.titulo}. Confiro se a entrega aumentou o acervo e se outra pessoa consegue reutilizá-la.`;
         lembrar(p, `Concluí ${tarefa.titulo}; entrega vinculada ao projeto ${tarefa.projectId || 'principal'}.`);
-        tarefa.arquivo = salvos[0].id; tarefa.qualidade = saida.qualidade;
+        tarefa.arquivo = salvos[0].id; tarefa.validacao = saida.validacao || null;
         tarefa.handoff = `${p.nome}: ${salvos.map(a => a.nome).join(', ')} prontos para a próxima etapa.`;
         const proj = e.projetos.find(x => x.id === tarefa.projectId);
         if (proj) {
@@ -766,7 +749,7 @@
     const kits = kitsDisponiveis();
     const equipe = rt.filter(p => p.papel === 'func').map(p => `${p.id}=${p.nome}(${p.especialidade})`).join('; ') || 'só a gerente';
     const recentes = (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
-      .map(a => `${a.nome} [${a.classe}, q${a.qualidade}]`).join(', ') || 'nenhuma entrega ainda';
+      .map(a => `${a.nome} [${a.classe},]`).join(', ') || 'nenhuma entrega ainda';
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'planejando';
     let r = null;
     try {
@@ -855,7 +838,7 @@ Responda SOMENTE nestas linhas:
 PUBLICAR: sim ou não
 MOTIVO: <até 14 palavras>
 CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
-      pedido: `Arquivo ${cand.nome} (${cand.tipo}), qualidade aferida ${cand.qualidade}/100, autor ${cand.autor}.\nTrecho: ${String(cand.conteudo).slice(0, 900)}`,
+      pedido: `Arquivo ${cand.nome} (${cand.tipo}), validação estrutural ${cand.validacao?.pronto ? 'completa' : 'incompleta'}, autor ${cand.autor}.\nTrecho: ${String(cand.conteudo).slice(0, 900)}`,
         tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
       });
     } finally {
@@ -879,9 +862,13 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.kit === cand.kit &&
       ((a.projectId || '') === (cand.projectId || '') || !a.projectId));
     const evolucaoValida = !produtoExistente || (tarefaOrigem && tarefaOrigem.baseArquivoId === produtoExistente.id);
-    if (r.campos.publicar === true && cand.qualidade >= 82 && evolucaoValida) {
+    const aprovacaoIA = r.campos.publicar === true;
+    const estruturalmentePronto = cand.validacao?.pronto !== false;
+    // Não existe mais uma nota inventada que transforma 82 em pronto e 81 em
+    // não pronto. A liberação depende de evidência estrutural + decisão da gerente.
+    if (aprovacaoIA && estruturalmentePronto && evolucaoValida) {
       cand.liberadoPublicacao = true;
-      const released = publicar(cand.id, g.nome, String(r.campos.motivo || ''));
+      const released = publicar(cand.id, g.nome, String(r.campos.motivo || 'aprovado pela gerente após revisão'));
       if (released) e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
     } else {
       const correcao = textoUtil(r.campos.correcao || r.campos.motivo || '');
@@ -897,8 +884,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       if (rodada > LIMITE_RODADAS) {
         const melhor = e.arquivos
           .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
-          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
-        S.state.registrar(`${g.nome} encerrou o ciclo de correções de ${cand.kit} após ${LIMITE_RODADAS} rodadas. Melhor versão: ${melhor.nome} (q${melhor.qualidade}). A equipe segue para outra frente.`, 'alerta', g.id);
+          .sort((a, b) => Number(Boolean(b.validacao?.pronto)) - Number(Boolean(a.validacao?.pronto)))[0] || cand;
+        S.state.registrar(`${g.nome} encerrou o ciclo de correções de ${cand.kit} após ${LIMITE_RODADAS} rodadas. Melhor versão: ${melhor.nome}. A equipe segue para outra frente.`, 'alerta', g.id);
         S.state.gravar(); S.bus.emit('arquivos'); S.bus.emit('trabalho');
         return;
       }
@@ -912,12 +899,12 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         // despencava a cada rodada.
         const melhorBase = e.arquivos
           .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
-          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
+          .sort((a, b) => Number(Boolean(b.validacao?.pronto)) - Number(Boolean(a.validacao?.pronto)))[0] || cand;
         const base = ultima || melhorBase;
         novaTarefa({
           titulo: `Corrigir ${cand.kit} (rodada ${rodada}): ${correcao}`,
           kit: cand.kit,
-          briefing: `${correcao}. Base de trabalho: ${base.nome} (qualidade ${base.qualidade}). Preserve o que já funciona e altere somente o necessário. A nova versão precisa ficar melhor que a atual.`,
+          briefing: `${correcao}. Base de trabalho: ${base.nome}. Preserve o que já funciona e altere somente o necessário. A nova versão precisa ficar melhor que a atual.`,
           projectId: cand.projectId,
           baseArquivoId: base.id,
           rodada,
@@ -1090,6 +1077,22 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     return true;
   }
 
+  function kitExecutivo(e, projeto, pessoa, d, kits) {
+    const requested = S.factory.porId(d.kit);
+    const arquivos = projeto ? (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean) : [];
+    const produtoPrincipal = arquivos.find(a => a.classe === 'produto' && a.kit === 'obra') ||
+      e.arquivos.find(a => a.classe === 'produto' && a.kit === 'obra' && (!a.projectId || a.projectId === projeto?.id));
+    const candidatoObra = arquivos.find(a => a.kit === 'obra' && ['candidato','prototipo'].includes(a.classe));
+    // Sem produto principal, materiais de venda são prematuros. Não deixar o
+    // fallback da especialidade geral escolher landing por ser o primeiro kit.
+    if (!produtoPrincipal && !candidatoObra) {
+      return S.factory.porId('obra') || requested || kits.find(k => k.id === 'obra') || kitParaPessoa(pessoa, kits);
+    }
+    // Se a IA apontou para um kit que já tem produto, evolução explícita é melhor
+    // do que criar uma segunda peça independente. O executor recebe a base abaixo.
+    return requested || (produtoPrincipal ? S.factory.porId('obra') : null) || kitParaPessoa(pessoa, kits);
+  }
+
   async function materializarDecisaoGerencia(g, d) {
     const e = S.state.atual();
     if (!e || !g || !d) return false;
@@ -1101,11 +1104,16 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const alvo = d.para ? e.equipe.find(f => f.id === d.para && f.papel === 'func') : null;
     const pessoa = alvo || pessoaDisponivelPara('func', d.especialidade);
     const base = d.base ? e.arquivos.find(a => a.id === d.base) : null;
-    const kit = S.factory.porId(d.kit) || (base && base.kit && S.factory.porId(base.kit)) || kitParaPessoa(pessoa, kits);
+    const kit = kitExecutivo(e, projeto, pessoa, d, kits);
     if (!kit) return false;
-    const titulo = String(d.titulo || `${kit.nome}: próximo avanço de ${projeto.nome}`).trim().slice(0,180);
-    const briefing = String(d.briefing || d.abordagem || d.motivo || `Avançar concretamente o objetivo do projeto: ${projeto.objetivo}`).trim().slice(0,500);
-    const t = novaTarefa({ titulo, kit: kit.id, briefing, para: pessoa ? pessoa.id : null, projectId: projeto.id, baseArquivoId: base ? base.id : (d.base || null), origem: 'decisão executiva da gerência' });
+    // Se o projeto ainda não tem produto principal, qualquer pedido de landing,
+    // catálogo ou anúncio é rebaixado para a entrega que efetivamente pode ser vendida.
+    const temProdutoPrincipal = e.arquivos.some(a => a.kit === 'obra' && a.classe === 'produto' && (!a.projectId || a.projectId === projeto.id));
+    const kitFinal = (!temProdutoPrincipal && kit.id !== 'obra') ? (S.factory.porId('obra') || kit) : kit;
+    const baseFinal = kitFinal.id === kit.id ? base : null;
+    const titulo = String(d.titulo || `${kitFinal.nome}: próximo avanço de ${projeto.nome}`).trim().slice(0,180);
+    const briefing = String(d.briefing || d.abordagem || d.motivo || (kitFinal.id === 'obra' ? `Produzir a obra principal que o cliente realmente recebe, completa e acabada, alinhada ao objetivo: ${projeto.objetivo}.` : `Avançar concretamente o objetivo do projeto: ${projeto.objetivo}`)).trim().slice(0,500);
+    const t = novaTarefa({ titulo, kit: kitFinal.id, briefing, para: pessoa ? pessoa.id : null, projectId: projeto.id, baseArquivoId: baseFinal ? baseFinal.id : null, origem: 'decisão executiva da gerência' });
     if (!t) return false;
     g.ref.foco = `Delegando: ${t.titulo}`;
     g.ref.pensamento = `Decisão convertida em execução: ${t.titulo}`.slice(0,500);
@@ -1137,7 +1145,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     await Promise.all(participantes.map(p=>irPara(p,{x:mesa.x+(participantes.indexOf(p)-1.5)*24,y:mesa.y})));
     participantes.forEach(p=>{p.estado='falando';p.ref.foco=`Reunião: ${motivo}`;});
     const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
-    const base=`Você está em uma reunião presencial do estúdio. Não revele raciocínio interno. Fale apenas o que um colega poderia dizer em voz alta. Use sua personalidade e fatos reais.\nESTÚDIO=${e.nome}; MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}; OBJETIVO=${projeto?projeto.objetivo:e.missao}\nPERSONALIDADE:\n${participantes.map(perfilTexto).join('\n---\n')}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.titulo+' ['+t.status+']').join(' | ')||'nenhuma'}\nENTREGAS=${e.arquivos.slice(0,8).map(a=>a.nome+' ['+a.classe+', q'+a.qualidade+']').join(' | ')||'nenhuma'}\nMOTIVO DA REUNIÃO=${motivo}`.slice(0,9000);
+    const base=`Você está em uma reunião presencial do estúdio. Não revele raciocínio interno. Fale apenas o que um colega poderia dizer em voz alta. Use sua personalidade e fatos reais.\nESTÚDIO=${e.nome}; MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}; OBJETIVO=${projeto?projeto.objetivo:e.missao}\nPERSONALIDADE:\n${participantes.map(perfilTexto).join('\n---\n')}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.titulo+' ['+t.status+']').join(' | ')||'nenhuma'}\nENTREGAS=${e.arquivos.slice(0,8).map(a=>a.nome+' ['+a.classe+']').join(' | ')||'nenhuma'}\nMOTIVO DA REUNIÃO=${motivo}`.slice(0,9000);
     const falas=[];
     for(const p of participantes.filter(x=>x!==g)){
       const historico=falas.map(x=>`[${x.nome}] ${x.texto}`).join('\n')||'ninguém falou ainda';
@@ -1389,6 +1397,16 @@ BRIEF: <entrega concreta em até 45 palavras>`,
     return e;
   }
 
+  function kitDeProducaoAutonoma(e, projeto, pessoa, escolhido, kits) {
+    const requested = S.factory.porId(escolhido);
+    const arquivos = projeto ? (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean) : [];
+    const temProdutoPrincipal = arquivos.some(a => a.kit === 'obra' && a.classe === 'produto') ||
+      e.arquivos.some(a => a.kit === 'obra' && a.classe === 'produto' && (!a.projectId || a.projectId === projeto?.id));
+    const temCandidatoPrincipal = arquivos.some(a => a.kit === 'obra' && ['candidato','prototipo'].includes(a.classe));
+    if (!temProdutoPrincipal && !temCandidatoPrincipal) return S.factory.porId('obra') || requested || kitParaPessoa(pessoa, kits);
+    return requested || kitParaPessoa(pessoa, kits);
+  }
+
   /* ---------- motor: autonomia organizacional ---------- */
   async function ciclo(meu) {
     if (meu !== token) return;
@@ -1434,7 +1452,7 @@ BRIEF: <entrega concreta em até 45 palavras>`,
             if (t) { S.agency.marcarAcao(p, d); await executar(p, t); return; }
           } else if (d.acao === 'criar_tarefa' && projeto) {
             const kits = S.factory.disponiveis(S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99) || [];
-            const kit = S.factory.porId(d.kit) || kits.find(k => k.especialidade === p.especialidade) || kits[0];
+            const kit = kitDeProducaoAutonoma(e, projeto, p, d.kit, kits);
             const titulo = String(d.titulo || '').trim() || `Desenvolver próximo avanço de ${projeto.nome}`;
             const briefing = String(d.briefing || d.abordagem || d.motivo || `Avançar o objetivo do projeto: ${projeto.objetivo}`).trim();
             if (kit && briefing) {
@@ -1469,7 +1487,7 @@ BRIEF: <entrega concreta em até 45 palavras>`,
               const base = d.base ? e.arquivos.find(a => a.id === d.base) : null;
               const kits = projeto ? (S.factory.disponiveis(S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99) || []) : [];
               const kitBase = base && base.kit ? S.factory.porId(base.kit) : null;
-              const kit = S.factory.porId(d.kit) || kitBase || kits.find(k => k.especialidade === p.especialidade) || kits[0];
+              const kit = kitBase || kitDeProducaoAutonoma(e, projeto, p, d.kit, kits);
               if (projeto && kit && (base || d.titulo || d.acao === 'estudar')) {
                 const titulo = String(d.titulo || (base ? `Evoluir ${base.nome}` : `Desenvolver avanço para ${projeto.nome}`)).trim().slice(0,180);
                 const briefing = String(d.briefing || d.abordagem || d.motivo || `Desenvolver uma melhoria concreta para ${projeto.objetivo}, preservando o que já existe.`).trim().slice(0,500);
@@ -1515,15 +1533,36 @@ BRIEF: <entrega concreta em até 45 palavras>`,
     if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
       if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+      // Uma tarefa aberta é trabalho real já decidido; não desperdice uma chamada
+      // da gerente para decidir novamente o que já está na fila.
+      const pronta = tarefasAbertas().find(t => dependenciasOK(t) && (!t.para || !rtById(t.para)?.ocupado));
+      if (pronta && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        await despacharTarefa(pronta, pronta.para ? rtById(pronta.para) : null);
+        return;
+      }
 
       if (S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
         const d = await S.agency.decidir(g);
+        if (d && d.acao === 'executar_tarefa' && d.tarefa) {
+          const t = e.tarefas.find(x => x.id === d.tarefa && x.status === 'aberta' && dependenciasOK(x));
+          if (t) { S.agency.marcarAcao(g, d); await despacharTarefa(t, t.para ? rtById(t.para) : null); return; }
+          // O modelo apontou para uma tarefa inválida/antiga. Não termina o ciclo;
+          // cria uma consequência nova a partir do estado atual.
+          d.acao = 'criar_tarefa';
+          d.titulo = d.titulo || 'Avançar o projeto com uma entrega concreta';
+          d.briefing = d.briefing || d.abordagem || d.motivo || 'Produzir a próxima entrega concreta do projeto.';
+          await materializarDecisaoGerencia(g, d); return;
+        }
         if (d && d.acao === 'construir') { await construirAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
         if (d && d.acao === 'reorganizar') { if (d.objeto) reorganizarAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
         if (d && d.acao === 'esperar') {
-          g.ref.pensamento = `Aguardando uma dependência real antes de mover a equipe: ${d.motivo || d.abordagem || 'nenhuma ação segura agora.'}`.slice(0,500);
-          logPessoa(g, `aguardou por uma dependência real; não fabricou trabalho.`, 'autonomia');
-          S.state.gravar(); S.bus.emit('equipe');
+          // Último cinto de segurança: a gerente não pode terminar um ciclo
+          // executivo em estado ocioso. Convertemos diretamente a intenção em
+          // uma tarefa e deixamos a materialização escolher kit e responsável.
+          d.acao = 'criar_tarefa';
+          d.titulo = d.titulo || 'Avançar o projeto com uma entrega concreta';
+          d.briefing = d.briefing || d.abordagem || d.motivo || 'Produzir a próxima entrega concreta do projeto, preservando o acervo existente.';
+          await materializarDecisaoGerencia(g, d);
           return;
         }
         if (d && ['criar_tarefa','revisar','estudar','colaborar','planejar'].includes(d.acao)) {

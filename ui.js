@@ -115,9 +115,9 @@
         <div class="economy-card"><b>${esc(F.brl(n.caixa))}</b><span>caixa atual</span></div>
         <div class="economy-card"><b>${esc(F.brl(n.receitaMercado))}</b><span>receita acumulada</span></div>
         <div class="economy-card"><b>${esc(F.brl(com))}</b><span>comissões pagas</span></div>
-        <div class="economy-card"><b>${esc(F.num((e.recompensas||[]).length))}</b><span>produtos recompensados</span></div>
+        <div class="economy-card"><b>${esc(F.num(n.pedidos||0))}</b><span>vendas concluídas</span></div>
       </div>
-      <p class="panel-foot">Qualidade média ${F.pct(n.qualidade)} · ${F.num(objs.length)} objetos no escritório · lucro operacional ${F.brl(i.lucroOperacional)}.</p>`;
+      <p class="panel-foot">Mercado: ${F.num(n.visitas||0)} visitas · ${F.num(n.leads||0)} leads · ${F.num(n.pedidos||0)} vendas · ${F.num(objs.length)} objetos no escritório · lucro operacional ${F.brl(i.lucroOperacional)}.</p>`;
   }
 
   function pintarAmbienteBar(){
@@ -220,7 +220,7 @@
       const abertas = e.tarefas.filter(t => t.projectId === pr.id && t.status !== 'feita').length;
       const feitas = e.tarefas.filter(t => t.projectId === pr.id && t.status === 'feita').length;
       const arquivos = (pr.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
-      const qualidade = arquivos.length ? Math.round(arquivos.reduce((n,a)=>n+(Number(a.qualidade)||0),0)/arquivos.length) : 0;
+      const completos = arquivos.filter(a=>a.validacao?.pronto || a.classe==='produto').length;
       const atividade = (pr.atividade || []).slice(-4).reverse();
       return `<div class="item project-item">
         <span class="dot-state ${pr.status === 'ativo' ? 'fazendo' : ''}"></span>
@@ -230,7 +230,7 @@
           <div class="stats project-stats">
             <div class="stat"><span>Etapas</span><b>${feitas} feitas · ${abertas} abertas</b></div>
             <div class="stat"><span>Artefatos</span><b>${arquivos.length}</b></div>
-            <div class="stat"><span>Qualidade média</span><b>${qualidade || '—'}</b></div>
+            <div class="stat"><span>Entregas completas</span><b>${completos}/${arquivos.length}</b></div>
           </div>
           ${atividade.length ? `<div class="project-feed">${atividade.map(a=>`<div><span>${F.hora(a.t)}</span>${esc(a.texto)}</div>`).join('')}</div>` : ''}
         </div>
@@ -269,7 +269,7 @@
           <div class="item-meta">
             <span>${esc(t.status)}</span>
             ${quem ? `<span>· ${esc(quem)}</span>` : '<span>· aguardando distribuição</span>'}
-            ${t.qualidade ? `<span>· qualidade ${t.qualidade}</span>` : ''}
+            ${t.validacao?.pronto ? `<span>· entrega completa</span>` : ''}
             ${t.handoff ? `<span>· ${esc(t.handoff)}</span>` : ''}
           </div>
         </div>
@@ -288,7 +288,7 @@
         <span class="dot-state feita"></span>
         <div class="item-body">
           <div class="item-title">${esc(a.nome)}</div>
-          <div class="item-meta"><span>qualidade ${a.qualidade}</span><span>· por ${esc(a.autor)}</span></div>
+          <div class="item-meta"><span>${a.validacao?.pronto || a.classe==='produto' ? 'entrega completa' : 'em trabalho'}</span><span>· por ${esc(a.autor)}</span></div>
         </div>
 
       </div>`).join('')}
@@ -332,7 +332,7 @@
             <div class="file-name">${esc(a.nome)}</div>
             <div class="file-meta">
               <span class="tag ${a.classe === 'produto' ? 'tag-ember' : ''}">${esc(ROTULO_CLASSE[a.classe])}${a.classe === 'produto' ? ' v' + a.versao : ''}</span>
-              <span class="quality">q${a.qualidade}<span class="quality-bar"><i style="width:${a.qualidade}%"></i></span></span>
+              <span class="quality">${a.validacao?.pronto || a.classe==='produto' ? 'pronto' : 'em trabalho'}</span>
               <span>${esc(a.autor)}</span><span>${esc(a.quando || '')}</span>
               <span>${F.compact(a.conteudo.length)} car.</span>
               ${a.viaIA === false ? '<span class="tag">gabarito local</span>' : ''}
@@ -400,7 +400,7 @@
     arquivos.push({
       nome: `${pasta}/LEIA-ME.md`,
       conteudo: `# ${e.nome}\n\n${e.missao}\n\nRamo: ${e.ramo}\nPúblico: ${e.publico}\nExportado em ${new Date().toLocaleString('pt-BR')}\n\n## Arquivos\n\n` +
-        e.arquivos.map(a => `- \`${a.classe}/${a.nome}\` — qualidade aferida ${a.qualidade}/100, por ${a.autor}`).join('\n') +
+        e.arquivos.map(a => `- \`${a.classe}/${a.nome}\` — ${a.validacao?.pronto ? 'entrega estruturalmente completa' : 'entrega ainda em trabalho'}, por ${a.autor}`).join('\n') +
         `\n\nOs arquivos deste pacote são reais e podem ser usados, editados e vendidos livremente. Os números de vendas, caixa e reputação vistos no aplicativo são simulação.\n`
     });
     S.arquivo.baixarBlob(S.arquivo.zip(arquivos), pasta + '.zip');

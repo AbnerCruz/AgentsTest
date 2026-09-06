@@ -25,3 +25,11 @@ No OpenRouter com `openai/gpt-oss-20b`, algumas deliberações terminavam em `fi
 - Ordens dadas na sala de reuniões são encaminhadas imediatamente para produção quando houver capacidade.
 - Se a resposta estruturada da gerente vier sem campos de tarefa, uma segunda chamada curta converte a ordem em uma primeira entrega executável.
 - A gerente delega a consequência operacional em vez de apenas registrar uma recomendação.
+
+
+## v40 — execução obrigatória da gerência
+- Corrigido o ciclo executivo: `executar_tarefa` agora é efetivamente despachado pela gerente.
+- A gerente não pode encerrar o ciclo apenas pensando/esperando/planejando; decisões não executáveis são convertidas em tarefa concreta.
+- O fallback de especialidade não escolhe mais `landing` como primeiro kit quando ainda não existe produto principal; a primeira entrega passa a ser `obra`.
+- Funcionários também respeitam essa proteção quando criam trabalho autonomamente.
+- Primeira obra principal com qualidade estrutural alta pode passar pelo release sem ficar presa em aprovação textual repetitiva.

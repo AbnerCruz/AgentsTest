@@ -60,7 +60,7 @@
         receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
         pedidos: 0, clientes: 0, visitas: 0, leads: 0,
         preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
-        reputacao: 46, qualidade: 0, historico: []
+        reputacao: 46, historico: []
       };
     }
     const n = e.negocio;
@@ -70,7 +70,7 @@
       receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
       pedidos: 0, clientes: 0, visitas: 0, leads: 0,
       preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
-      reputacao: 46, qualidade: 0
+      reputacao: 46
     };
     Object.keys(padroes).forEach(k => { if (!Number.isFinite(n[k])) n[k] = padroes[k]; });
     if (!Array.isArray(n.historico)) n.historico = [];
@@ -79,10 +79,10 @@
     return n;
   }
 
-  /* Presença de mercado: lida do portfólio publicado + qualidade aferida. */
+  /* Presença de mercado: lida do portfólio realmente publicado. */
   function presenca(e) {
     const publicados = (e.arquivos || []).filter(a => a.classe === 'produto');
-    if (!publicados.length) return { oferta: false, alcance: 0, conversao: 0, reputacao: 0, qualidade: 0, kits: [] };
+    if (!publicados.length) return { oferta: false, alcance: 0, conversao: 0, reputacao: 0, kits: [] };
     let alcance = 0, conversao = 0, reput = 0;
     const kits = [];
     const jaContado = {};
@@ -91,14 +91,12 @@
       // O segundo arquivo do mesmo tipo rende metade; o terceiro, um quarto.
       const rep = jaContado[a.kit] = (jaContado[a.kit] || 0) + 1;
       const decaimento = 1 / rep;
-      const fq = clamp(a.qualidade, 20, 100) / 100;
-      alcance += ef.alcance * decaimento * fq;
-      conversao += ef.conversao * decaimento * fq;
-      reput += ef.reputacao * decaimento * fq;
+      alcance += ef.alcance * decaimento;
+      conversao += ef.conversao * decaimento;
+      reput += ef.reputacao * decaimento;
       if (kits.indexOf(a.kit) < 0) kits.push(a.kit);
     });
-    const media = publicados.reduce((s, a) => s + clamp(a.qualidade, 0, 100), 0) / publicados.length;
-    return { oferta: true, alcance, conversao, reputacao: reput, qualidade: media, kits, itens: publicados.length };
+    return { oferta: true, alcance, conversao, reputacao: reput, kits, itens: publicados.length };
   }
 
   function folhaPorHora(e) {
@@ -121,7 +119,6 @@
     n.minutos = minutosAntes + horasNegocio * 60;
 
     const p = presenca(e);
-    n.qualidade = p.qualidade;
     let mudou = false;
 
     if (p.oferta) {
@@ -134,7 +131,7 @@
       const leadsNovos = Math.floor(visitasNovas * taxaLead);
       n.leads += leadsNovos;
 
-      const fechamento = clamp(0.10 + p.conversao * 0.14 + (n.qualidade / 100) * 0.08, 0.05, 0.38);
+      const fechamento = clamp(0.10 + p.conversao * 0.14, 0.05, 0.38);
       const demanda = Math.floor(leadsNovos * fechamento);
       const capacidade = Math.floor(horasNegocio * (n.capacidadeDia / 24));
       const pedidos = Math.max(0, Math.min(capacidade, demanda));
@@ -143,8 +140,32 @@
         const receita = pedidos * n.preco;
         const custo = pedidos * n.custoUnitario;
         n.receitaMercado += receita; n.custoDireto += custo;
-        n.caixa += receita - custo;
+        const poolComissao = Math.round(receita * 0.15);
+        n.caixa += receita - custo - poolComissao;
         n.reputacao = clamp(n.reputacao + pedidos * 0.09, 0, 92);
+        // Comissão nasce de venda real, nunca da simples publicação de um arquivo.
+        const candidatos = [];
+        pedidos && publicados.forEach(a => {
+          const ids = [];
+          const autor = e.equipe.find(f => f.nome === a.autor);
+          if (autor && autor.papel !== 'gerente') ids.push(autor.id);
+          if (a.taskId) {
+            const tt = e.tarefas.find(t => t.id === a.taskId);
+            if (tt) [tt.para, ...(tt.contributors || [])].forEach(id => { if (id && !ids.includes(id)) ids.push(id); });
+          }
+          ids.forEach(id => { if (!candidatos.includes(id)) candidatos.push(id); });
+        });
+        if (poolComissao && candidatos.length) {
+          const cada = Math.round((poolComissao / candidatos.length) * 100) / 100;
+          candidatos.forEach(id => {
+            const f = e.equipe.find(x => x.id === id); if (!f) return;
+            f.comissaoTotal = Number(f.comissaoTotal || 0) + cada;
+            f.comissoes = Number(f.comissoes || 0) + cada;
+            e.comissoes = e.comissoes || [];
+            e.comissoes.unshift({ t: Date.now(), agente: id, nome: f.nome, venda: pedidos, valor: cada });
+          });
+          e.comissoes = e.comissoes.slice(0, 120);
+        }
         S.state.registrar(`Mercado: ${pedidos} pedido(s) fechado(s) a partir de ${leadsNovos} lead(s) novo(s).`, 'ok');
         mudou = true;
       }
@@ -217,7 +238,7 @@
       convVisitaLead: n.visitas > 0 ? (n.leads / n.visitas) * 100 : 0,
       convLeadPedido: n.leads > 0 ? (n.pedidos / n.leads) * 100 : 0,
       convTotal: n.visitas > 0 ? (n.pedidos / n.visitas) * 100 : 0,
-      reputacao: n.reputacao, qualidade: n.qualidade,
+      reputacao: n.reputacao,
       burnMes, runway: burnMes > 0 ? n.caixa / burnMes : Infinity,
       folhaHora: folhaPorHora(e), presenca: p,
       historico: n.historico
