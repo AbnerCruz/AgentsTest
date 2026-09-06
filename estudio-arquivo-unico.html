@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0E1113">
-<meta name="description" content="Simulação de estúdio criativo com equipe autônoma focada em produção e acervo.">
+<meta name="description" content="Simulação de estúdio criativo: agentes de IA trabalham autonomamente em projetos persistentes e produzem arquivos reais.">
+<title>Estúdio — simulação de equipe com projetos persistentes</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 <style>
 /* ============================================================
    ESTÚDIO — sistema visual
@@ -507,8 +510,6 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .meeting-composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg-2)}
 .meeting-composer textarea{min-height:70px;resize:vertical}
 .meeting-send{display:flex;align-items:center;gap:10px;margin-top:7px}.meeting-send .hint{flex:1}
-.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;min-width:0}.management-summary b{display:block;font-size:20px;overflow-wrap:anywhere}.management-summary span{font-size:10px;color:var(--ink-3);overflow-wrap:anywhere}.manager-focus{margin:8px 0;line-height:1.5;overflow-wrap:anywhere}.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0;overflow-wrap:anywhere}.manager-recommendation span{font-size:12px}.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere}
-@media (max-width:380px){.management-summary{grid-template-columns:1fr}.management-summary>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px}}
 @media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.meeting-person{min-width:0;flex:1}}
 
 .person-log{max-height:280px;overflow:auto;padding-right:4px}.person-log .log-line{margin:4px 0}
@@ -517,10 +518,77 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .idea-item .panel-foot { margin: 6px 0; }
 .member-personality{display:block;color:var(--ink-3);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
 
+
+/* ─────────── correções de layout no celular ───────────
+   Rótulos longos em select cortavam sem reticência, valores longos
+   estouravam a linha do painel e o teclado do iOS dava zoom em campos
+   com fonte menor que 16px. */
+select{text-overflow:ellipsis;}
+input[type=text],input[type=password],select,textarea{max-width:100%;}
+
+@media (max-width:899px){
+  input[type=text],input[type=password],select,textarea{font-size:16px;}
+  .row-actions{display:flex;flex-wrap:wrap;gap:8px;}
+  .row-actions .btn{flex:1 1 auto;min-width:44%;justify-content:center;}
+  .hint,.panel-foot,.sub{overflow-wrap:anywhere;}
+}
+
+/* Uma estatística com rótulo comprido deve quebrar em duas linhas em vez
+   de empurrar o número para fora do painel. */
+.stats .stat{gap:10px;align-items:baseline;}
+.stats .stat span{min-width:0;overflow-wrap:anywhere;}
+.stats .stat b{white-space:nowrap;flex-shrink:0;}
+
+.call-head,.call-meta{min-width:0;overflow-wrap:anywhere;}
+.panel{overflow-wrap:break-word;}
+.file-info b,.item-body b{overflow-wrap:anywhere;}
+
+
+/* ─────────── painel de supervisão da gerente ───────────
+   O grid de 3 colunas fixas nunca tinha sido testado numa tela
+   estreita de verdade: em ~340px de largura de conteúdo, um rótulo
+   como "etapas abertas" embaixo de um número de dois dígitos aperta
+   a coluna até estourar. Em telas realmente pequenas, empilha 1x3
+   em vez de manter 3 colunas artificialmente. */
+.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;}
+.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;min-width:0;}
+.management-summary b{display:block;font-size:20px;overflow-wrap:anywhere;}
+.management-summary span{font-size:10px;color:var(--ink-3);overflow-wrap:anywhere;}
+@media (max-width:380px){
+  .management-summary{grid-template-columns:1fr;}
+  .management-summary>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
+}
+.manager-focus{margin:8px 0;line-height:1.5;overflow-wrap:anywhere;}
+.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0;overflow-wrap:anywhere;}
+.manager-recommendation span{font-size:12px;}
+.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere;}
+
 </style>
+<script>
+/* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
+(function(){
+  function mostra(txt){
+    var d=document.getElementById('erroFatal');
+    if(!d){ d=document.createElement('pre'); d.id='erroFatal';
+      d.style.cssText='position:fixed;left:8px;right:8px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;margin:0;padding:34px 12px 12px;max-height:32vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #E4703E;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+      var x=document.createElement('button');
+      x.textContent='fechar';
+      x.style.cssText='position:absolute;top:6px;right:8px;background:#E4703E;color:#1A0B08;border:0;border-radius:99px;padding:4px 12px;font:600 11px/1 system-ui;cursor:pointer';
+      x.onclick=function(){d.remove();};
+      d.appendChild(x);
+      (document.body||document.documentElement).appendChild(d); }
+    d.insertBefore(document.createTextNode(txt + '\n'), d.firstChild);
+  }
+  window.addEventListener('error', function(e){
+    if (e.target && e.target.tagName === 'SCRIPT') mostra('Não carregou o arquivo: ' + (e.target.src||'?'));
+    else if (e.target && e.target.tagName === 'LINK') mostra('Não carregou o estilo: ' + (e.target.href||'?'));
+    else mostra((e.message||'erro') + '\n  em ' + (e.filename||'?') + ':' + (e.lineno||0));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){ mostra('Promessa rejeitada: ' + (e.reason && e.reason.message || e.reason)); });
+})();
+</script>
 </head>
 <body>
-
 
 <div class="shell">
 
@@ -695,9 +763,25 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
       <div class="panel" id="conexaoPanel">
         <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
         <div class="field">
-          <label for="apiKeyInput">Chave da Groq</label>
+          <label for="provedorSel">Provedor</label>
+          <select id="provedorSel">
+            <option value="groq">Groq — teto diário no gratuito</option>
+            <option value="openrouter">OpenRouter — sem teto</option>
+          </select>
+          <p class="hint" id="provedorHint"></p>
+        </div>
+        <div class="field">
+          <label for="apiKeyInput" id="apiKeyLabel">Chave</label>
           <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
-          <p class="hint">A chave fica só neste aparelho, no armazenamento do navegador. Pegue uma gratuita em console.groq.com.</p>
+          <p class="hint" id="apiKeyHint"></p>
+        </div>
+        <div class="field" id="tierField">
+          <label for="tierSel">Plano da sua conta Groq</label>
+          <select id="tierSel">
+            <option value="free">Gratuito — com teto diário</option>
+            <option value="dev">Developer — sem teto diário</option>
+          </select>
+          <p class="hint">O Developer é liberado só cadastrando um cartão em console.groq.com, sem mínimo de gasto: você paga apenas os tokens que usar. Esta escolha ajusta a estimativa de custo abaixo.</p>
         </div>
         <div class="field">
           <label for="modeloDecisaoSel">Modelo de decisão <span class="tag tag-real">barato</span></label>
@@ -747,13 +831,8 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script src="./core.js"></script>
-<script src="./ai.js"></script>
-<script src="./market.js"></script>
-<script src="./factory.js"></script>
-<script src="./studio.js"></script>
-<script src="./ui.js"></script>
 <script>
+/* core.js */
 /* ============================================================
    CORE — utilidades, estado e persistência.
    Carregado primeiro; todos os módulos penduram-se em window.S.
@@ -1122,6 +1201,7 @@ window.S = window.S || {};
 
 </script>
 <script>
+/* ai.js */
 /* ============================================================
    IA — única porta de saída para a Groq.
    Princípio do projeto: economia de tokens. Toda chamada tem teto,
@@ -1132,18 +1212,76 @@ window.S = window.S || {};
   'use strict';
   const { clamp, sleep } = S.util;
 
-  const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
+  /* Dois provedores possíveis, um ativo por vez. Ambos falam o formato
+     OpenAI, então o corpo da requisição é idêntico: muda o endereço, a
+     chave e os identificadores de modelo.
+
+     A Groq suspendeu os upgrades para o tier Developer, e no tier
+     gratuito existe teto diário de requisições. O OpenRouter não impõe
+     limite de plataforma em modelos pagos e funciona com crédito
+     pré-pago, sem cartão recorrente — é o caminho para rodar sem teto. */
+  const PROVEDORES = {
+    groq: {
+      nome: 'Groq',
+      rotulo: 'da Groq',
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      prefixo: 'gsk_',
+      regex: /^gsk_[A-Za-z0-9_-]{10,}$/,
+      console: 'console.groq.com',
+      nota: 'Rápida. No tier gratuito há teto diário de requisições, e os upgrades para Developer estão suspensos pela própria Groq.'
+    },
+    openrouter: {
+      nome: 'OpenRouter',
+      rotulo: 'do OpenRouter',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      prefixo: 'sk-or-',
+      regex: /^sk-or-[A-Za-z0-9_-]{10,}$/,
+      console: 'openrouter.ai/keys',
+      nota: 'Sem teto diário e sem limite de plataforma nos modelos pagos. Crédito pré-pago a partir de US$ 5, que não expira e não vira assinatura.'
+    }
+  };
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
+  const K_CHAVE_OR = 'openrouter-api-key';
   const K_CFG = 'estudio-ia-cfg';
   const K_USO = 'groq-usage-v1';
 
-  const MODELOS = [
+  const MODELOS_GROQ = [
     { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
     { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · produção', nota: '$0,15 entrada / $0,60 saída por 1M. 500 t/s. Melhor escolha para criar produtos finais complexos.' },
     { id: 'qwen/qwen3.8-27b', nome: 'Qwen 3.8 27B · raciocínio', nota: '$0,80 entrada / $4,00 saída por 1M. Mais caro; útil como alternativa de raciocínio/revisão.' },
     { id: 'qwen/qwen3.6-27b', nome: 'Qwen 3.6 27B · raciocínio', nota: '$0,60 entrada / $3,00 saída por 1M. Alternativa de raciocínio, não recomendada para chamadas frequentes.' },
     { id: 'openai/gpt-oss-safeguard-20b', nome: 'GPT-OSS Safeguard 20B · segurança', nota: '$0,075 entrada / $0,30 saída por 1M. Especializado em classificação de segurança; não é a escolha principal para produção.' }
   ];
+
+  /* No OpenRouter os mesmos modelos abertos saem mais baratos, porque o
+     preço é repassado do provedor de origem sem markup. */
+  const MODELOS_OPENROUTER = [
+    { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '~$0,03 entrada / $0,15 saída por 1M. Melhor escolha para planejamento, coordenação e revisão.' },
+    { id: 'openai/gpt-oss-120b', nome: 'GPT-OSS 120B · produção', nota: '~$0,036 entrada / $0,18 saída por 1M. Bem mais barato que na Groq; use para o produto final.' },
+    { id: 'deepseek/deepseek-chat', nome: 'DeepSeek Chat · alternativa', nota: 'Barato e forte em texto longo. Alternativa de produção.' },
+    { id: 'qwen/qwen3-32b', nome: 'Qwen3 32B · raciocínio', nota: 'Alternativa de raciocínio e revisão.' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', nome: 'Llama 3.3 70B · geral', nota: 'Modelo geral robusto, preço médio.' }
+  ];
+
+  /* Preço por 1M de tokens, em dólar, na tabela on-demand. No tier
+     Developer a Groq aplica 25% de desconto sobre esses valores. */
+  const PRECOS_POR_PROVEDOR = {
+    groq: {
+      'openai/gpt-oss-20b': { entrada: 0.075, saida: 0.30 },
+      'openai/gpt-oss-120b': { entrada: 0.15, saida: 0.60 },
+      'qwen/qwen3.8-27b': { entrada: 0.80, saida: 4.00 },
+      'qwen/qwen3.6-27b': { entrada: 0.60, saida: 3.00 },
+      'openai/gpt-oss-safeguard-20b': { entrada: 0.075, saida: 0.30 }
+    },
+    openrouter: {
+      'openai/gpt-oss-20b': { entrada: 0.03, saida: 0.15 },
+      'openai/gpt-oss-120b': { entrada: 0.036, saida: 0.18 },
+      'deepseek/deepseek-chat': { entrada: 0.14, saida: 0.28 },
+      'qwen/qwen3-32b': { entrada: 0.10, saida: 0.30 },
+      'meta-llama/llama-3.3-70b-instruct': { entrada: 0.12, saida: 0.30 }
+    }
+  };
+  const DESCONTO_DEV = 0.75;
 
   /* A Groq decomissionou os antigos Llama (llama-3.1-8b-instant e
      llama-3.3-70b-versatile) em 16/08/2026 para conta gratuita/dev.
@@ -1160,21 +1298,48 @@ window.S = window.S || {};
     'mistral-saba-24b': 'qwen/qwen3.6-27b',
     'qwen-qwq-32b': 'qwen/qwen3.6-27b'
   };
-  function migrarModelo(id) {
-    if (MODELOS.some(m => m.id === id)) return id;
-    return MODELOS_MIGRADOS[id] || MODELOS[0].id;
-  }
+  const MODELOS_DE = p => (p === 'openrouter' ? MODELOS_OPENROUTER : MODELOS_GROQ);
 
-
+  /* A migração de modelo depende da lista do provedor, então a lista e a
+     configuração precisam existir antes de qualquer chamada a
+     migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
+  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
+
+  /* Recuperação de configuração antiga: se a versão anterior deixou Groq
+     selecionada mas já existe uma chave OpenRouter válida, priorizamos o
+     OpenRouter. Isso evita que uma cota antiga mantenha o estúdio preso mesmo
+     depois de o usuário ter configurado o provedor novo. */
+
+  function migrarModelo(id) {
+    const lista = MODELOS_DE(cfg.provedor);
+    if (lista.some(m => m.id === id)) return id;
+    return MODELOS_MIGRADOS[id] || lista[0].id;
+  }
+
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
   cfg.revisao = migrarModelo(cfg.revisao);
   S.local.setJson(K_CFG, cfg);
-  let chave = S.local.get(K_CHAVE, '') || '';
+
+  /* Cada provedor guarda a própria chave: trocar de um para outro e
+     voltar não faz o usuário recolar nada. */
+  const chaves = {
+    groq: S.local.get(K_CHAVE, '') || '',
+    openrouter: S.local.get(K_CHAVE_OR, '') || ''
+  };
+  if (chaves.openrouter && cfg.provedor === 'groq' && !cfg.providerSelecionadoEm) {
+    cfg.provedor = 'openrouter';
+    cfg.decisao = 'openai/gpt-oss-20b';
+    cfg.producao = 'openai/gpt-oss-120b';
+    cfg.revisao = 'openai/gpt-oss-20b';
+    S.local.setJson(K_CFG, cfg);
+  }
+  const prov = () => PROVEDORES[cfg.provedor];
+
 
   let uso = Object.assign(
     { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} },
@@ -1199,6 +1364,8 @@ window.S = window.S || {};
     emVoo: 0,
     bloqueadaAte: 0,
     falhas: 0,
+    ultimo429: 0,
+    esperaAtual: 0,
     ultimaAutonoma: 0,
     chamadas: []          // histórico curto para a aba Motor
   };
@@ -1210,7 +1377,8 @@ window.S = window.S || {};
     S.bus.emit('ia');
   }
 
-  function pronta() { return Boolean(chave) && !estado.pausado; }
+  const chave = () => chaves[cfg.provedor];
+  function pronta() { return Boolean(chave()) && !estado.pausado; }
   function disponivel() {
     return pronta() && Date.now() >= estado.bloqueadaAte && estado.emVoo === 0;
   }
@@ -1285,11 +1453,46 @@ window.S = window.S || {};
     S.bus.emit('ia');
   }
 
+  /* Quanto falta até a Groq aceitar de novo, lido da própria resposta.
+     Esperar o tempo certo é o que diferencia "a equipe retoma sozinha"
+     de "a equipe fica batendo na porta e tomando 429". */
+  function esperaDaGroq(resp, dados) {
+    const h = n => { try { return resp.headers.get(n); } catch (e) { return null; } };
+    const cands = [h('retry-after'), h('x-ratelimit-reset-tokens'), h('x-ratelimit-reset-requests')]
+      .map(v => msDeHeader(v)).filter(v => Number.isFinite(v) && v > 0);
+    if (cands.length) return Math.min(6 * 36e5, Math.max(5e3, Math.max.apply(null, cands)));
+    const txt = String((dados && dados.error && dados.error.message) || '');
+    const m = txt.match(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b/i);
+    const ms = m ? msDeHeader(m[0]) : null;
+    return Number.isFinite(ms) && ms > 0 ? Math.max(5e3, ms) : 60e3;
+  }
+
+  /* Se o provedor ativo falhar por cota, tenta uma única vez o outro
+     provedor configurado. A troca é persistida: a sessão não fica presa no
+     provedor esgotado. Erros de chave inválida não fazem failover silencioso. */
+  function provedorAlternativo() {
+    const outro = cfg.provedor === 'openrouter' ? 'groq' : 'openrouter';
+    return PROVEDORES[outro] && chaves[outro] ? outro : null;
+  }
+
+  function ativarProvedor(p) {
+    if (!PROVEDORES[p] || !chaves[p]) return false;
+    cfg.provedor = p;
+    const lista = MODELOS_DE(p);
+    cfg.decisao = lista.some(m => m.id === cfg.decisao) ? cfg.decisao : lista[0].id;
+    cfg.producao = lista.some(m => m.id === cfg.producao) ? cfg.producao : (lista[1] || lista[0]).id;
+    cfg.revisao = lista.some(m => m.id === cfg.revisao) ? cfg.revisao : lista[0].id;
+    S.local.setJson(K_CFG, cfg);
+    estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0; estado.esperaAtual = 0;
+    return true;
+  }
+
   /* ---------- chamada ---------- */
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
+    const permitirFailover = op._failover !== false;
     const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
-    if (!chave) throw new Error('Nenhuma chave da Groq configurada.');
+    if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
@@ -1304,13 +1507,13 @@ window.S = window.S || {};
     situar('ocupada', 'IA trabalhando', `${modelo} · ${motivo || 'chamada'}`);
     const inicio = Date.now();
     try {
-      const resp = await fetch(ENDPOINT, {
+      const resp = await fetch(prov().url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave },
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave() },
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
+          stream: false, reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low')
         })
       });
       let dados = null;
@@ -1322,9 +1525,24 @@ window.S = window.S || {};
       if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
 
       if (!resp.ok) {
-        const msg = (dados && dados.error && dados.error.message) || `A Groq respondeu HTTP ${resp.status}.`;
-        if (resp.status === 401) throw new Error('Chave da Groq inválida ou expirada.');
-        if (resp.status === 429) throw new Error('Limite da Groq atingido. Aguarde alguns instantes.');
+        const msg = (dados && dados.error && dados.error.message) || `${prov().nome} respondeu HTTP ${resp.status}.`;
+        if (resp.status === 401) throw new Error(`Chave ${prov().rotulo} inválida ou expirada.`);
+        if (resp.status === 429) {
+          // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
+          // do estúdio volta sozinho quando a janela reabre.
+          const espera = esperaDaGroq(resp, dados);
+          estado.bloqueadaAte = Date.now() + espera;
+          estado.ultimo429 = Date.now();
+          estado.esperaAtual = espera;
+          const outro = permitirFailover ? provedorAlternativo() : null;
+          if (outro && ativarProvedor(outro)) {
+            S.state && S.state.registrar && S.state.registrar(`Limite do provedor anterior atingido. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`, 'alerta');
+            return chamar(Object.assign({}, op, { _failover: false, forcar: false }));
+          }
+          const e429 = new Error(`Limite ${prov().rotulo} atingido. A equipe entra em espera até a janela informada pelo provedor.`);
+          e429.cota = true;
+          throw e429;
+        }
         throw new Error(msg);
       }
       const escolha = (dados.choices || [])[0] || {};
@@ -1338,7 +1556,11 @@ window.S = window.S || {};
     } catch (err) {
       const msg = String(err && err.message || err);
       estado.falhas++;
-      estado.bloqueadaAte = Date.now() + (/429|Limite/i.test(msg) ? 45000 : /401|inválida/i.test(msg) ? 90000 : Math.min(40000, 6000 * estado.falhas));
+      if (err && err.cota) {
+        // bloqueadaAte já foi definido com o tempo real devolvido pela Groq.
+      } else {
+        estado.bloqueadaAte = Date.now() + (/401|inválida/i.test(msg) ? 90000 : Math.min(40000, 6000 * estado.falhas));
+      }
       registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms: Date.now() - inicio, ok: false, erro: msg, em: Date.now() });
       situar('erro', 'Falha na IA', msg);
       throw err;
@@ -1370,6 +1592,19 @@ window.S = window.S || {};
     return corte >= 0 ? t.slice(corte + 4).replace(/^\n+/, '').trim() : '';
   }
 
+  /* Deliberação autônoma: não pede ao modelo para obedecer uma árvore de
+     opções. Ele recebe o estado real e produz apenas uma síntese de decisão
+     para a própria pessoa usar no trabalho. O raciocínio profundo permanece
+     interno ao modelo; o que persiste é a conclusão operacional. */
+  async function deliberar(op) {
+    const r = await chamar({
+      sistema: String(op.sistema || '') + `\n\nVocê tem liberdade para escolher a melhor abordagem. Não siga uma árvore fixa de decisões. Analise o contexto, compare alternativas, identifique o que já existe e escolha uma direção coerente com o objetivo do projeto. Não revele seu raciocínio interno passo a passo. Retorne somente uma síntese operacional curta: DECISAO: <o que fará>\nABORDAGEM: <como pretende fazer>\nRISCOS: <o que precisa evitar>\nUSAR: <materiais existentes que devem ser preservados ou reutilizados>`,
+      pedido: op.pedido, tipo: 'decisao', tokens: op.tokens || 700, reasoning_effort: 'high', agente: op.agente, motivo: op.motivo || 'deliberação autônoma'
+    });
+    const c = campos(r.texto);
+    return { texto: r.texto, campos: c, resumo: [c.decisao,c.abordagem,c.riscos,c.usar].filter(Boolean).join(' ') };
+  }
+
   async function perguntar(op) {
     try {
       const r = await chamar(op);
@@ -1380,7 +1615,7 @@ window.S = window.S || {};
   }
 
   async function testar() {
-    if (!chave) throw new Error('Informe a chave antes de testar.');
+    if (!chave()) throw new Error('Informe a chave antes de testar.');
     const r = await chamar({
       sistema: 'Responda exatamente com a linha abaixo, sem mais nada.',
       pedido: 'STATUS: ok', tokens: 60, motivo: 'teste de conexão', forcar: true, agente: 'você'
@@ -1394,16 +1629,37 @@ window.S = window.S || {};
   function salvarCfg(novaChave, decisao, producao, ritmo, revisao) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
-      if (k && !/^gsk_[A-Za-z0-9_-]{10,}$/.test(k)) throw new Error('A chave da Groq começa com gsk_ e é bem mais longa. Confira o que foi colado.');
-      chave = k;
+      if (k && !prov().regex.test(k)) throw new Error(`A chave ${prov().rotulo} começa com ${prov().prefixo} e é bem mais longa. Confira o que foi colado.`);
+      chaves[cfg.provedor] = k;
     }
-    if (MODELOS.some(m => m.id === decisao)) cfg.decisao = decisao;
-    if (MODELOS.some(m => m.id === producao)) cfg.producao = producao;
-    if (MODELOS.some(m => m.id === revisao)) cfg.revisao = revisao;
-    if (chave) S.local.set(K_CHAVE, chave); else S.local.del(K_CHAVE);
+    const lista = MODELOS_DE(cfg.provedor);
+    if (lista.some(m => m.id === decisao)) cfg.decisao = decisao;
+    if (lista.some(m => m.id === producao)) cfg.producao = producao;
+    if (lista.some(m => m.id === revisao)) cfg.revisao = revisao;
+    const kk = cfg.provedor === 'openrouter' ? K_CHAVE_OR : K_CHAVE;
+    if (chave()) S.local.set(kk, chave()); else S.local.del(kk);
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0;
-    situar(chave ? 'pronta' : 'off', chave ? 'IA pronta' : 'IA desligada', chave ? 'configuração salva' : 'sem chave');
+    situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada', chave() ? `configuração salva · ${prov().nome}` : 'sem chave');
+  }
+
+  /* Custo do dia em dólar, calculado sobre o que a Groq contabilizou.
+     É estimativa de acompanhamento, não fatura. */
+  function custoDoDia() {
+    const q = usoHoje();
+    let total = 0, temPreco = false;
+    Object.keys(q.porModelo || {}).forEach(id => {
+      const p = (PRECOS_POR_PROVEDOR[cfg.provedor] || {})[id];
+      if (!p) return;
+      temPreco = true;
+      const m = q.porModelo[id];
+      // Sem separação por modelo de entrada/saída, usa a proporção do dia.
+      const prop = q.tokens > 0 ? q.entrada / q.tokens : 0.7;
+      const ent = (m.tokens || 0) * prop, sai = (m.tokens || 0) * (1 - prop);
+      total += (ent / 1e6) * p.entrada + (sai / 1e6) * p.saida;
+    });
+    if (!temPreco) return null;
+    return (cfg.provedor === 'groq' && cfg.tier === 'dev') ? total * DESCONTO_DEV : total;
   }
 
   function orcamento() {
@@ -1417,24 +1673,48 @@ window.S = window.S || {};
     const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'aguardando headers',
-      ref: null, headers: h, porModelo: q.porModelo
+      pctTokens, pctReq, fonte: (temTok || temReq) ? cfg.provedor : 'aguardando headers', provedor: cfg.provedor,
+      ref: null, headers: h, porModelo: q.porModelo,
+      custo: custoDoDia(), tier: cfg.tier
     };
   }
 
   S.ai = {
-    MODELOS, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
-    orcamento, pronta, disponivel, reservarAutonomia, faltaParaAutonomia, msDeHeader,
-    temChave: () => Boolean(chave),
-    chaveMascarada: () => (chave ? chave.slice(0, 7) + '••••••' + chave.slice(-4) : ''),
-    pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave ? 'IA pronta' : 'IA desligada')); },
-    iniciar() { if (chave) situar('pronta', 'IA pronta', 'chave carregada deste aparelho'); }
+    get MODELOS() { return MODELOS_DE(cfg.provedor); },
+    PROVEDORES,
+    definirProvedor(p) {
+      if (!PROVEDORES[p] || p === cfg.provedor) return;
+      cfg.providerSelecionadoEm = Date.now();
+      cfg.provedor = p;
+      // Modelos são identificados de forma diferente em cada provedor:
+      // ao trocar, cai no padrão da nova lista em vez de mandar um id inválido.
+      const lista = MODELOS_DE(p);
+      cfg.decisao = lista[0].id;
+      cfg.producao = (lista[1] || lista[0]).id;
+      cfg.revisao = lista[0].id;
+      S.local.setJson(K_CFG, cfg);
+      estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
+      situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
+        chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
+    },
+    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg,
+    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
+    definirTier(v) {
+      cfg.tier = v === 'dev' ? 'dev' : 'free';
+      S.local.setJson(K_CFG, cfg);
+      S.bus.emit('ia');
+    }, reservarAutonomia, faltaParaAutonomia, msDeHeader,
+    temChave: () => Boolean(chave()),
+    chaveMascarada: () => (chave() ? chave().slice(0, 7) + '••••••' + chave().slice(-4) : ''),
+    pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave() ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave() ? 'IA pronta' : 'IA desligada')); },
+    iniciar() { if (chave()) situar('pronta', 'IA pronta', `chave ${prov().rotulo} carregada deste aparelho`); }
   };
   void sleep;
 })(window.S);
 
 </script>
 <script>
+/* market.js */
 /* ============================================================
    MERCADO — economia causal.
    Nenhuma venda, visita ou seguidor é sorteado nem inventado pela IA.
@@ -1666,6 +1946,7 @@ window.S = window.S || {};
 
 </script>
 <script>
+/* factory.js */
 /* ============================================================
    FÁBRICA — onde nasce o produto de verdade.
 
@@ -1836,6 +2117,7 @@ ${o.corpo}
         return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva o texto de uma página de vendas em português do Brasil.
 Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
 Pedido: ${ctx.briefing}
+Deliberação do responsável (use como orientação, não como roteiro rígido): ${ctx.deliberacao || 'nenhuma ainda'}
 Projeto persistente: ${ctx.projeto ? ctx.projeto.nome : 'principal'} — ${ctx.projeto ? ctx.projeto.objetivo : ''}
 Artefatos já produzidos devem ser aproveitados e integrados, especialmente produtos/catálogos.
 Responda SOMENTE nestas linhas, sem markdown, sem comentários, uma linha por campo:
@@ -1975,6 +2257,56 @@ ${texto || '## Introdução\n\nConteúdo em elaboração.'}
         const palavras = arquivos[0].conteudo.split(/\s+/).length;
         const titulos = (arquivos[0].conteudo.match(/^## /gm) || []).length;
         return (palavras > 380 ? 10 : palavras > 200 ? 5 : 0) + (titulos >= 3 ? 8 : titulos >= 1 ? 4 : 0);
+      }
+    },
+
+    /* ---------------- obra: o produto principal do estúdio ----------------
+       Todos os outros kits são material sobre o produto: página que vende,
+       catálogo que lista, anúncio que divulga. Faltava o kit que produz A
+       COISA em si. Sem ele, uma editora só conseguia fazer propaganda de
+       livros que nunca seriam escritos — e o catálogo saía vazio porque
+       não havia produto nenhum para catalogar. */
+    {
+      id: 'obra', nome: 'Obra — produto principal', ext: 'md', nivel: 1, especialidade: 'criacao',
+      desc: 'A entrega central do negócio: o texto, a peça ou o material que o estúdio realmente vende.',
+      vende: 'É o produto de verdade. Tudo o mais (site, catálogo, anúncio) existe para apresentá-lo.',
+      tokens: 2600,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Produza A OBRA PRINCIPAL deste negócio, em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Missão: ${ctx.missao}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+
+Isto NÃO é material de divulgação. Não escreva página de vendas, anúncio, catálogo, e-mail ou plano. Escreva a obra em si, aquilo que o cliente consome ou compra.
+Se o negócio escreve livros, entregue capítulo ou conto completo. Se ensina, entregue a aula ou o módulo. Se faz software, entregue a documentação funcional. Se presta serviço, entregue o material que o cliente recebe.
+
+Comece com estas linhas:
+TITULO: <título da obra, até 12 palavras>
+FORMATO: <o que é: capítulo, conto, aula, guia, manual...>
+SINOPSE: <até 30 palavras>
+---
+Depois escreva a obra completa em Markdown, com começo, meio e fim. Entre 700 e 1200 palavras. Conteúdo real e acabado, não esboço, não índice, não promessa do que será feito.`;
+      },
+      obrigatorios: ['titulo', 'formato'],
+      montar(c, ctx, bruto) {
+        const texto = String(bruto || '').trim();
+        const md = `---
+titulo: "${limpa(c.titulo).replace(/"/g, "'")}"
+formato: "${limpa(c.formato)}"
+sinopse: "${limpa(c.sinopse).replace(/"/g, "'")}"
+autor: "${ctx.autor} — ${ctx.estudio}"
+data: ${new Date().toISOString().slice(0, 10)}
+---
+
+# ${limpa(c.titulo)}
+
+${texto || 'Conteúdo em elaboração.'}
+`;
+        return [{ nome: slug(limpa(c.titulo)) + '.md', tipo: 'md', conteudo: md }];
+      },
+      checarExtra(c, arquivos) {
+        const palavras = arquivos[0].conteudo.split(/\s+/).length;
+        // Uma obra curta demais é esboço, não produto.
+        return palavras > 700 ? 14 : palavras > 450 ? 8 : palavras > 250 ? 3 : 0;
       }
     },
 
@@ -2327,11 +2659,13 @@ Sem numeração, sem markdown.`;
       autor: agente ? agente.nome : 'a equipe',
       cargo: agente ? agente.cargo : 'produção',
       briefing: String(op.briefing || kit.desc).slice(0, 420),
+      deliberacao: String(op.deliberacao || '').slice(0, 1200),
       projectId: op.projectId || null,
       projeto: contextoProjeto(e, op.projectId)
     };
 
     let campos = null, bruto = '', viaIA = false;
+    if (!S.ai.disponivel()) return null;
     if (S.ai.pronta()) {
       try {
         const r = await S.ai.chamar({
@@ -2448,6 +2782,7 @@ Sem numeração, sem markdown.`;
 
 </script>
 <script>
+/* studio.js */
 /* ============================================================
    ESTÚDIO — o simulador propriamente dito.
    Um único motor assíncrono decide, no máximo, UMA ação de IA por
@@ -2674,7 +3009,11 @@ Sem numeração, sem markdown.`;
         id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
         classe: meta.classe || 'esboco', kit: meta.kit || 'legado', projectId: meta.projectId || (e.projetos[0] && e.projetos[0].id),
         qualidade: meta.qualidade == null ? 50 : meta.qualidade,
-        viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '').replace(/-v\d+$/i, '')),
+        // A linhagem identifica O QUE é o produto, não como o arquivo foi
+        // batizado. Derivar do nome permitia que a IA escolhesse outro nome
+        // e o mesmo produto fosse publicado de novo como v1.
+        viaIA: Boolean(meta.viaIA), versao: 1,
+        linhagem: 'k:' + (meta.projectId || (e.projetos[0] && e.projetos[0].id) || '') + ':' + (meta.kit || 'legado'),
         autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora(),
         taskId: meta.taskId || null, baseArquivoId: meta.baseArquivoId || null,
         briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false
@@ -2729,11 +3068,32 @@ Sem numeração, sem markdown.`;
     if (base.classe === 'produto') return null;
 
     const projeto = e.projetos.find(x => x.id === (base.projectId || '')) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
-    const produtosDoMesmoKit = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === (projeto && projeto.id) && a.kit === base.kit)
-      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
-    const anteriores = e.arquivos.filter(a => a.classe === 'produto' && a.linhagem === base.linhagem)
-      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
+    const projId = (projeto && projeto.id) || base.projectId || '';
+    const normal = x => String(x || '').replace(/\s+/g, ' ').trim();
+
+    // Identidade por projeto + kit, com o projeto resolvido dos dois lados.
+    // Comparar projectId cru deixava passar arquivos sem projeto definido.
+    const doMesmoKit = a => a.classe === 'produto' && a.kit === base.kit &&
+      ((a.projectId || '') === projId || !a.projectId);
+    const produtosDoMesmoKit = e.arquivos.filter(doMesmoKit)
+      .sort((a, b) => (b.versao || 1) - (a.versao || 1));
+    // A linhagem antiga vinha do nome do arquivo; para acervos gravados antes
+    // desta correção, o kit continua sendo a identidade confiável.
+    const anteriores = produtosDoMesmoKit.slice();
     const ultima = anteriores[0] || null;
+
+    // Rede de segurança final: nenhum conteúdo já publicado neste projeto
+    // volta a ser publicado, com qualquer nome, kit ou linhagem.
+    const alvoNormal = normal(base.conteudo);
+    const clone = e.arquivos.find(a => a.classe === 'produto' &&
+      ((a.projectId || '') === projId || !a.projectId) && normal(a.conteudo) === alvoNormal);
+    if (clone) {
+      S.state.registrar(`Release bloqueado para ${base.nome}: conteúdo idêntico a ${clone.nome}, já publicado.`, 'alerta');
+      base.avaliado = true;
+      base.liberadoPublicacao = false;
+      S.state.gravar();
+      return null;
+    }
 
     // Identidade de produto é projeto + kit, não o nome do arquivo. Isso evita
     // que uma IA mude "index.html" para outro nome e consiga republicar
@@ -2759,7 +3119,6 @@ Sem numeração, sem markdown.`;
         S.state.registrar(`Release bloqueado para ${base.nome}: não é uma evolução explícita de ${ultima.nome}.`, 'alerta');
         return null;
       }
-      const normal = x => String(x || '').replace(/\s+/g, ' ').trim();
       if (normal(base.conteudo) === normal(ultima.conteudo)) {
         S.state.registrar(`Release bloqueado para ${base.nome}: conteúdo idêntico à versão publicada.`, 'alerta');
         return null;
@@ -2773,6 +3132,7 @@ Sem numeração, sem markdown.`;
       id: uid('p'), classe: 'produto', versao,
       nome: raiz + '-v' + versao + ext,
       publicadoPor: quem || 'equipe', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now(),
+      projectId: projId, linhagem: 'k:' + projId + ':' + (base.kit || 'legado'),
       liberadoPublicacao: true
     });
     e.arquivos.unshift(produto);
@@ -2801,16 +3161,57 @@ Sem numeração, sem markdown.`;
   }
 
   /* ---------- tarefas ---------- */
+  /* Texto vindo do modelo nunca entra cru na interface nem em título de
+     tarefa. Modelos pequenos vazam marcadores de template ("|constrain|>",
+     "<|channel|>", cercas de código, tags), e isso acabava virando o nome
+     da tarefa na tela. */
+  function limpo(txt, maxPalavras) {
+    let t = String(txt == null ? '' : txt);
+    t = t.replace(/<\|[^|>]*\|>/g, ' ')      // <|tokens especiais|>
+         .replace(/\|[a-z_]{3,20}\|>?/gi, ' ') // |constrain|>, |channel|
+         .replace(/```[a-z]*|```/gi, ' ')
+         .replace(/<\/?[a-z][^>]{0,40}>/gi, ' ')
+         .replace(/[<>{}]/g, ' ')
+         .replace(/\s+/g, ' ')
+         .trim()
+         .replace(/^[\s\-–—:*"'.,]+|[\s\-–—:*"']+$/g, '')
+         .trim();
+    if (maxPalavras) t = t.split(' ').slice(0, maxPalavras).join(' ');
+    return t;
+  }
+  /* Um texto só vale como instrução se sobrar conteúdo de verdade depois
+     da limpeza. Restos como "csv" ou "revisar" não viram tarefa. */
+  function textoUtil(t) {
+    const x = limpo(t);
+    return x.length >= 12 && /\s/.test(x) ? x : '';
+  }
+
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
-    const titulo = String(dados.titulo || '').trim(); if (!titulo) return null;
+    const titulo = limpo(dados.titulo, 16); if (!titulo || titulo.length < 6) return null;
     if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
+    // Dedupe real: o mesmo kit não pode ter duas etapas abertas no mesmo
+    // projeto, e uma etapa idêntica concluída há pouco não volta em loop.
+    // Comparar só o título exato entre tarefas abertas deixava "Produzir
+    // Catálogo..." nascer de novo assim que a anterior virava "feita".
+    const projAlvo = dados.projectId || null;
+    if (e.tarefas.some(t => t.status !== 'feita' && t.kit === dados.kit && (t.projectId || null) === projAlvo)) return null;
+    const repetidaRecente = e.tarefas.some(t => t.status === 'feita' &&
+      t.titulo.toLowerCase() === titulo.toLowerCase() &&
+      Date.now() - (t.concluidaEm || 0) < 20 * 60000);
+    if (repetidaRecente) return null;
     const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     const t = {
-      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: dados.briefing || titulo,
+      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: limpo(dados.briefing) || titulo,
+      rodada: Number(dados.rodada) || 0,
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
       projectId: projeto ? projeto.id : null,
       dependsOn: Array.isArray(dados.dependsOn) ? dados.dependsOn : [],
+      // Este campo era recebido por cinco chamadas diferentes e nunca era
+      // gravado. Sem ele, nenhuma tarefa conseguia provar que era evolução
+      // de um produto existente: a gerente segurava toda entrega com
+      // "já existe uma versão publicada" e a produção travava no primeiro
+      // produto de cada kit.
       baseArquivoId: dados.baseArquivoId || null,
       handoff: dados.handoff || null, criadaEm: Date.now()
     };
@@ -2841,12 +3242,38 @@ Sem numeração, sem markdown.`;
       || abertas.find(t => !t.para) || null;
   }
 
-  /* Executa uma tarefa do começo ao fim: uma chamada de IA, um arquivo. */
+  /* Quando a IA está indisponível, não fingimos produção. O funcionário
+     continua trabalhando no ambiente: lê o acervo, organiza o foco, registra
+     o que precisa ser retomado e pode conversar com colegas. Nenhum artefato
+     falso é criado e nenhuma tarefa é marcada como concluída. */
+  async function atividadeSemIA(p, tarefa) {
+    if (!p || !tarefa || p.ocupado) return;
+    p.ocupado = true; p.tarefa = tarefa.titulo; p.ref.foco = 'estudando o projeto e preparando a retomada';
+    p.estado = 'trabalhando';
+    const e = S.state.atual();
+    const projeto = e && e.projetos.find(x => x.id === tarefa.projectId);
+    const base = projeto ? (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).slice(0,3) : [];
+    p.ref.pensamento = base.length
+      ? `Estou estudando ${base.map(a=>a.nome).join(', ')} para retomar ${tarefa.titulo} sem perder decisões anteriores.`
+      : `Estou revisando o objetivo do projeto e preparando ${tarefa.titulo}; sem IA, não vou fabricar uma entrega.`;
+    logPessoa(p, `está estudando o contexto de \"${tarefa.titulo}\" enquanto a IA está indisponível. Nenhum artefato fictício será criado.`, 'trabalho');
+    S.state.gravar(); S.bus.emit('equipe');
+    await sleep(2600 + Math.random()*2600);
+    if (e && p.ref) {
+      const nota = base.length ? `Retomada preparada a partir de ${base[0].nome}.` : 'Retomada preparada a partir do objetivo do projeto.';
+      lembrar(p, nota);
+      logPessoa(p, nota, 'estudo');
+    }
+    p.ocupado = false; p.tarefa = null; p.estado = 'sentado'; p.ref.foco = ''; p.ref.pensamento = 'Disponível; aguardando a IA para transformar a preparação em uma entrega real.';
+    S.state.gravar(); S.bus.emit('equipe');
+  }
+
+  /* Executa uma tarefa do começo ao fim: deliberação autônoma + produção. */
   async function executar(p, tarefa) {
     const e = S.state.atual(); if (!e) return false;
     p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
     p.ref.foco = tarefa.titulo;
-    p.ref.pensamento = `Estou trabalhando em ${tarefa.titulo}. Antes de agir, verifico: isso melhora o acervo, usa o que já existe e deixa algo útil para a equipe?`;
+    p.ref.pensamento = `Estou examinando ${tarefa.titulo} e o estado atual do projeto antes de decidir como agir.`;
     tarefa.status = 'fazendo'; tarefa.para = p.id;
     S.bus.emit('trabalho'); S.bus.emit('equipe');
     S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
@@ -2859,7 +3286,20 @@ Sem numeração, sem markdown.`;
 
     let ok = false;
     try {
-      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
+      let deliberacao = null;
+      if (S.ai.disponivel()) {
+        deliberacao = await S.ai.deliberar({
+          sistema: `Você é ${p.nome}, ${p.cargo} do estúdio ${e.nome}. Trabalha dentro de um projeto contínuo. Missão: ${e.missao}. Público: ${e.publico}. Projeto: ${(e.projetos.find(x=>x.id===tarefa.projectId)||{}).objetivo || e.missao}. Tarefa: ${tarefa.titulo}. Briefing: ${tarefa.briefing}.`,
+          pedido: `Antes de produzir, examine o estado real do projeto e escolha autonomamente a melhor abordagem para esta tarefa. Considere os artefatos existentes e a continuidade do trabalho. Não invente fatos.`,
+          tokens: 700, agente: p.nome, motivo: 'pensamento profundo antes da produção'
+        });
+        if (deliberacao && deliberacao.resumo) {
+          p.ref.pensamento = deliberacao.resumo.slice(0, 500);
+          lembrar(p, `Deliberação para ${tarefa.titulo}: ${deliberacao.resumo.slice(0, 160)}`);
+          logPessoa(p, `decidiu como abordar a tarefa antes de produzir: ${deliberacao.resumo.slice(0, 220)}`, 'pensamento');
+        }
+      }
+      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, deliberacao: deliberacao && deliberacao.resumo, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
       if (saida && saida.arquivos.length) {
         const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, {
           projectId: tarefa.projectId,
@@ -2882,7 +3322,7 @@ Sem numeração, sem markdown.`;
         }
         ok = true;
         humor(p, 8, `entreguei ${salvos[0].nome}`);
-        if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
+
       } else {
         tarefa.status = 'aberta';
         logPessoa(p, `não conseguiu concluir "${tarefa.titulo}"; deixou a tarefa aberta para recuperação ou revisão.`, 'alerta');
@@ -2933,9 +3373,16 @@ Sem numeração, sem markdown.`;
     if (e.tarefas.some(t => t.status !== 'feita')) return 0;
 
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
-    const publicados = arquivos.filter(a => a.classe === 'produto');
-    const tem = kit => publicados.some(a => a.kit === kit);
-    const sequencia = ['landing','catalogo','artigo','emails','anuncios'].find(k => !tem(k));
+    // "Já existe" não pode significar apenas "já foi publicado": enquanto o
+    // portão de release segurava tudo, esta fila recriava eternamente a mesma
+    // etapa ("Produzir Catálogo...") porque nenhum candidato virava produto.
+    const tem = kit => arquivos.some(a => a.kit === kit &&
+      (a.classe === 'produto' || a.classe === 'candidato' || a.classe === 'prototipo'));
+    // A obra vem primeiro. Não faz sentido montar catálogo, anúncio ou página
+    // de vendas antes de existir o que vender: era exatamente isso que gerava
+    // "catálogo de produtos" sem nenhum produto e briefing citando um
+    // portfólio que nunca foi criado.
+    const sequencia = ['obra','landing','catalogo','artigo','emails','anuncios'].find(k => !tem(k));
     if (!sequencia) return 0;
     const kit = S.factory.porId(sequencia);
     if (!kit) return 0;
@@ -2944,10 +3391,19 @@ Sem numeração, sem markdown.`;
       || rt.find(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
     if (!alvo) return 0;
 
-    const briefing = tem('landing')
-      ? `Produzir ou evoluir ${kit.nome} usando exclusivamente os artefatos e produtos já registrados no projeto. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`
-      : `Criar a primeira entrega pública completa do projeto usando exclusivamente missão, público e materiais registrados. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`;
-    const titulo = tem('landing') ? `Produzir ${kit.nome} a partir do portfólio existente` : `Construir a primeira entrega pública`;
+    // O briefing não pode afirmar que existe um acervo quando não existe.
+    // "a partir do portfólio existente" aparecia mesmo com o projeto vazio,
+    // e o modelo então inventava produtos para preencher.
+    const obras = arquivos.filter(a => a.kit === 'obra');
+    const acervo = obras.map(a => a.nome).slice(0, 4).join(', ');
+    const briefing = sequencia === 'obra'
+      ? `Escrever a obra principal do estúdio: o produto que o cliente realmente recebe, completo e acabado. Usar exclusivamente ramo, público e missão registrados. Não inventar clientes, preços, métricas, datas ou prazos.`
+      : acervo
+        ? `Produzir ${kit.nome} baseado exclusivamente nas obras já existentes no projeto (${acervo}). Descrever apenas o que essas obras realmente contêm. Não inventar outros itens, preços, métricas ou datas.`
+        : `Produzir ${kit.nome} usando exclusivamente missão, público e ramo registrados. O projeto ainda não tem obras publicadas, então não cite catálogo, portfólio, itens ou resultados que não existem.`;
+    const titulo = sequencia === 'obra'
+      ? `Escrever a obra principal do estúdio`
+      : acervo ? `Produzir ${kit.nome} a partir das obras existentes` : `Produzir ${kit.nome}`;
     const t = novaTarefa({titulo, kit:kit.id, briefing, para:alvo.id, projectId:projeto.id, origem:'fila produtiva'});
     if (t) {
       g.ref.foco = 'Garantindo uma entrega concreta em produção';
@@ -2967,14 +3423,19 @@ Sem numeração, sem markdown.`;
     const abertas = e.tarefas.filter(t => t.status !== 'feita');
     if (abertas.length >= 2) return 0;
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+    // Mesmo sem IA, a ordem é a mesma: obra antes de qualquer material sobre
+    // a obra. E o catálogo só entra quando existe o que catalogar.
+    const temObra = arquivos.some(a => a.kit === 'obra' && (a.classe === 'produto' || a.classe === 'candidato'));
+    const obrasPublicadas = arquivos.filter(a => a.classe === 'produto' && a.kit === 'obra');
     const temSite = arquivos.some(a => a.classe === 'produto' && a.kit === 'landing');
     const temCatalogo = arquivos.some(a => a.classe === 'produto' && a.kit === 'catalogo');
     const temArtigo = arquivos.some(a => a.classe === 'produto' && a.kit === 'artigo');
     const temEmails = arquivos.some(a => a.classe === 'produto' && a.kit === 'emails');
     const temAnuncios = arquivos.some(a => a.classe === 'produto' && a.kit === 'anuncios');
     let spec = null;
-    if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e materiais já registrados.' };
-    else if (!temCatalogo) spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar somente os produtos existentes em um catálogo coerente para uso no site e nas próximas etapas.' };
+    if (!temObra) spec = { kit:'obra', titulo:'Escrever a obra principal do estúdio', briefing:'Produzir a obra em si — o que o cliente recebe — completa e acabada, usando apenas ramo, público e missão registrados.' };
+    else if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e as obras já registradas.' };
+    else if (!temCatalogo && obrasPublicadas.length) spec = { kit:'catalogo', titulo:'Organizar as obras já publicadas', briefing:`Consolidar em catálogo somente as obras que existem no projeto (${obrasPublicadas.map(a=>a.nome).slice(0,4).join(', ')}). Não inventar itens, preços ou coleções.` };
     else if (!temArtigo) spec = { kit:'artigo', titulo:'Criar conteúdo público de apoio', briefing:'Criar um artigo completo usando somente fatos e materiais já registrados no projeto.' };
     else if (!temEmails) spec = { kit:'emails', titulo:'Criar comunicação de lançamento', briefing:'Criar a sequência de e-mails usando somente informações reais já registradas no projeto.' };
     else if (!temAnuncios) spec = { kit:'anuncios', titulo:'Criar peças de divulgação', briefing:'Criar peças completas de divulgação sem inventar resultados, preços, prazos ou métricas.' };
@@ -3007,11 +3468,14 @@ Sem numeração, sem markdown.`;
     const recentes = (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
       .map(a => `${a.nome} [${a.classe}, q${a.qualidade}]`).join(', ') || 'nenhuma entrega ainda';
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'planejando';
-    const r = await S.ai.perguntar({
+    let r = null;
+    try {
+      r = await S.ai.perguntar({
       sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Trabalhe como gerente de um projeto contínuo, não como um jogo.
 Projeto: ${projeto.nome}. Objetivo: ${projeto.objetivo}.
 Equipe: ${equipe}.
 Entregas existentes: ${recentes}.
+ORDEM OBRIGATÓRIA: o kit "obra" é o produto que o estúdio realmente vende. Enquanto não existir nenhuma obra registrada acima, a próxima tarefa TEM QUE ser kit "obra". Catálogo, anúncios, e-mails e página de vendas são material SOBRE as obras — só fazem sentido depois que existe obra. Nunca peça catálogo de produtos se não há produto listado nas entregas existentes.
 Crie no máximo 1 próxima tarefa produtiva que dependa do estado REAL acima. Primeiro verifique se existe uma lacuna concreta no acervo. A tarefa deve produzir, integrar, corrigir ou melhorar um artefato concreto. Se não houver contribuição verificável ao acervo, retorne KIT1 vazio.
 NUNCA invente cliente, pedido, contrato, orçamento, prazo, data futura, métrica, resultado, número, aprovação externa ou acontecimento. Se a informação não existe, não a crie.
 Não crie uma tarefa apenas para conversar, pesquisar sem entregar, fazer reunião ou "definir estratégia".
@@ -3029,9 +3493,14 @@ BRIEF2: vazio
 DEP2: vazio
 BASE2: vazio`,
       pedido: `Missão: ${e.missao}. Produza a próxima etapa verificável. Só use fatos presentes no projeto. Se não houver base suficiente para uma nova etapa, retorne KIT1 vazio.`,
-      tokens: 300, agente: g.nome, motivo: 'planejar projeto'
-    });
-    g.ocupado = false; g.balao = null; g.estado = 'sentado';
+        tokens: 300, agente: g.nome, motivo: 'planejar projeto'
+      });
+    } finally {
+      // Sem este finally, uma exceção no meio do planejamento deixava a
+      // gerente marcada como ocupada para sempre — e o ciclo nunca mais
+      // entrava no ramo de gerência. Ela simplesmente parava de trabalhar.
+      g.ocupado = false; g.balao = null; g.estado = 'sentado';
+    }
     if (!r) return;
     let criadas = 0;
     ['1','2'].forEach(n => {
@@ -3040,15 +3509,34 @@ BASE2: vazio`,
       const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief'+n]));
       if (!kit) return;
       const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para'+n] || '').trim());
-      const brief = String(r.campos['brief'+n] || kit.desc).trim();
+      // Instrução no prompt não basta: modelos pequenos ignoram a ordem.
+      // Aqui o código recusa material de divulgação enquanto não houver obra.
+      const temObraNoProjeto = e.arquivos.some(a => a.kit === 'obra' &&
+        ((a.projectId || '') === projeto.id || !a.projectId) &&
+        (a.classe === 'produto' || a.classe === 'candidato'));
+      if (!temObraNoProjeto && kit.id !== 'obra') {
+        S.state.registrar(`${g.nome} redirecionou a etapa: o projeto ainda não tem obra própria, então a prioridade é produzi-la antes de qualquer material de divulgação.`, 'info', g.id);
+        if (novaTarefa({ titulo: 'Escrever a obra principal do estúdio', kit: 'obra',
+          briefing: 'Produzir a obra em si — o que o cliente recebe — completa e acabada, usando apenas ramo, público e missão registrados.',
+          para: alvo ? alvo.id : null, projectId: projeto.id, origem: 'gerente' })) criadas++;
+        return;
+      }
+      const brief = textoUtil(r.campos['brief'+n]) || kit.desc;
       const dep = e.tarefas.find(t => t.id === String(r.campos['dep'+n] || '').trim() && t.status === 'feita');
       const baseId = String(r.campos['base'+n] || '').trim();
-      const existente = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === projeto.id && a.kit === kit.id).sort((a,b)=>(b.versao||1)-(a.versao||1))[0] || null;
-      // Um kit já publicado não pode voltar à fila como se fosse um produto novo.
-      // Só entra novamente se o planejamento declarar explicitamente uma evolução
-      // baseada na última versão publicada.
-      if (existente && baseId !== existente.id) return;
-      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null,
+      const existente = e.arquivos.filter(a => a.classe === 'produto' && a.kit === kit.id &&
+        ((a.projectId || '') === projeto.id || !a.projectId)).sort((a,b)=>(b.versao||1)-(a.versao||1))[0] || null;
+      // Um kit já publicado não volta à fila como produto novo. Antes, quando a
+      // IA não repetia exatamente o id da versão anterior em BASE, a etapa era
+      // simplesmente descartada — e a gerente passava ciclos inteiros
+      // "mantendo o plano" sem produzir nada. Agora a etapa é convertida em
+      // evolução explícita daquela versão; publicar continua barrado pelas
+      // travas de conteúdo, então não há risco de republicação.
+      const evolucao = Boolean(existente);
+      const briefFinal = evolucao && baseId !== existente.id
+        ? `${brief}. Trabalhe sobre ${existente.nome}, preservando o que já funciona e alterando apenas o necessário.`
+        : brief;
+      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: briefFinal, para: alvo ? alvo.id : null,
         projectId: projeto.id, dependsOn: dep ? [dep.id] : [], baseArquivoId: existente ? existente.id : null })) criadas++;
     });
     S.state.registrar(criadas ? `${g.nome} atualizou o projeto e criou ${criadas} próxima(s) etapa(s).` : `${g.nome} revisou o projeto e manteve o plano.`, criadas ? 'ok' : 'info', g.id);
@@ -3058,42 +3546,81 @@ BASE2: vazio`,
     const e = S.state.atual(); if (!e) return;
     const cand = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
     if (!cand) return;
-    cand.avaliado = false;
     g.ocupado = true; g.balao = 'revisando';
-    const r = await S.ai.perguntar({
+    let r = null;
+    try {
+      r = await S.ai.perguntar({
       sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Decida se este material já pode ser publicado como produto final, aquele que o cliente recebe. Publicar congela a versão.
 Responda SOMENTE nestas linhas:
 PUBLICAR: sim ou não
 MOTIVO: <até 14 palavras>
 CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       pedido: `Arquivo ${cand.nome} (${cand.tipo}), qualidade aferida ${cand.qualidade}/100, autor ${cand.autor}.\nTrecho: ${String(cand.conteudo).slice(0, 900)}`,
-      tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
-    });
-    g.ocupado = false; g.balao = null;
-    if (!r) { cand.avaliado = false; S.state.gravar(); return; }
+        tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
+      });
+    } finally {
+      g.ocupado = false; g.balao = null;
+    }
+    if (!r) {
+      // Um candidato que nunca consegue ser avaliado bloqueia todo o ramo de
+      // gerência: enquanto ele existe, a gerente não planeja nem supervisiona.
+      // Depois de três tentativas sem resposta, ele sai da frente.
+      cand.tentativasAvaliacao = (cand.tentativasAvaliacao || 0) + 1;
+      if (cand.tentativasAvaliacao >= 3) {
+        cand.avaliado = true;
+        S.state.registrar(`${g.nome} não conseguiu avaliar ${cand.nome} após 3 tentativas; o artefato ficou no acervo e a fila seguiu.`, 'alerta', g.id);
+      }
+      S.state.gravar();
+      return;
+    }
+    cand.tentativasAvaliacao = 0;
     cand.avaliado = true;
     const tarefaOrigem = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
-    const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.projectId === cand.projectId && a.kit === cand.kit);
+    const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.kit === cand.kit &&
+      ((a.projectId || '') === (cand.projectId || '') || !a.projectId));
     const evolucaoValida = !produtoExistente || (tarefaOrigem && tarefaOrigem.baseArquivoId === produtoExistente.id);
     if (r.campos.publicar === true && cand.qualidade >= 82 && evolucaoValida) {
       cand.liberadoPublicacao = true;
       const released = publicar(cand.id, g.nome, String(r.campos.motivo || ''));
       if (released) e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
     } else {
-      const correcao = String(r.campos.correcao || r.campos.motivo || '').trim();
+      const correcao = textoUtil(r.campos.correcao || r.campos.motivo || '');
       const motivoBloqueio = !evolucaoValida ? `já existe uma versão publicada de ${cand.kit}; a tarefa não aponta para ela` : (correcao || 'ainda não está pronto');
       S.state.registrar(`${g.nome} segurou ${cand.nome}: ${motivoBloqueio}.`, 'alerta', g.id);
       e.decisoes.unshift({ t: Date.now(), tipo: 'segurou', quem: g.nome, texto: `${cand.nome}: ${correcao}` });
+
+      // Quantas rodadas de correção este kit já consumiu neste projeto.
+      // Sem esse teto, cada correção gerava outra correção indefinidamente —
+      // e a qualidade descia a cada volta em vez de subir.
+      const rodada = (tarefaOrigem && Number(tarefaOrigem.rodada) || 0) + 1;
+      const LIMITE_RODADAS = 2;
+      if (rodada > LIMITE_RODADAS) {
+        const melhor = e.arquivos
+          .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
+          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
+        S.state.registrar(`${g.nome} encerrou o ciclo de correções de ${cand.kit} após ${LIMITE_RODADAS} rodadas. Melhor versão: ${melhor.nome} (q${melhor.qualidade}). A equipe segue para outra frente.`, 'alerta', g.id);
+        S.state.gravar(); S.bus.emit('arquivos'); S.bus.emit('trabalho');
+        return;
+      }
       if (correcao) {
         const ultima = e.arquivos
-          .filter(a => a.classe === 'produto' && a.linhagem === cand.linhagem)
+          .filter(a => a.classe === 'produto' && a.kit === cand.kit &&
+            ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
           .sort((a,b) => (b.versao || 1) - (a.versao || 1))[0] || null;
+        // A correção parte da melhor versão existente, não da última produzida.
+        // Antes, uma entrega pior virava base da próxima e a qualidade
+        // despencava a cada rodada.
+        const melhorBase = e.arquivos
+          .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
+          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
+        const base = ultima || melhorBase;
         novaTarefa({
-          titulo: `Corrigir ${cand.nome}: ${correcao}`,
+          titulo: `Corrigir ${cand.kit} (rodada ${rodada}): ${correcao}`,
           kit: cand.kit,
-          briefing: `${correcao}. Base de trabalho: ${ultima ? ultima.nome : cand.nome}. Preserve o que já funciona e altere somente o necessário.`,
+          briefing: `${correcao}. Base de trabalho: ${base.nome} (qualidade ${base.qualidade}). Preserve o que já funciona e altere somente o necessário. A nova versão precisa ficar melhor que a atual.`,
           projectId: cand.projectId,
-          baseArquivoId: ultima ? ultima.id : (cand.baseArquivoId || null),
+          baseArquivoId: base.id,
+          rodada,
           origem: 'revisão da gerente'
         });
       }
@@ -3481,7 +4008,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       const t = proximaPara(livre);
       if (t) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
-        if (!S.ai.pronta()) { await executar(livre, t); return; }
+        if (!S.ai.pronta() || !S.ai.disponivel()) { await atividadeSemIA(livre, t); return; }
       }
     }
     // Dependências normais não geram reunião. Elas são resolvidas pelo próprio
@@ -3499,6 +4026,9 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       // A gerente faz um único gate de release; se aprovar, congela esta versão.
       if (candidato) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+        // Sem IA disponível a gerente não julga o candidato, mas também não
+        // fica de braços cruzados: segue supervisionando a operação.
+        monitorarEquipe(g);
         return;
       }
       // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.
@@ -3701,6 +4231,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
 </script>
 <script>
+/* ui.js */
 /* ============================================================
    UI — desenho dos painéis e ligações de evento.
    Cada painel se redesenha sozinho quando o escopo dele muda.
@@ -4127,8 +4658,21 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const msg = $('#conexaoMsg');
     if (chip) chip.textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
     if (pausar) pausar.textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
-    if (apiKeyInput && !apiKeyInput.value && S.ai.temChave()) apiKeyInput.placeholder = S.ai.chaveMascarada();
     if (msg) msg.textContent = st.detalhe || '';
+
+    const pv = S.ai.provedorAtual();
+    const info = S.ai.PROVEDORES[pv];
+    const provSel = $('#provedorSel');
+    if (provSel && provSel.value !== pv) provSel.value = pv;
+    const pHint = $('#provedorHint');
+    if (pHint) pHint.textContent = info.nota;
+    const kLabel = $('#apiKeyLabel');
+    if (kLabel) kLabel.textContent = `Chave ${info.rotulo}`;
+    const kHint = $('#apiKeyHint');
+    if (kHint) kHint.textContent = `A chave fica só neste aparelho, no armazenamento do navegador. Pegue a sua em ${info.console}.`;
+    if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
+    const tierField = $('#tierField');
+    if (tierField) tierField.hidden = pv !== 'groq';
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -4141,6 +4685,9 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
     const o = S.ai.orcamento();
     const h = o.headers;
+    const tierSel = $('#tierSel');
+    if (tierSel && tierSel.value !== o.tier) tierSel.value = o.tier;
+    const espera = S.ai.estado.bloqueadaAte - Date.now();
     $('#consumoPanel').innerHTML = `
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
@@ -4148,14 +4695,17 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
         <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
-        ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
-        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela (Groq)</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
+        ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
+        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Autonomia</span><b>${S.ai.disponivel() ? 'disponível' : st.emVoo ? 'em execução' : st.pausado ? 'pausada' : 'aguardando'}</b></div>
+        ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
+        ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
+      ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
-        ? 'Os limites de janela vêm dos cabeçalhos que a Groq devolve na última resposta. O Estúdio não impõe uma cota diária artificial.'
-        : 'Ainda sem resposta da Groq nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
+        ? 'Os limites de janela vêm dos cabeçalhos devolvidos pelo provedor ativo. O Estúdio não impõe uma cota diária artificial.'
+        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -4371,12 +4921,21 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         const revisao = $('#modeloRevisaoSel');
         if (key && key.value.trim()) S.ai.salvarCfg(key.value, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
         const r = await S.ai.testar();
-        toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
+        toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
       b.disabled = false; b.textContent = 'Testar'; pintarMotor();
     };
     const pausarBtn = $('#pausarBtn');
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
+    const tierSel = $('#tierSel');
+    if (tierSel) tierSel.onchange = () => { S.ai.definirTier(tierSel.value); pintarMotor(); };
+    const provedorSel = $('#provedorSel');
+    if (provedorSel) provedorSel.onchange = () => {
+      S.ai.definirProvedor(provedorSel.value);
+      const k = $('#apiKeyInput'); if (k) k.value = '';
+      toast(`Provedor: ${S.ai.PROVEDORES[provedorSel.value].nome}.`, 'ok');
+      pintarMotor();
+    };
 
     const fecharEstudioBtn = $('#fecharEstudioBtn');
     if (fecharEstudioBtn) fecharEstudioBtn.onclick = () => {

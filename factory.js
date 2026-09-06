@@ -168,6 +168,7 @@ ${o.corpo}
         return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Escreva o texto de uma página de vendas em português do Brasil.
 Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Tom: ${ctx.tom}.
 Pedido: ${ctx.briefing}
+Deliberação do responsável (use como orientação, não como roteiro rígido): ${ctx.deliberacao || 'nenhuma ainda'}
 Projeto persistente: ${ctx.projeto ? ctx.projeto.nome : 'principal'} — ${ctx.projeto ? ctx.projeto.objetivo : ''}
 Artefatos já produzidos devem ser aproveitados e integrados, especialmente produtos/catálogos.
 Responda SOMENTE nestas linhas, sem markdown, sem comentários, uma linha por campo:
@@ -709,11 +710,13 @@ Sem numeração, sem markdown.`;
       autor: agente ? agente.nome : 'a equipe',
       cargo: agente ? agente.cargo : 'produção',
       briefing: String(op.briefing || kit.desc).slice(0, 420),
+      deliberacao: String(op.deliberacao || '').slice(0, 1200),
       projectId: op.projectId || null,
       projeto: contextoProjeto(e, op.projectId)
     };
 
     let campos = null, bruto = '', viaIA = false;
+    if (!S.ai.disponivel()) return null;
     if (S.ai.pronta()) {
       try {
         const r = await S.ai.chamar({

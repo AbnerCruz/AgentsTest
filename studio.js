@@ -457,12 +457,38 @@
       || abertas.find(t => !t.para) || null;
   }
 
-  /* Executa uma tarefa do começo ao fim: uma chamada de IA, um arquivo. */
+  /* Quando a IA está indisponível, não fingimos produção. O funcionário
+     continua trabalhando no ambiente: lê o acervo, organiza o foco, registra
+     o que precisa ser retomado e pode conversar com colegas. Nenhum artefato
+     falso é criado e nenhuma tarefa é marcada como concluída. */
+  async function atividadeSemIA(p, tarefa) {
+    if (!p || !tarefa || p.ocupado) return;
+    p.ocupado = true; p.tarefa = tarefa.titulo; p.ref.foco = 'estudando o projeto e preparando a retomada';
+    p.estado = 'trabalhando';
+    const e = S.state.atual();
+    const projeto = e && e.projetos.find(x => x.id === tarefa.projectId);
+    const base = projeto ? (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).slice(0,3) : [];
+    p.ref.pensamento = base.length
+      ? `Estou estudando ${base.map(a=>a.nome).join(', ')} para retomar ${tarefa.titulo} sem perder decisões anteriores.`
+      : `Estou revisando o objetivo do projeto e preparando ${tarefa.titulo}; sem IA, não vou fabricar uma entrega.`;
+    logPessoa(p, `está estudando o contexto de \"${tarefa.titulo}\" enquanto a IA está indisponível. Nenhum artefato fictício será criado.`, 'trabalho');
+    S.state.gravar(); S.bus.emit('equipe');
+    await sleep(2600 + Math.random()*2600);
+    if (e && p.ref) {
+      const nota = base.length ? `Retomada preparada a partir de ${base[0].nome}.` : 'Retomada preparada a partir do objetivo do projeto.';
+      lembrar(p, nota);
+      logPessoa(p, nota, 'estudo');
+    }
+    p.ocupado = false; p.tarefa = null; p.estado = 'sentado'; p.ref.foco = ''; p.ref.pensamento = 'Disponível; aguardando a IA para transformar a preparação em uma entrega real.';
+    S.state.gravar(); S.bus.emit('equipe');
+  }
+
+  /* Executa uma tarefa do começo ao fim: deliberação autônoma + produção. */
   async function executar(p, tarefa) {
     const e = S.state.atual(); if (!e) return false;
     p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
     p.ref.foco = tarefa.titulo;
-    p.ref.pensamento = `Estou trabalhando em ${tarefa.titulo}. Antes de agir, verifico: isso melhora o acervo, usa o que já existe e deixa algo útil para a equipe?`;
+    p.ref.pensamento = `Estou examinando ${tarefa.titulo} e o estado atual do projeto antes de decidir como agir.`;
     tarefa.status = 'fazendo'; tarefa.para = p.id;
     S.bus.emit('trabalho'); S.bus.emit('equipe');
     S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
@@ -475,7 +501,20 @@
 
     let ok = false;
     try {
-      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
+      let deliberacao = null;
+      if (S.ai.disponivel()) {
+        deliberacao = await S.ai.deliberar({
+          sistema: `Você é ${p.nome}, ${p.cargo} do estúdio ${e.nome}. Trabalha dentro de um projeto contínuo. Missão: ${e.missao}. Público: ${e.publico}. Projeto: ${(e.projetos.find(x=>x.id===tarefa.projectId)||{}).objetivo || e.missao}. Tarefa: ${tarefa.titulo}. Briefing: ${tarefa.briefing}.`,
+          pedido: `Antes de produzir, examine o estado real do projeto e escolha autonomamente a melhor abordagem para esta tarefa. Considere os artefatos existentes e a continuidade do trabalho. Não invente fatos.`,
+          tokens: 700, agente: p.nome, motivo: 'pensamento profundo antes da produção'
+        });
+        if (deliberacao && deliberacao.resumo) {
+          p.ref.pensamento = deliberacao.resumo.slice(0, 500);
+          lembrar(p, `Deliberação para ${tarefa.titulo}: ${deliberacao.resumo.slice(0, 160)}`);
+          logPessoa(p, `decidiu como abordar a tarefa antes de produzir: ${deliberacao.resumo.slice(0, 220)}`, 'pensamento');
+        }
+      }
+      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, deliberacao: deliberacao && deliberacao.resumo, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
       if (saida && saida.arquivos.length) {
         const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, {
           projectId: tarefa.projectId,
@@ -498,7 +537,7 @@
         }
         ok = true;
         humor(p, 8, `entreguei ${salvos[0].nome}`);
-        if (!saida.viaIA) S.state.registrar('Entrega feita pelo gabarito local — sem IA no momento. Vale como esboço.', 'alerta', p.id);
+
       } else {
         tarefa.status = 'aberta';
         logPessoa(p, `não conseguiu concluir "${tarefa.titulo}"; deixou a tarefa aberta para recuperação ou revisão.`, 'alerta');
@@ -1184,7 +1223,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       const t = proximaPara(livre);
       if (t) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
-        if (!S.ai.pronta()) { await executar(livre, t); return; }
+        if (!S.ai.pronta() || !S.ai.disponivel()) { await atividadeSemIA(livre, t); return; }
       }
     }
     // Dependências normais não geram reunião. Elas são resolvidas pelo próprio

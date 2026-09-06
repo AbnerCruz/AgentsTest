@@ -12,7 +12,7 @@ python3 -m http.server 8000
 
 Depois abra `http://localhost:8000`.
 
-Para ativar a equipe, entre em **Motor** e configure uma chave da Groq. A chave fica apenas no `localStorage` do navegador.
+Para ativar a equipe, entre em **Motor** e configure uma chave do provedor escolhido. OpenRouter é o padrão recomendado. A chave fica apenas no `localStorage` do navegador.
 
 ### Sem teto diário
 
@@ -40,7 +40,7 @@ A gerente mantém o projeto e decide as próximas etapas. Agentes recebem tarefa
 
 ## Produção
 
-A IA escreve o conteúdo estruturado; o navegador monta os arquivos finais com gabaritos determinísticos. Isso mantém HTML, CSV, SVG e Markdown válidos e reduz o consumo de tokens.
+A IA delibera sobre cada etapa antes de produzir: considera o objetivo, memória e acervo persistente e escolhe uma abordagem. A montagem final ainda usa componentes determinísticos quando o formato exige validade estrutural, mas nenhum artefato é fabricado quando a IA está indisponível.
 
 ## XP
 
@@ -57,15 +57,16 @@ O chão do estúdio é uma representação visual dos agentes: deslocamento, tra
 
 ## IA — autonomia contínua e arquitetura econômica
 
-- **Pré-produção/coordenação:** GPT-OSS 20B por padrão, com contexto detalhado e saída curta.
+- **Pré-produção/coordenação:** GPT-OSS 20B por padrão.
+- **Deliberação:** usa esforço de raciocínio alto antes de uma produção, preservando apenas a síntese operacional.
 - **Produção:** GPT-OSS 120B por padrão, reservado para criar o produto final.
 - **Revisão:** modelo econômico separado para validações curtas.
 - O contexto enviado inclui projeto, tarefa, memória relevante do agente, equipe, artefatos anteriores, produtos publicados, etapas e eventos recentes.
 - O contexto é limitado por caracteres para evitar crescimento infinito, mas é deliberadamente mais rico que versões anteriores.
 - Movimentação, animações e interações sociais simples não usam IA.
-- Não existe mais cronômetro, ritmo ou cota diária artificial no Estúdio: a IA pode ser chamada sempre que houver uma necessidade operacional real.
+- Não existe mais cronômetro, ritmo ou cota diária artificial no Estúdio: a IA pode ser chamada sempre que houver uma necessidade operacional real. Se o provedor ativo atingir 429 e houver outra chave configurada, o motor troca automaticamente uma vez para o outro provedor.
 - O cliente não força `service_tier`: a requisição usa a capacidade padrão disponível no plano da conta, evitando falha em organizações que não têm tiers pagos habilitados.
-- Os limites de requisições/tokens mostrados no Motor vêm dos headers reais devolvidos pela Groq; antes da primeira resposta, o Estúdio não inventa uma cota local.
+- Os limites de requisições/tokens mostrados no Motor vêm dos headers reais devolvidos pelo provedor ativo; antes da primeira resposta, o Estúdio não inventa uma cota local.
 
 Na Groq, atualmente o GPT-OSS 20B custa menos por token de entrada/saída do que os modelos Qwen disponíveis; o GPT-OSS 120B continua sendo a escolha forte para produção. Os modelos Qwen 3.6/3.8 ficam disponíveis como alternativas, mas são mais caros e por isso não são usados automaticamente.
 

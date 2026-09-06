@@ -461,17 +461,17 @@
         <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
         <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
-        ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
-        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela (Groq)</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
+        ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
+        ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Autonomia</span><b>${S.ai.disponivel() ? 'disponível' : st.emVoo ? 'em execução' : st.pausado ? 'pausada' : 'aguardando'}</b></div>
         ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
-      ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A cota gratuita da Groq já barrou a equipe hoje, e os upgrades para Developer estão suspensos por lá. Para rodar sem teto, troque o provedor para OpenRouter: nos modelos pagos não há limite de plataforma, o crédito é pré-pago a partir de US$ 5 e o GPT-OSS 120B sai mais barato que na Groq.</p>` : ''}
+      ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
-        ? 'Os limites de janela vêm dos cabeçalhos que a Groq devolve na última resposta. O Estúdio não impõe uma cota diária artificial.'
-        : 'Ainda sem resposta da Groq nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
+        ? 'Os limites de janela vêm dos cabeçalhos devolvidos pelo provedor ativo. O Estúdio não impõe uma cota diária artificial.'
+        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -687,7 +687,7 @@
         const revisao = $('#modeloRevisaoSel');
         if (key && key.value.trim()) S.ai.salvarCfg(key.value, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
         const r = await S.ai.testar();
-        toast('Conexão ok — a Groq respondeu: ' + r.slice(0, 40), 'ok');
+        toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
       b.disabled = false; b.textContent = 'Testar'; pintarMotor();
     };

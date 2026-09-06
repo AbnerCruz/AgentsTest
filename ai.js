@@ -100,10 +100,15 @@
      configuração precisam existir antes de qualquer chamada a
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { provedor: 'groq', tier: 'free', decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
-  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'groq';
+  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
+
+  /* Recuperação de configuração antiga: se a versão anterior deixou Groq
+     selecionada mas já existe uma chave OpenRouter válida, priorizamos o
+     OpenRouter. Isso evita que uma cota antiga mantenha o estúdio preso mesmo
+     depois de o usuário ter configurado o provedor novo. */
 
   function migrarModelo(id) {
     const lista = MODELOS_DE(cfg.provedor);
@@ -122,6 +127,13 @@
     groq: S.local.get(K_CHAVE, '') || '',
     openrouter: S.local.get(K_CHAVE_OR, '') || ''
   };
+  if (chaves.openrouter && cfg.provedor === 'groq' && !cfg.providerSelecionadoEm) {
+    cfg.provedor = 'openrouter';
+    cfg.decisao = 'openai/gpt-oss-20b';
+    cfg.producao = 'openai/gpt-oss-120b';
+    cfg.revisao = 'openai/gpt-oss-20b';
+    S.local.setJson(K_CFG, cfg);
+  }
   const prov = () => PROVEDORES[cfg.provedor];
 
 
@@ -251,9 +263,30 @@
     return Number.isFinite(ms) && ms > 0 ? Math.max(5e3, ms) : 60e3;
   }
 
+  /* Se o provedor ativo falhar por cota, tenta uma única vez o outro
+     provedor configurado. A troca é persistida: a sessão não fica presa no
+     provedor esgotado. Erros de chave inválida não fazem failover silencioso. */
+  function provedorAlternativo() {
+    const outro = cfg.provedor === 'openrouter' ? 'groq' : 'openrouter';
+    return PROVEDORES[outro] && chaves[outro] ? outro : null;
+  }
+
+  function ativarProvedor(p) {
+    if (!PROVEDORES[p] || !chaves[p]) return false;
+    cfg.provedor = p;
+    const lista = MODELOS_DE(p);
+    cfg.decisao = lista.some(m => m.id === cfg.decisao) ? cfg.decisao : lista[0].id;
+    cfg.producao = lista.some(m => m.id === cfg.producao) ? cfg.producao : (lista[1] || lista[0]).id;
+    cfg.revisao = lista.some(m => m.id === cfg.revisao) ? cfg.revisao : lista[0].id;
+    S.local.setJson(K_CFG, cfg);
+    estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0; estado.esperaAtual = 0;
+    return true;
+  }
+
   /* ---------- chamada ---------- */
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
+    const permitirFailover = op._failover !== false;
     const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
     if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
@@ -276,7 +309,7 @@
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
+          stream: false, reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low')
         })
       });
       let dados = null;
@@ -297,7 +330,12 @@
           estado.bloqueadaAte = Date.now() + espera;
           estado.ultimo429 = Date.now();
           estado.esperaAtual = espera;
-          const e429 = new Error(`Limite ${prov().rotulo} atingido. A equipe retoma em ${Math.ceil(espera / 1000)}s.`);
+          const outro = permitirFailover ? provedorAlternativo() : null;
+          if (outro && ativarProvedor(outro)) {
+            S.state && S.state.registrar && S.state.registrar(`Limite do provedor anterior atingido. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`, 'alerta');
+            return chamar(Object.assign({}, op, { _failover: false, forcar: false }));
+          }
+          const e429 = new Error(`Limite ${prov().rotulo} atingido. A equipe entra em espera até a janela informada pelo provedor.`);
           e429.cota = true;
           throw e429;
         }
@@ -348,6 +386,19 @@
     const t = String(texto || '').replace(/```[a-z]*|```/gi, '');
     const corte = t.indexOf('\n---');
     return corte >= 0 ? t.slice(corte + 4).replace(/^\n+/, '').trim() : '';
+  }
+
+  /* Deliberação autônoma: não pede ao modelo para obedecer uma árvore de
+     opções. Ele recebe o estado real e produz apenas uma síntese de decisão
+     para a própria pessoa usar no trabalho. O raciocínio profundo permanece
+     interno ao modelo; o que persiste é a conclusão operacional. */
+  async function deliberar(op) {
+    const r = await chamar({
+      sistema: String(op.sistema || '') + `\n\nVocê tem liberdade para escolher a melhor abordagem. Não siga uma árvore fixa de decisões. Analise o contexto, compare alternativas, identifique o que já existe e escolha uma direção coerente com o objetivo do projeto. Não revele seu raciocínio interno passo a passo. Retorne somente uma síntese operacional curta: DECISAO: <o que fará>\nABORDAGEM: <como pretende fazer>\nRISCOS: <o que precisa evitar>\nUSAR: <materiais existentes que devem ser preservados ou reutilizados>`,
+      pedido: op.pedido, tipo: 'decisao', tokens: op.tokens || 700, reasoning_effort: 'high', agente: op.agente, motivo: op.motivo || 'deliberação autônoma'
+    });
+    const c = campos(r.texto);
+    return { texto: r.texto, campos: c, resumo: [c.decisao,c.abordagem,c.riscos,c.usar].filter(Boolean).join(' ') };
   }
 
   async function perguntar(op) {
@@ -418,7 +469,7 @@
     const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'aguardando headers', provedor: cfg.provedor,
+      pctTokens, pctReq, fonte: (temTok || temReq) ? cfg.provedor : 'aguardando headers', provedor: cfg.provedor,
       ref: null, headers: h, porModelo: q.porModelo,
       custo: custoDoDia(), tier: cfg.tier
     };
@@ -429,6 +480,7 @@
     PROVEDORES,
     definirProvedor(p) {
       if (!PROVEDORES[p] || p === cfg.provedor) return;
+      cfg.providerSelecionadoEm = Date.now();
       cfg.provedor = p;
       // Modelos são identificados de forma diferente em cada provedor:
       // ao trocar, cai no padrão da nova lista em vez de mandar um id inválido.
@@ -441,7 +493,7 @@
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
     },
-    provedorAtual: () => cfg.provedor, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
+    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg,
     orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
