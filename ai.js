@@ -37,6 +37,11 @@
     { id: 'meta-llama/llama-3.3-70b-instruct', nome: 'Llama 3.3 70B · geral', nota: 'Modelo geral robusto, preço médio.' }
   ];
 
+  const MODELOS_IMAGEM_OPENROUTER = [
+    { id:'google/gemini-2.5-flash-image', nome:'Gemini 2.5 Flash Image · econômico', nota:'Boa opção de custo/qualidade para arte, capas e assets.' },
+    { id:'openai/gpt-image-2', nome:'GPT Image 2 · alta fidelidade', nota:'Mais caro; use quando a qualidade visual justificar.' }
+  ];
+
 
   const MODELOS_DE = () => MODELOS_OPENROUTER;
 
@@ -45,7 +50,7 @@
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
     { provedor: 'openrouter', roteamento: 'manual', tier: 'paid', providerSelecionadoEm: 0,
-      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b',
+      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', imagem: 'google/gemini-2.5-flash-image',
       orcamentoUSD: 3, periodoDias: 30, modoOrcamento: 'normal', margemSegurancaUSD: 0 },
     S.local.json(K_CFG, {})
   );
@@ -58,6 +63,7 @@
   }
   cfg.pensamento = migrarModelo(cfg.pensamento || cfg.decisao || cfg.revisao);
   cfg.producao = migrarModelo(cfg.producao);
+  cfg.imagem = MODELOS_IMAGEM_OPENROUTER.some(m=>m.id===cfg.imagem) ? cfg.imagem : MODELOS_IMAGEM_OPENROUTER[0].id;
   cfg.orcamentoUSD = Math.max(0.10, Math.min(1000, Number(cfg.orcamentoUSD) || 3));
   cfg.periodoDias = 30;
   cfg.modoOrcamento = cfg.modoOrcamento === 'intensivo' ? 'intensivo' : 'normal';
@@ -316,6 +322,34 @@
     }
   }
 
+  function contabilizarCustoDireto(modelo, custo, ms) {
+    const valor=Math.max(0,Number(custo)||0), q=usoHoje();
+    q.requisicoes+=1;
+    const m=q.porModelo[modelo]=q.porModelo[modelo]||{requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
+    m.requisicoes+=1;m.custo+=valor;q.ultimoModelo=modelo;salvarUso();
+    renovarPeriodoSeNecessario();periodo.requisicoes+=1;periodo.gastoUSD+=valor;
+    const k='openrouter:'+modelo,pm=periodo.porModelo[k]=periodo.porModelo[k]||{provedor:'openrouter',modelo,requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
+    pm.requisicoes+=1;pm.custo+=valor;salvarPeriodo();
+    const e=S.state.atual();if(e){e.uso.chamadas+=1;e.uso.ms+=ms||0;S.state.gravar();}
+  }
+
+  async function gerarImagem(op){
+    op=op||{};const agenteId=String(op.agenteId||op.agente||'imagem'),l=lane(agenteId);if(!disponivel(agenteId))throw new Error('IA indisponível para geração de imagem.');
+    const modelo=MODELOS_IMAGEM_OPENROUTER.some(m=>m.id===op.modelo)?op.modelo:cfg.imagem;
+    const estimativa=0.05;
+    if(restanteUSD()<estimativa || (cfg.modoOrcamento!=='intensivo'&&restanteDiaUSD()<estimativa)){const er=new Error('Orçamento disponível pequeno demais para iniciar uma imagem com segurança.');er.limiteLocal=true;throw er;}
+    estado.emVoo++;l.emVoo++;situar('ocupada','IA criando imagem',`${op.agente||agenteId} · ${modelo}`);const inicio=Date.now();
+    try{
+      const resp=await fetch('https://openrouter.ai/api/v1/images',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+chaves.openrouter},body:JSON.stringify({model:modelo,prompt:String(op.prompt||'').slice(0,5000),aspect_ratio:op.aspect_ratio||'1:1'})});
+      const dados=await resp.json().catch(()=>null);if(!resp.ok)throw new Error((dados&&dados.error&&dados.error.message)||`OpenRouter Images respondeu HTTP ${resp.status}.`);
+      const item=dados&&dados.data&&dados.data[0];if(!item||!item.b64_json)throw new Error('O modelo de imagem não devolveu bytes utilizáveis.');
+      const media=String(item.media_type||'image/png');const ext=/jpeg|jpg/i.test(media)?'jpg':/webp/i.test(media)?'webp':'png';const custo=Number(dados&&dados.usage&&dados.usage.cost)||0;
+      contabilizarCustoDireto(modelo,custo,Date.now()-inicio);registrarChamada({quem:op.agente||agenteId,motivo:op.motivo||'geração de imagem',modelo,provedor:'openrouter',ms:Date.now()-inicio,ok:true,tokens:0,custo,em:Date.now()});
+      void sincronizarOpenRouterCreditos();situar('pronta','IA pronta','imagem criada');return{b64:item.b64_json,mediaType:media,ext,custo,modelo};
+    }catch(err){registrarChamada({quem:op.agente||agenteId,motivo:op.motivo||'geração de imagem',modelo,provedor:'openrouter',ms:Date.now()-inicio,ok:false,erro:String(err.message||err),em:Date.now()});situar('erro','Falha ao criar imagem',String(err.message||err));throw err;}
+    finally{estado.emVoo=Math.max(0,estado.emVoo-1);l.emVoo=Math.max(0,l.emVoo-1);S.bus.emit('ia');}
+  }
+
   function registrarChamada(reg) {
     estado.chamadas.unshift(reg);
     if (estado.chamadas.length > 24) estado.chamadas.pop();
@@ -570,7 +604,7 @@
     return sincronizarOpenRouterCreditos();
   }
 
-  function salvarCfg(novaChave, pensamento, producao, _ignored1, orcamentoUSD, _ignored2, _ignored3, modoOrcamento, _ignored4) {
+  function salvarCfg(novaChave, pensamento, producao, _ignored1, orcamentoUSD, _ignored2, _ignored3, modoOrcamento, _ignored4, imagem) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
       if (k && !PROVEDORES.openrouter.regex.test(k)) throw new Error(`A chave do OpenRouter começa com ${PROVEDORES.openrouter.prefixo} e é bem mais longa. Confira o que foi colado.`);
@@ -579,6 +613,7 @@
     const lista = MODELOS_DE(cfg.provedor);
     if (lista.some(m => m.id === pensamento)) cfg.pensamento = pensamento;
     if (lista.some(m => m.id === producao)) cfg.producao = producao;
+    if (MODELOS_IMAGEM_OPENROUTER.some(m=>m.id===imagem)) cfg.imagem=imagem;
     if (orcamentoUSD !== undefined) cfg.orcamentoUSD = Math.max(0.10, Math.min(1000, Number(orcamentoUSD) || cfg.orcamentoUSD));
     if (modoOrcamento !== undefined) cfg.modoOrcamento = modoOrcamento === 'intensivo' ? 'intensivo' : 'normal';
     cfg.provedor='openrouter'; cfg.roteamento='manual'; cfg.tier='paid';
@@ -610,6 +645,7 @@
 
   S.ai = {
     get MODELOS() { return MODELOS_OPENROUTER; },
+    get MODELOS_IMAGEM() { return MODELOS_IMAGEM_OPENROUTER; },
     PROVEDORES,
     definirProvedor(p) {
       if (p && p !== 'openrouter' && p !== 'auto') return;
@@ -619,7 +655,7 @@
       cfg.producao = lista.some(m=>m.id===cfg.producao) ? cfg.producao : (lista[1]||lista[0]).id;
       S.local.setJson(K_CFG,cfg); estado.bloqueadaAte=0; estado.falhas=0;
       situar(chave()?'pronta':'off',chave()?'IA pronta':'IA desligada',chave()?'usando OpenRouter':'informe a chave do OpenRouter');
-    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, salvarChaves, salvarChaveGerenciamentoOpenRouter,
+    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, gerarImagem, deliberar, perguntar, campos, corpo, testar, salvarCfg, salvarChaves, salvarChaveGerenciamentoOpenRouter,
     orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoDiarioEsgotado, orcamentoIndisponivel, restanteUSD, restanteDiaUSD, custoPeriodo, custoDoDia,
     sincronizarFornecedor: sincronizarOpenRouter, sincronizarCreditosOpenRouter: sincronizarOpenRouterCreditos,
     statusFornecedores: () => ({ openrouter: stateProvedor('openrouter'), roteamento: 'manual', openrouterSaldo: saldoOpenRouterDisponivel(), openrouterManagementConfigured: Boolean(openRouterManagementKey) }),

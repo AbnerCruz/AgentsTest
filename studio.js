@@ -8,12 +8,14 @@
   'use strict';
   const { clamp, sleep, uid, slug, pick } = S.util;
 
+  // Quatro setores estáveis. A empresa não precisa manter uma pessoa em cada
+  // setor o tempo todo: setores sem demanda podem ficar sem funcionário e a
+  // gerente redistribui trabalho antes de contratar.
   const ESPECIALIDADES = [
-    { id: 'criacao', cargo: 'Criação', desc: 'Páginas, artigos, marca e calendário.' },
-    { id: 'comercial', cargo: 'Comercial', desc: 'Anúncios, e-mails e propostas.' },
-    { id: 'dados', cargo: 'Dados', desc: 'Catálogos, planilhas e organização.' },
-    { id: 'producao', cargo: 'Produção', desc: 'Ajustes, revisões e acabamento.' },
-    { id: 'geral', cargo: 'Generalista', desc: 'Pega o que aparecer, sem bônus.' }
+    { id: 'criacao', cargo: 'Produto & Criação', desc: 'Conteúdo, design, marca, experiência e direção criativa.' },
+    { id: 'producao', cargo: 'Tecnologia & Produção', desc: 'Sites, código, montagem, revisão técnica e empacotamento.' },
+    { id: 'operacoes', cargo: 'Operações & Dados', desc: 'Pesquisa interna, dados, documentação, QA e organização.' },
+    { id: 'comercial', cargo: 'Crescimento & Comercial', desc: 'Posicionamento, marketing, distribuição e materiais comerciais.' }
   ];
   const NOMES = ['Lia', 'Rui', 'Bia', 'Téo', 'Vera', 'Caio', 'Ju', 'Nara', 'Íris', 'Davi', 'Cléo', 'Otto', 'Selma', 'Bento'];
 
@@ -23,6 +25,9 @@
   let vitaisTimer = null;
   let socialTimer = null;
   let selecionado = null;
+  const SOCIAL_OCIOSO_MIN_MS = 6 * 60 * 1000;
+  const OCIOSO_TROCA_MIN_MS = 18000;
+  let ultimaConversaOciosa = 0;
   let animacao = null;
 
   /* ---------- construção ---------- */
@@ -70,7 +75,7 @@
       const m = mesa(i, (e.equipe || []).length, f);
       return {
         id: f.id, nome: f.nome, papel: f.papel, cargo: f.cargo,
-        especialidade: f.especialidade || 'geral', cor: f.cor,
+        especialidade: ({dados:'operacoes',geral:'producao'}[f.especialidade] || f.especialidade || 'producao'), cor: f.cor,
         mesa: m, pos: { x: m.x, y: m.y + 40 }, alvo: null,
         estado: 'sentado', balao: null, ocupado: false, progresso: 0,
         tarefa: null, ref: f
@@ -184,13 +189,33 @@
     return `Projeto: ${projeto?projeto.nome:'principal'} | objetivo=${projeto?projeto.objetivo:e.missao}\nTarefas abertas:\n${tarefas}\nEntregas recentes:\n${arquivos}\n\n${perfilTexto(a)}\n\n${perfilTexto(b)}`.slice(0,7000);
   }
 
+  function guardarMemoria(p, texto, tipo, peso, refs) {
+    if (!p || !p.ref) return;
+    const item={id:uid('mem'),texto:String(texto||'').trim().slice(0,420),tipo:String(tipo||'episodio'),peso:clamp(Number(peso||2),1,5),refs:Array.isArray(refs)?refs.slice(0,6):[],t:Date.now()};
+    if(!item.texto) return;
+    const mem=Array.isArray(p.ref.memoria)?p.ref.memoria:[];
+    const norm=x=>normalizarFrase(x&&x.texto);
+    const dup=mem.find(x=>norm(x)===norm(item));
+    if(dup){dup.t=item.t;dup.peso=Math.max(Number(dup.peso||1),item.peso);dup.tipo=item.tipo;dup.refs=item.refs;}
+    else mem.push(item);
+    // Memória mais ampla, mas ainda limitada para localStorage. A seleção que
+    // entra no prompt é feita por relevância na Agency, não pelos itens mais recentes.
+    p.ref.memoria=mem.sort((a,b)=>(Number(a.t)||0)-(Number(b.t)||0)).slice(-80);
+    p.ref.memoriaResumo=p.ref.memoria.filter(x=>Number(x.peso||1)>=4).slice(-16).map(x=>x.texto).join(' | ').slice(0,2600);
+    // Decisões, entregas e fatos realmente importantes também viram memória
+    // organizacional compartilhada. É um índice local, não uma chamada de IA.
+    if(item.peso>=4){
+      const e=S.state.atual(); if(e){e.memoriaOrganizacional=Array.isArray(e.memoriaOrganizacional)?e.memoriaOrganizacional:[];
+        const org={id:item.id,t:item.t,tipo:item.tipo,peso:item.peso,por:p.nome,porId:p.id,refs:item.refs,texto:item.texto};
+        const ja=e.memoriaOrganizacional.find(x=>normalizarFrase(x.texto)===normalizarFrase(org.texto)); if(ja){ja.t=org.t;ja.peso=Math.max(ja.peso,org.peso);} else e.memoriaOrganizacional.push(org);
+        e.memoriaOrganizacional=e.memoriaOrganizacional.slice(-120);
+      }
+    }
+  }
+
   function memorizarInteracao(a,b,texto) {
-    const t=Date.now();
-    const pares=[a,b];
-    pares.forEach(p=>{
-      const f=p.ref; if(!f) return;
-      f.memoria=(f.memoria||[]).concat({texto:`Interação com ${p===a?b.nome:a.nome}: ${texto}`.slice(0,220),t}).slice(-24);
-    });
+    guardarMemoria(a,`Interação com ${b.nome}: ${texto}`,'relacao',3,[b.id]);
+    guardarMemoria(b,`Interação com ${a.nome}: ${texto}`,'relacao',3,[a.id]);
   }
 
   async function bateBoca(a,b,motivo) {
@@ -279,11 +304,55 @@
     S.state.gravar();S.bus.emit('reuniao');S.bus.emit('equipe');S.bus.emit('trabalho');return{ok:true,falas:pessoas.length};
   }
 
-  // Conversas sociais não entram no ciclo automático.
-  // O tempo e os tokens da equipe são reservados para produção, revisão e
-  // resolução de dependências reais. A sala continua disponível para reuniões
-  // de trabalho e para mensagens iniciadas pelo dono.
-  function socializar() { return; }
+  const ACOES_OCIOSAS=[
+    {estado:'celular',balao:'mexendo no celular',estacao:'descanso',rotina:'lazer'},
+    {estado:'lendo',balao:'lendo um livro',estacao:'descanso',rotina:'leitura'},
+    {estado:'andando',balao:'dando uma volta',estacao:'quadro',rotina:'caminhada'},
+    {estado:'assistindo',balao:'assistindo TV',estacao:'tv',rotina:'lazer'},
+    {estado:'comendo',balao:'pegando um café',estacao:'cafe',rotina:'refeicao'}
+  ];
+  function estaOcioso(p){return !!(p&&!p.ocupado&&['sentado','ocioso','celular','lendo','assistindo','comendo'].includes(p.estado));}
+  function tarefaAdequadaLocal(e,p){
+    const abertas=tarefasAbertas().filter(t=>dependenciasOK(t)&&!t.bloqueada&&!t._agenteEmExecucao);
+    const propria=abertas.find(t=>t.para===p.id); if(propria)return propria;
+    const livres=abertas.filter(t=>!t.para);
+    const afinidade=t=>{const k=String(t.kit||'autonomo'); if(p.especialidade==='producao')return /pagina|codigo|autonomo/.test(k); if(p.especialidade==='operacoes')return /dados|autonomo/.test(k); if(p.especialidade==='criacao')return /texto|visual|autonomo/.test(k); if(p.especialidade==='comercial')return /comercial|autonomo/.test(k); return k==='autonomo';};
+    return livres.find(afinidade)||livres[0]||null;
+  }
+  function entrarOcio(p, motivo){
+    if(!p||p.ocupado)return;
+    const f=p.ref; f.cuidados=f.cuidados||{}; const agora=Date.now();
+    if(agora-Number(f.cuidados.ultimaOciosidade||0)<OCIOSO_TROCA_MIN_MS && p.estado!=='sentado')return;
+    f.cuidados.ultimaOciosidade=agora;
+    const idx=Math.abs((agora/OCIOSO_TROCA_MIN_MS|0)+(p.id||'').split('').reduce((n,c)=>n+c.charCodeAt(0),0))%ACOES_OCIOSAS.length;
+    const a=ACOES_OCIOSAS[idx]; p.estado='andando';p.balao=a.balao;f.cuidados.rotina=a.rotina;f.foco='';
+    const alvo=ESTACOES[a.estacao]||assento(p);
+    irPara(p,alvo).then(()=>{if(!p.ocupado){p.estado=a.estado;p.balao=a.balao;p.ref.pensamento=`Sem tarefa útil agora; ${a.balao}. Continuo disponível para trabalho.`;}});
+    if(motivo && agora-Number(f.cuidados.ultimoLogOcioso||0)>8*60*1000){f.cuidados.ultimoLogOcioso=agora;logPessoa(p,`entrou em tempo livre: ${motivo}.`,'rotina');}
+  }
+  function acordarParaTrabalho(p){if(!p||p.ocupado)return;p.balao='nova tarefa';p.estado='andando';return irPara(p,assento(p)).then(()=>{p.estado='sentado';p.balao=null;p.ref.cuidados=p.ref.cuidados||{};p.ref.cuidados.rotina='trabalho';});}
+  async function conversarOciosos(){
+    const e=S.state.atual();if(!e||Date.now()-ultimaConversaOciosa<SOCIAL_OCIOSO_MIN_MS||!S.ai.pronta()||(S.ai.orcamentoIndisponivel&&S.ai.orcamentoIndisponivel()))return;
+    const ps=rt.filter(p=>p.papel==='func'&&estaOcioso(p)&&Number(p.ref.energia)>25);if(ps.length<2)return;
+    const a=ps[0],b=ps[1]; if(!S.ai.disponivel(a.id))return; ultimaConversaOciosa=Date.now();
+    const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
+    const memA=(a.ref.memoria||[]).slice(-4).map(x=>x.texto||x).join(' | '), memB=(b.ref.memoria||[]).slice(-4).map(x=>x.texto||x).join(' | ');
+    try{
+      const r=await S.ai.perguntar({sistema:`Conversa casual curta entre dois colegas em tempo livre. Não invente fatos externos nem finja trabalho concluído. Eles podem comentar a empresa, uma ideia, uma entrega ou simplesmente trocar uma observação humana. Uma única chamada deve gerar as duas falas.
+EMPRESA=${e.nome}
+PROJETO=${projeto?.nome||'principal'}
+${a.nome}: ${memA||'sem memória recente'}
+${b.nome}: ${memB||'sem memória recente'}
+RETORNE SOMENTE:
+FALA_A: <até 24 palavras>
+FALA_B: <até 24 palavras>`,pedido:`${a.nome} e ${b.nome} estão sem tarefa e se encontraram no escritório. Gere uma conversa breve e natural.`,tokens:100,reasoning_effort:'low',agente:a.nome,agenteId:a.id,motivo:'conversa ociosa econômica'});
+      if(!r)return;const fa=String(r.campos.fala_a||'').trim(),fb=String(r.campos.fala_b||'').trim();
+      if(fa){a.balao=fa.slice(0,70);registrarReuniao(a.nome,fa,'interacao');} if(fb){b.balao=fb.slice(0,70);registrarReuniao(b.nome,fb,'interacao');}
+      if(fa||fb)memorizarInteracao(a,b,`${fa} ${fb}`.trim());
+      setTimeout(()=>{if(estaOcioso(a))a.balao=null;if(estaOcioso(b))b.balao=null;S.bus.emit('equipe');},4500);
+    }catch(_){ }
+  }
+  function socializar(){void conversarOciosos();}
 
   /* ---------- vitais ---------- */
   function tickVitais() {
@@ -353,11 +422,10 @@
     p.ref.humor = clamp(p.ref.humor + delta, 0, 100);
     if (motivo && Math.abs(delta) >= 6) lembrar(p, motivo);
   }
-  function lembrar(p, texto) {
-    if (!p.ref) return;
-    const item = { texto: String(texto).slice(0, 180), t: Date.now() };
-    p.ref.memoria = (p.ref.memoria || []).concat(item).slice(-12);
-    p.ref.pensamento = String(texto).slice(0, 220);
+  function lembrar(p, texto, tipo, peso, refs) {
+    if (!p || !p.ref) return;
+    guardarMemoria(p, texto, tipo || 'episodio', peso || 2, refs || []);
+    p.ref.pensamento = String(texto).slice(0, 300);
     S.state.gravar();
   }
 
@@ -373,7 +441,7 @@
         ? `Criou ${salvos.map(a=>a.nome).join(', ')} como material concreto do projeto.`
         : 'Registrou uma contribuição concreta ao projeto.';
     p.ref.contribuicaoAcervo = { ultima: texto.slice(0,220), atualizadoEm: Date.now(), arquivoIds: (salvos||[]).map(a=>a.id) };
-    lembrar(p, `Acervo: ${texto}`);
+    lembrar(p, `Acervo: ${texto}`, 'entrega', 4, (salvos||[]).map(a=>a.id));
   }
   /* ---------- arquivos ---------- */
   function salvarArquivos(lista, meta, p) {
@@ -626,8 +694,23 @@
     return x.length >= 12 && /\s/.test(x) ? x : '';
   }
 
+  function inferirKitTarefa(dados, e) {
+    const base=dados&&dados.baseArquivoId ? (e.arquivos||[]).find(a=>a.id===dados.baseArquivoId) : null;
+    if(base && base.kit) return base.kit;
+    const explicito=String(dados&&dados.kit||'').trim();
+    if(explicito && explicito!=='autonomo') return explicito;
+    const txt=`${dados&&dados.titulo||''} ${dados&&dados.briefing||''}`.toLowerCase();
+    if(/imagem|ilustra[cç][aã]o|capa|banner|logo|logotipo|sprite|thumbnail|miniatura|poster|p[oô]ster|concept art|arte visual/.test(txt)) return 'visual';
+    if(/html|css|javascript|typescript|site|p[aá]gina|interface|aplica[cç][aã]o|c[oó]digo|frontend|web/.test(txt)) return 'pagina';
+    if(/csv|json|dados|cat[aá]logo|planilha|m[eé]trica|an[aá]lise|qa|auditoria/.test(txt)) return 'dados';
+    if(/marketing|campanha|venda|comercial|lan[cç]amento|copy|an[uú]ncio/.test(txt)) return 'comercial';
+    if(/texto|livro|conto|romance|cap[ií]tulo|manifesto|roteiro|artigo|documento|editorial/.test(txt)) return 'texto';
+    return 'autonomo';
+  }
+
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
+    dados=Object.assign({},dados||{}); dados.kit=inferirKitTarefa(dados,e);
     const titulo = limpo(dados.titulo, 24); if (!titulo || titulo.length < 6) return null;
     const baseAlvo = dados.baseArquivoId || null;
     // Duas tarefas realmente idênticas (mesmo título + mesma base) não coexistem.
@@ -718,6 +801,13 @@
     rev.avaliacoes++; rev.atualizadoEm=agora;
     // O limite é da LINHAGEM, não do id transitório do arquivo.
     const ultimaChance = rev.correcoes >= MAX_CORRECOES_LINHAGEM || cand.tentativasAvaliacao >= 3;
+    if(['png','jpg','jpeg','webp'].includes(String(cand.tipo||'').toLowerCase())){
+      const valido=Boolean(cand.validacao&&cand.validacao.pronto);
+      cand.avaliado=true;
+      if(valido){cand.liberadoPublicacao=true;const produto=publicar(cand.id,g.nome,'Imagem gerada pelo modelo visual e validada localmente como arquivo binário utilizável.');registrarReuniao(g.nome,produto?`Liberei ${produto.nome}: o ativo visual foi gerado e salvo corretamente.`:`O ativo visual ${cand.nome} já foi processado.`,'decisao');lembrar(g,`Aprovou ativo visual ${cand.nome}.`,'decisao',4,[cand.id]);}
+      else {cand.classe='prototipo';cand.motivoEncerramento='imagem inválida ou sem bytes utilizáveis';registrarReuniao(g.nome,`Retive ${cand.nome}: a geração visual não produziu um arquivo binário válido.`,'alerta');}
+      S.state.gravar();S.bus.emit('arquivos');S.bus.emit('equipe');return;
+    }
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'lendo a entrega';
     const projeto = e.projetos.find(x => x.id === cand.projectId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
     const tarefa = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
@@ -879,7 +969,7 @@ ${ultimaChance ? 'MODO ANTI-LOOP: esta linhagem já consumiu o máximo de corre�
     const perfis={
       criacao:{tracos:['criativo','curioso','observador'],comunicacao:'visual e direta',prioridades:'clareza, experiência e coerência',estilo:'explora alternativas antes de escolher',colaboracao:'pede referências e compartilha versões',aversoes:'repetição sem propósito'},
       comercial:{tracos:['persuasivo','prático','atento a contexto'],comunicacao:'objetiva e orientada a impacto',prioridades:'clareza e proposta de valor',estilo:'procura a mensagem mais útil',colaboracao:'transforma ideias em mensagens acionáveis',aversoes:'mensagens vagas'},
-      dados:{tracos:['analítico','metódico','cauteloso'],comunicacao:'precisa e organizada',prioridades:'consistência e rastreabilidade',estilo:'confere antes de consolidar',colaboracao:'documenta dependências',aversoes:'dados sem origem'},
+      operacoes:{tracos:['analítico','metódico','cauteloso'],comunicacao:'precisa e organizada',prioridades:'consistência, QA e rastreabilidade',estilo:'confere antes de consolidar',colaboracao:'documenta dependências',aversoes:'dados sem origem'},
       producao:{tracos:['detalhista','pragmático','persistente'],comunicacao:'curta e concreta',prioridades:'acabamento e estabilidade',estilo:'melhora o que já existe',colaboracao:'faz revisão e handoff',aversoes:'retrabalho'},
       geral:{tracos:['adaptável','curioso','colaborativo'],comunicacao:'direta e cordial',prioridades:'utilidade e continuidade',estilo:'entra onde existe gargalo',colaboracao:'pede contexto e compartilha',aversoes:'trabalho desconectado'}
     };
@@ -914,7 +1004,7 @@ ${ultimaChance ? 'MODO ANTI-LOOP: esta linhagem já consumiu o máximo de corre�
      personalidade-base do cargo quando a ficha vier incompleta. */
   function contratarPerfil(e,nome,especialidade,ficha,origem){
     if(!e) return null;
-    const esp=ESPECIALIDADES.find(x=>x.id===especialidade)||ESPECIALIDADES[4];
+    const esp=ESPECIALIDADES.find(x=>x.id===especialidade)||ESPECIALIDADES[1];
     const f=ficha&&typeof ficha==='object'?ficha:{};
     const nomeFinal=nomeLivre(e,nome||f.nome);
     const base=personalidadeInicial(esp.id,nomeFinal);
@@ -934,7 +1024,7 @@ ${ultimaChance ? 'MODO ANTI-LOOP: esta linhagem já consumiu o máximo de corre�
     return novo;
   }
   function contratar(nome,especialidade){
-    const e=S.state.atual();if(!e)return false;const esp=ESPECIALIDADES.find(x=>x.id===especialidade)||ESPECIALIDADES[4];
+    const e=S.state.atual();if(!e)return false;const esp=ESPECIALIDADES.find(x=>x.id===especialidade)||ESPECIALIDADES[1];
     const novo={id:uid('a'),nome:nome||pick(NOMES),papel:'func',cargo:esp.cargo,especialidade:esp.id,cor:S.state.PALETA[e.equipe.length%S.state.PALETA.length],energia:85,humor:70,entregas:0,memoria:[],uso:{chamadas:0,tokens:0},personalidade:personalidadeInicial(esp.id,nome)};
     e.equipe.push(novo);S.state.registrar(`${novo.nome} entrou na equipe como ${novo.cargo}.`,'ok');S.state.gravar();montar();return true;
   }
@@ -944,7 +1034,7 @@ ${ultimaChance ? 'MODO ANTI-LOOP: esta linhagem já consumiu o máximo de corre�
     const e=S.state.normalizarEstudio({id:uid('e'),nome:'Nova empresa',ramo:'em definição pela gerente',missao:'Em definição pela gerente',tom:'Em definição pela gerente',publico:String(dados.publico||'a definir'),criadoEm:agora,xp:0,
       fundacao:{versao:2,estado:'criando',perguntas:{ideia:String(dados.ideia||''),objetivo:String(dados.objetivo||''),tipoProduto:String(dados.tipoProduto||''),publico:String(dados.publico||''),restricoes:String(dados.restricoes||'')},identidade:{},planoNegocio:'',primeiroProduto:'',equipePlanejada:[],ultimaTentativa:0,concluidaEm:0},
       projetos:[{id:uid('proj'),nome:'Primeiro produto — planejamento inicial',objetivo:String(dados.objetivo||'Definir e planejar o primeiro produto.'),status:'ativo',criadoEm:agora,tarefaIds:[],arquivoIds:[],atividade:[]}],
-      equipe:[{id:'a0',nome:gerenteNome,papel:'gerente',cargo:'Sócia-gerente',especialidade:'geral',cor:S.state.PALETA[0],energia:88,humor:74,personalidade:personalidadeInicial('geral',gerenteNome)}]});
+      equipe:[{id:'a0',nome:gerenteNome,papel:'gerente',cargo:'Sócia-gerente',especialidade:'producao',cor:S.state.PALETA[0],energia:88,humor:74,personalidade:personalidadeInicial('producao',gerenteNome)}]});
     S.DB.estudios.unshift(e);S.DB.atual=e.id;S.state.gravarJa();S.state.registrar(`Nova empresa criada. ${gerenteNome} foi nomeada gerente e começou a fundação estratégica.`,'ok');S.bus.emit('trocou');return e;
   }
 
@@ -986,7 +1076,7 @@ Escreva de forma objetiva: o plano de negócio e o planejamento do produto devem
 O plano deve cobrir problema/oportunidade, cliente ideal, proposta de valor, diferenciais, modelo de negócio, canais, operação, métricas, riscos e roadmap inicial. Não invente faturamento, clientes, validações ou fatos externos: marque hipóteses.
 O primeiro produto deve ter nome, problema, público, escopo, entregáveis, critérios de aceitação e o que fica fora do v1.
 Os critérios de aceitação precisam ser verificáveis dentro das capacidades do estúdio. Não use como gate assinatura real, Asana/Trello/Notion, e-mail, upload, publicação externa, aprovação de terceiros nem outra ação que o runtime não executa. Produtos longos podem ser planejados em partes/capítulos incrementais; não exija que dezenas ou centenas de páginas apareçam em uma única chamada.
-Monte a equipe inicial mínima, com 2 a 4 funcionários além da gerente, usando somente os cargos-base criacao, comercial, dados, producao e geral. Um cargo pode repetir. Não crie outra gerente geral. Para cada funcionário, crie uma ficha individual coerente.
+A empresa opera em QUATRO setores fixos: criacao (Produto & Criação), producao (Tecnologia & Produção), operacoes (Operações & Dados) e comercial (Crescimento & Comercial). Setor não significa funcionário obrigatório. Monte a equipe inicial realmente mínima, com 1 a 3 funcionários além da gerente, cobrindo somente a demanda imediata do primeiro produto. Um funcionário pode colaborar fora do seu setor. Não contrate alguém apenas para preencher organograma; novas contratações devem ocorrer depois somente diante de gargalo persistente e trabalho real acumulado. Não crie outra gerente geral. Para cada funcionário criado, gere uma ficha individual coerente.
 
 ${fundacaoContexto(e)}
 
@@ -1002,7 +1092,7 @@ TOM: <tom de comunicação>
 CORES: <paleta/direção cromática>
 TIPOGRAFIA: <direção tipográfica>
 ESTILO_VISUAL: <direção visual>
-EQUIPE: <cargos-base separados por vírgula; pode repetir um cargo>
+EQUIPE: <1 a 3 setores necessários agora, usando criacao | producao | operacoes | comercial>
 FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
 FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
 FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
@@ -1042,7 +1132,7 @@ MANIFESTO
       identidade.manifesto=(mm?mm[1]:'').trim().slice(0,4000);
       e.nome=identidade.nome||e.nome;e.ramo=limparTexto(c.ramo)||e.ramo||e.fundacao.perguntas.tipoProduto||'empresa de produto';e.missao=identidade.missao||e.missao;e.tom=identidade.tom||e.tom;e.publico=e.fundacao.perguntas.publico||e.publico;
       const validos=new Set(ESPECIALIDADES.map(x=>x.id));
-      const aliases={criacao:['criação','criativa','design','produto','criacao','conteudo','conteúdo','editorial','escrita'],comercial:['comercial','marketing','vendas','negócios','negocios'],dados:['dados','data','analise','análise','analytics'],producao:['produção','producao','desenvolvimento','engenharia','tech','revisao','revisão'],geral:['geral','operações','operacoes','multifuncional']};
+      const aliases={criacao:['criação','criativa','design','produto','criacao','conteudo','conteúdo','editorial','escrita'],comercial:['comercial','marketing','vendas','negócios','negocios','crescimento'],operacoes:['dados','data','analise','análise','analytics','operações','operacoes','qa','financeiro'],producao:['produção','producao','desenvolvimento','engenharia','tech','revisao','revisão','geral','multifuncional']};
       const normalizarEsp=(valor)=>{const v=limparTexto(valor).toLowerCase(); if(validos.has(v)) return v; for(const [id,arr] of Object.entries(aliases)){if(arr.some(a=>v===a || v.includes(a))) return id;} return null;};
       let planejadas=parseLista(c.equipe).map(normalizarEsp).filter(Boolean);
       const linhasFuncionarios=String(r.texto||'').split(/\n+/).filter(l=>/^\s*FUNCIONARIO\s*:/i.test(l));
@@ -1052,16 +1142,16 @@ MANIFESTO
         const esp=normalizarEsp(obj.cargo); if(esp){obj.cargo=esp;funcionarios.push(obj);}
       });
       if(funcionarios.length) planejadas=funcionarios.map(x=>x.cargo);
-      planejadas=planejadas.slice(0,4);
+      planejadas=planejadas.slice(0,3);
       // A gerente nunca fica sozinha por falha de formato: sem ficha válida,
       // preservamos os cargos mínimos e criamos fichas coerentes.
-      if(planejadas.length<2){
+      if(planejadas.length<1){
         const tipo=String(e.fundacao?.perguntas?.tipoProduto||'').toLowerCase();
-        const padrao=/software|app|site|web|ia|tecnolog|produto digital/.test(tipo) ? ['producao','criacao','comercial'] : ['criacao','producao','comercial'];
-        for(const id of padrao) if(planejadas.length<3) planejadas.push(id);
+        const padrao=/software|app|site|web|ia|tecnolog|produto digital/.test(tipo) ? ['producao','criacao'] : ['criacao','producao'];
+        for(const id of padrao) if(planejadas.length<2) planejadas.push(id);
       }
       e.fundacao.equipePlanejada=planejadas.map((especialidade,i)=>({especialidade,funcionario:funcionarios[i]||null}));
-      e.fundacao.equipePlanejada.slice(0,4).forEach(item=>contratarPerfil(e,item.funcionario?.nome||'',item.especialidade,item.funcionario||{},'gerência fundadora'));
+      e.fundacao.equipePlanejada.slice(0,3).forEach(item=>contratarPerfil(e,item.funcionario?.nome||'',item.especialidade,item.funcionario||{},'gerência fundadora'));
       montar();
       const pr=e.projetos?.find(x=>x.status==='ativo')||e.projetos?.[0],produtoTit=limparTexto(((e.fundacao.primeiroProduto.match(/(?:^|\n)#{0,3}\s*(?:Nome do produto|Produto|Nome)\s*:?\s*(.+)/i)||[])[1]||'Primeiro produto')).slice(0,180);
       if(!pr)e.projetos=[{id:uid('proj'),nome:produtoTit,objetivo:e.fundacao.perguntas.objetivo||'Executar o planejamento do primeiro produto.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}];else if(/primeiro produto|principal|planejamento inicial/i.test(pr.nome)){pr.nome=produtoTit||pr.nome;pr.objetivo=e.fundacao.perguntas.objetivo||pr.objetivo;}
@@ -1079,7 +1169,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
       e.fundacao.ultimoErro=String(err&&err.message||err).slice(0,400);
       S.state.registrar(`A fundação foi concluída com ressalvas: ${e.fundacao.ultimoErro}`,'alerta');
       if((e.equipe||[]).filter(f=>f.papel==='func').length===0){
-        ['criacao','producao','comercial'].forEach(id=>contratarPerfil(e,'',id,{},'equipe mínima de recuperação'));
+        ['criacao','producao'].forEach(id=>contratarPerfil(e,'',id,{},'equipe mínima de recuperação'));
         montar();
       }
     }
@@ -1133,6 +1223,19 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     return f ? rtById(f.id) : rt.find(x => x.id !== p.id && x.papel === 'func' && !x.ocupado && x.estado === 'sentado');
   }
 
+  function necessidadeContratacao(e, especialidade){
+    const esp=ESPECIALIDADES.find(x=>x.id===especialidade);if(!e||!esp)return{ok:false,motivo:'setor inválido'};
+    const funcs=(e.equipe||[]).filter(f=>f.papel==='func');
+    if(funcs.length>=5)return{ok:false,motivo:'quadro já atingiu o teto enxuto de 5 funcionários'};
+    e.gerencia=e.gerencia||{}; if(Date.now()-Number(e.gerencia.ultimaContratacao||0)<30*60*1000)return{ok:false,motivo:'contratação recente; observar a capacidade antes de ampliar novamente'};
+    const abertas=(e.tarefas||[]).filter(t=>t.status!=='feita'&&!t.bloqueada);
+    const noSetor=funcs.filter(f=>f.especialidade===especialidade);
+    const compat=t=>{const k=String(t.kit||'autonomo');return especialidade==='producao'?/pagina|codigo/.test(k):especialidade==='operacoes'?/dados/.test(k):especialidade==='criacao'?/texto|visual/.test(k):especialidade==='comercial'?/comercial/.test(k):false;};
+    const demanda=abertas.filter(t=>compat(t)||(!t.para&&String(t.kit||'')==='autonomo'));
+    const sobrecarga=demanda.length>=Math.max(3,(noSetor.length||1)*3);
+    return sobrecarga?{ok:true,demanda:demanda.length}:{ok:false,motivo:`demanda insuficiente (${demanda.length} tarefas compatíveis); redistribuir trabalho antes de contratar`};
+  }
+
   async function materializarDecisaoAgente(p, d) {
     const e = S.state.atual(); if (!e || !p || !d) return false;
     const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
@@ -1175,11 +1278,15 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
        verdade, senão "contratar" vira uma decisão sem consequência. */
     if (d.acao === 'contratar') {
       if (p.papel !== 'gerente') return false;
-      if ((e.equipe || []).length >= 8) return false;
+      if ((e.equipe || []).filter(f=>f.papel==='func').length >= 5) return false;
       const ficha = parseFicha(d.funcionario || '');
       const esp = ESPECIALIDADES.find(x => x.id === String(d.especialidade || ficha.cargo || '').trim().toLowerCase());
-      const novo = contratarPerfil(e, ficha.nome || '', esp ? esp.id : 'geral', ficha, `decisão de ${p.nome}`);
+      if(!esp)return false;
+      const precisa=necessidadeContratacao(e,esp.id);
+      if(!precisa.ok){ registrarReuniao(p.nome, `Não contratei agora: ${precisa.motivo}.`, 'decisao'); logPessoa(p,`evitou contratação sem necessidade: ${precisa.motivo}.`,'gerencia'); return false; }
+      const novo = contratarPerfil(e, ficha.nome || '', esp ? esp.id : 'producao', ficha, `decisão de ${p.nome}`);
       if (!novo) return false;
+      e.gerencia.ultimaContratacao=Date.now();
       montar();
       registrarReuniao(p.nome, `Contratei ${novo.nome} para ${novo.cargo}. ${d.motivo || d.abordagem || ''}`.trim(), 'decisao');
       logPessoa(p, `contratou ${novo.nome} (${novo.cargo}).`, 'gerencia');
@@ -1233,7 +1340,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
       if (pensamento && pensamento.resumo) {
         p.ref.pensamento = pensamento.resumo.slice(0,500); p.balao = pensamento.resumo.slice(0,70);
         logPessoa(p, `decidiu como agir: ${pensamento.resumo}`, 'pensamento');
-        lembrar(p, `Decisão de execução: ${pensamento.resumo.slice(0,180)}`);
+        lembrar(p, `Decisão de execução: ${pensamento.resumo.slice(0,240)}`, 'decisao', 3, [tarefa.id]);
       }
       p.balao = 'produzindo';
       const saida = await S.factory.produzir({ kit:tarefa.kit || 'autonomo', briefing:tarefa.briefing, deliberacao:p.ref.pensamento, agente:p.ref, projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId });
@@ -1249,7 +1356,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         const proj=e.projetos.find(x=>x.id===tarefa.projectId); if(proj){ salvos.forEach(a=>{if(!proj.arquivoIds.includes(a.id))proj.arquivoIds.unshift(a.id);}); proj.atividade.unshift({t:Date.now(),tipo:'entrega',texto:`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')}.`}); proj.atividade=proj.atividade.slice(-40); }
         logPessoa(p, `entregou ${salvos.map(a=>a.nome).join(', ')}. A gerente agora pode ler o conteúdo e decidir o próximo passo.`, 'entrega');
         p.ref.pensamento = `Entreguei ${salvos[0].nome}; agora a gerente deve inspecionar o conteúdo e decidir se continua, corrige, descarta ou publica.`;
-        lembrar(p, `Entrega: ${salvos[0].nome}; aguardando decisão da gerente.`); sucesso=true;
+        lembrar(p, `Entrega: ${salvos[0].nome}; aguardando decisão da gerente.`, 'entrega', 4, [salvos[0].id, tarefa.id]); sucesso=true;
       } else throw new Error('Nenhuma transformação foi produzida.');
     } catch(err) {
       tarefa.status='aberta';
@@ -1293,22 +1400,25 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
       const pendente=e.arquivos.find(a=>(a.classe==='candidato'||a.classe==='prototipo')&&!a.avaliado);
       if(pendente){ await avaliar(g); return; }
       const ultima=g._agencia&&g._agencia.ultima||0;
-      if(Date.now()-ultima>=60000){
+      const abertasGerencia=(e.tarefas||[]).filter(t=>t.status!=='feita'&&!t.bloqueada);
+      // Sem entrega para revisar e sem gargalo urgente, a gerente também vive no
+      // escritório em vez de consultar IA a cada minuto. Ela faz uma varredura
+      // estratégica esparsa para descobrir/delegar a próxima frente de trabalho.
+      const cadenciaGerencia=abertasGerencia.length ? 180000 : 240000;
+      if(Date.now()-ultima>=cadenciaGerencia){
         const d=await S.agency.decidir(g,true);
         if(d){ S.agency.marcarAcao(g,d); const fez=await materializarDecisaoAgente(g,d); if(fez)return; }
       }
     }
 
-    const livres=rt.filter(p=>p.papel==='func'&&!p.ocupado&&p.estado!=='pausa'&&Number(p.ref.energia)>20).slice(0,3);
+    // Funcionários não queimam tokens para inventar trabalho. Primeiro procuram
+    // localmente tarefas existentes/sem dono. Sem tarefa útil, entram no modo
+    // Sims-like e ficam disponíveis até a gerente ou a fila produzir demanda.
+    const livres=rt.filter(p=>p.papel==='func'&&!p.ocupado&&p.estado!=='pausa'&&Number(p.ref.energia)>20).slice(0,4);
     await Promise.allSettled(livres.map(async p=>{
-      const atribuida=tarefasAbertas().find(t=>t.para===p.id&&dependenciasOK(t));
-      if(atribuida){ await executar(p,atribuida); return; }
-      if(!S.ai.disponivel(p.id)) return;
-      const d=await S.agency.decidir(p);
-      if(!d) return;
-      if (['criar_tarefa','colaborar','reuniao'].includes(d.acao) && (d.motivo || d.titulo)) registrarIdeia({titulo:d.titulo || d.acao, objetivo:e.missao, proposta:d.motivo || d.abordagem, participantes:[{id:p.id,nome:p.nome,fala:d.motivo || d.abordagem || d.acao}], projetoId:d.projetoId || null, status:'observada'});
-      S.agency.marcarAcao(p,d);
-      await materializarDecisaoAgente(p,d);
+      const atribuida=tarefaAdequadaLocal(e,p);
+      if(atribuida){ if(p.estado!=='sentado')await acordarParaTrabalho(p); atribuida.para=p.id; await executar(p,atribuida); return; }
+      entrarOcio(p,'nenhuma tarefa executável está disponível');
     }));
   }
 
@@ -1317,7 +1427,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     const alvo = meu == null ? token : meu;
     motorTimer = setInterval(() => { ciclo(alvo).catch(err => console.error('ciclo', err)); }, 6000);
     vitaisTimer = setInterval(tickVitais, 7000);
-    socialTimer = null;
+    socialTimer = setInterval(() => { try { socializar(); } catch(_){} }, 30000);
     if (!animacao) laco();
   }
   function parar() {

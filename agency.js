@@ -33,11 +33,20 @@
       return `${f.id}=${f.nome} (${f.cargo}, ${f.especialidade}, ${estado}, energia ${Math.round(Number(f.energia)||0)}, foco: ${max(f.foco,90)})`;
     }).join('; ');
   }
+  function memoriasRelevantes(p, termos){
+    const mem=Array.isArray(p.ref&&p.ref.memoria)?p.ref.memoria:[];
+    const toks=String(termos||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').split(/[^a-z0-9]+/).filter(x=>x.length>3);
+    const score=m=>{const t=String(m&&m.texto||m||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');let n=Number(m&&m.peso||2)*2;for(const k of toks.slice(0,40))if(t.includes(k))n+=2;const idade=Math.max(0,(Date.now()-Number(m&&m.t||0))/86400000);if(idade<1)n+=2;return n;};
+    return mem.slice().sort((a,b)=>score(b)-score(a)).slice(0,12).map(m=>typeof m==='string'?m:(m.texto||'')).filter(Boolean);
+  }
   function contexto(e, p) {
     const pr = projetoAtual(e, p);
     const arqs = arquivosDoProjeto(e, pr);
     const tarefas = tarefasDoProjeto(e, pr);
-    const memorias = Array.isArray(p.ref && p.ref.memoria) ? p.ref.memoria : (Array.isArray(p.memoria) ? p.memoria : []);
+    const termos=[pr&&pr.nome,pr&&pr.objetivo,...tarefas.map(t=>t.titulo),...arqs.map(a=>a.nome)].filter(Boolean).join(' ');
+    const memorias = memoriasRelevantes(p,termos);
+    const toksOrg=termos.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').split(/[^a-z0-9]+/).filter(x=>x.length>3);
+    const memOrg=(e.memoriaOrganizacional||[]).slice().sort((a,b)=>{const sc=m=>{const t=String(m.texto||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');return Number(m.peso||2)*2+toksOrg.slice(0,35).reduce((n,k)=>n+(t.includes(k)?1:0),0)};return sc(b)-sc(a)}).slice(0,10);
     const decisoes = (e.decisoes || []).slice(0, 8).map(d => max(d.texto,180)).join(' | ');
     return {
       projeto: pr,
@@ -49,9 +58,10 @@
         `PROJETO: ${pr ? pr.nome : 'nenhum'} | objetivo: ${pr ? pr.objetivo : e.missao} | status: ${pr ? pr.status : 'sem projeto'}`,
         `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}]`).join('; ') : 'nenhum'}`,
         `TRABALHO ABERTO: ${tarefas.length ? tarefas.map(t => `${t.id}:${t.titulo}[${t.status}, responsável=${t.para||'livre'}, base=${t.baseArquivoId||'nenhuma'}]`).join('; ') : 'nenhum'}`,
-        `CAPACIDADE DE PRODUÇÃO: criação e edição de arquivos reais. Formatos possíveis: html, md, txt, csv, json, js, css e outros compatíveis com o trabalho.`,
+        `CAPACIDADE DE PRODUÇÃO: criação e edição de arquivos reais; texto/código em html, md, txt, csv, tsv, json, jsonl, js, ts, tsx, jsx, css, scss, xml, yaml, svg, py, sql, sh e webmanifest; projetos multi-arquivo exportáveis em ZIP; e imagens reais quando a tarefa pedir arte visual.`,
         `EQUIPE: ${equipeContexto(e)}`,
-        `MEMÓRIA DE ${p.nome}: ${memorias.slice(-8).map(m => typeof m === 'string' ? m : (m.texto || '')).filter(Boolean).join(' | ') || 'nenhuma'}`,
+        `MEMÓRIA RELEVANTE DE ${p.nome}: ${memorias.join(' | ') || 'nenhuma'}${p.ref.memoriaResumo?' | MARCOS IMPORTANTES: '+max(p.ref.memoriaResumo,1200):''}`,
+        `MEMÓRIA ORGANIZACIONAL RELEVANTE: ${memOrg.map(m=>`${m.por||'equipe'}: ${max(m.texto,220)}`).join(' | ') || 'nenhuma'}`, 
         `DECISÕES RECENTES: ${decisoes || 'nenhuma'}`,
         `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`,
         `AMBIENTE: ${((e.ambiente&&e.ambiente.objetos)||[]).slice(-12).map(o => `${o.id}:${o.nome}@${Math.round(o.x)},${Math.round(o.y)} uso=${o.uso||0} por=${o.por||'equipe'}`).join('; ') || 'vazio'} | orçamento=${e.ambiente&&e.ambiente.moedas!=null?e.ambiente.moedas:'indisponível'}`
@@ -130,7 +140,7 @@ REGRA SOCIAL: quando outra pessoa pode melhorar a decisão, converse com ela e r
 Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
 LIMITE DE FERRAMENTAS: você e seus colegas só conseguem ler o estado do estúdio e criar/editar arquivos persistentes nele. Não podem enviar e-mail, usar Asana/Trello/Drive, obter assinaturas, publicar em redes/lojas, contatar pessoas ou confirmar eventos externos. Nunca crie tarefa cujo aceite dependa de uma dessas ações. Se uma ação externa for desejável, produza internamente o material preparatório e registre a dependência como externa para o dono, sem fingir execução.
 ${p.papel === 'gerente' ? `REGRA EXECUTIVA: você é a autoridade final. Leia os artefatos, acompanhe o trabalho real, decida o que continua, muda, é descartado ou está pronto para release. Quando precisar de opinião, convoque os envolvidos. Quando decidir uma ação, encaminhe-a ao responsável. Seu ciclo deve deixar o projeto em um estado diferente ou claramente justificar uma dependência real.
-REGRA DE QUADRO DE PESSOAL: você também administra a equipe. Os únicos cargos-base disponíveis são Criação (criacao), Comercial (comercial), Dados (dados), Produção (producao) e Generalista (geral). Você decide quantas pessoas de cada cargo são necessárias conforme a demanda, gargalos, especialização e carga real. Pode haver várias pessoas no mesmo cargo. Só pode existir UMA gerente geral. Não contrate para manter atividade artificial: contrate apenas quando houver trabalho recorrente, gargalo ou capacidade necessária que a equipe atual não consiga cobrir. Pode demitir quando uma função estiver estruturalmente sem demanda ou houver excesso de capacidade. Antes de contratar ou demitir, observe o quadro atual e as tarefas abertas. Se contratar, descreva um perfil coerente para a nova pessoa no campo FUNCIONARIO. Se demitir, informe o ID exato da pessoa em FUNCIONARIO.` : ''}
+REGRA DE QUADRO DE PESSOAL: você também administra a equipe. A organização possui somente quatro setores: Produto & Criação (criacao), Tecnologia & Produção (producao), Operações & Dados (operacoes) e Crescimento & Comercial (comercial). Você decide quantas pessoas de cada cargo são necessárias conforme a demanda, gargalos, especialização e carga real. Pode haver várias pessoas no mesmo cargo. Só pode existir UMA gerente geral. Setor não precisa ter funcionário fixo. Antes de contratar, redistribua tarefas e use a capacidade existente. Só contrate diante de backlog persistente e mensurável que a equipe atual não consiga absorver; o runtime também rejeitará contratação sem demanda suficiente. Pode demitir quando uma função estiver estruturalmente sem demanda ou houver excesso de capacidade. Antes de contratar ou demitir, observe o quadro atual e as tarefas abertas. Se contratar, descreva um perfil coerente para a nova pessoa no campo FUNCIONARIO. Se demitir, informe o ID exato da pessoa em FUNCIONARIO.` : ''}
 
 Retorne SOMENTE:
 ACAO: <uma das ações>
@@ -144,7 +154,7 @@ MOTIVO: <por que esta é a melhor ação agora, até 35 palavras>
 ABORDAGEM: <como pretende agir, até 45 palavras>
 RISCO: <principal risco ou incerteza, até 30 palavras>
 OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, bancada; senão vazio>
-ESPECIALIDADE: <se contratar, criacao | comercial | dados | producao | geral; senão vazio>
+ESPECIALIDADE: <se contratar, criacao | producao | operacoes | comercial; senão vazio>
 FUNCIONARIO: <se contratar, uma ficha curta no formato nome=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...; se demitir, o ID exato; senão vazio>`;
 
     try {
@@ -160,9 +170,9 @@ FUNCIONARIO: <se contratar, uma ficha curta no formato nome=...; tracos=...; com
       p.ref.foco = d.titulo || d.abordagem || d.acao || 'próxima ação';
       p.balao = (d.motivo || d.abordagem || d.acao || '').slice(0, 70);
       if (d.motivo) {
-        p.memoria = Array.isArray(p.memoria) ? p.memoria : [];
-        p.memoria.unshift({ t: agora(), texto: `Autonomia: ${d.acao}. ${d.motivo}` });
-        p.memoria = p.memoria.slice(0, 24);
+        p.ref.memoria = Array.isArray(p.ref.memoria) ? p.ref.memoria : [];
+        p.ref.memoria.push({ id:'mem'+agora().toString(36), t:agora(), tipo:'decisao', peso:d.executivo?4:3, refs:[d.tarefa,d.base,d.colega].filter(Boolean), texto:`Autonomia: ${d.acao}. ${d.motivo}${d.abordagem?' Abordagem: '+d.abordagem:''}`.slice(0,420) });
+        p.ref.memoria = p.ref.memoria.slice(-80);
       }
       S.bus.emit('equipe');
       return d;
