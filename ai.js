@@ -170,6 +170,10 @@
 
   const chave = () => chaves[cfg.provedor];
   function pronta() { return Boolean(chaves.openrouter) && !estado.pausado; }
+  // O Estúdio usa somente OpenRouter. Mantemos esta função como ponto único
+  // de decisão para o restante do motor, sem qualquer referência a roteamento
+  // Groq/automático.
+  function provedorAtualDeRota() { return 'openrouter'; }
   function disponivel(agenteId) {
     const l = lane(agenteId);
     const p = provedorAtualDeRota(); const sp = stateProvedor(p);
