@@ -256,3 +256,7 @@ O orçamento da IA pode ser definido em dólar por ciclo de 30 dias. O limite di
 ## v45.1 — Trabalho intensivo
 
 O modo **Trabalho intensivo** permite que a equipe ignore o teto diário em dólar e use o saldo disponível do ciclo de 30 dias. O limite mensal/ciclo continua sendo absoluto; chamadas que não couberem no saldo restante não são enviadas. O limite diário permanece como referência quando o modo normal está ativo.
+
+
+## v46.1
+Correção do sincronismo de limite da chave OpenRouter: `limit_remaining=null` agora é tratado como ausência de limite, não como US$ 0. HTTP 402 é tratado como falta real de créditos.

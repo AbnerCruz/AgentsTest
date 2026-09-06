@@ -1023,6 +1023,15 @@ window.S = window.S || {};
     g.status=(g.headers.restaReq===0 || g.headers.restaTok===0)?'esgotado':'disponivel';
     return g.headers;
   }
+  /* OpenRouter separa o saldo da conta do limite opcional da chave.
+     Em GET /api/v1/key, limit_remaining=null significa "sem limite de
+     chave". Nunca use Number(null), pois isso vira 0 e faria a aplicação
+     acreditar que uma conta com saldo está esgotada. */
+  function numeroOpcional(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
   async function sincronizarOpenRouter() {
     if(!chaves.openrouter) return null;
     const o=stateProvedor('openrouter');
@@ -1031,12 +1040,25 @@ window.S = window.S || {};
       const d=await r.json().catch(()=>null);
       if(!r.ok) throw new Error((d&&d.error&&d.error.message)||('HTTP '+r.status));
       const x=d&&d.data||d||{};
-      o.ultimoSync=Date.now(); o.status='disponivel'; o.limiteRestante=Number.isFinite(Number(x.limit_remaining))?Number(x.limit_remaining):null;
-      o.uso=Number.isFinite(Number(x.usage))?Number(x.usage):null; o.usoDiario=Number.isFinite(Number(x.usage_daily))?Number(x.usage_daily):null; o.usoMensal=Number.isFinite(Number(x.usage_monthly))?Number(x.usage_monthly):null;
-      if(x.limit===null || x.limit===undefined) o.limite= null; else o.limite=Number(x.limit);
-      if(o.limiteRestante !== null && o.limiteRestante <= 0) o.status='esgotado';
+      const limite=numeroOpcional(x.limit);
+      const restante=numeroOpcional(x.limit_remaining);
+      o.ultimoSync=Date.now();
+      o.status='disponivel';
+      o.limite=limite;
+      o.limiteRestante=(limite !== null) ? restante : null;
+      o.temLimiteChave=(limite !== null);
+      o.uso=numeroOpcional(x.usage);
+      o.usoDiario=numeroOpcional(x.usage_daily);
+      o.usoMensal=numeroOpcional(x.usage_monthly);
+      /* Só bloqueia por limite de chave quando o próprio OpenRouter
+         informou que existe um limite. Null = ilimitado. */
+      if(limite !== null && restante !== null && restante <= 0) o.status='esgotado';
       return x;
-    } catch(e) { o.status='indisponivel'; o.erro=String(e.message||e); return null; }
+    } catch(e) {
+      o.status='indisponivel';
+      o.erro=String(e.message||e);
+      return null;
+    }
   }
 
   function contabilizar(modelo, dados, ms, provedorUsado) {
@@ -1141,7 +1163,7 @@ window.S = window.S || {};
     }
     if (provedorUsado === 'openrouter' && !op._failover) await sincronizarOpenRouter();
     const orStatus = stateProvedor('openrouter');
-    if (provedorUsado === 'openrouter' && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) <= 0) {
+    if (provedorUsado === 'openrouter' && orStatus.temLimiteChave === true && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) <= 0) {
       const er=new Error('Limite real da chave OpenRouter esgotado. A equipe não fará novas chamadas pagas até a renovação ou aumento do limite.'); er.cota=true; throw er;
     }
     if (Date.now() < l.bloqueadaAte && !op.forcar) {
@@ -1156,7 +1178,7 @@ window.S = window.S || {};
     const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
     const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
     const custoEstimado = estimarCusto(provedorUsado, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
-    if (provedorUsado === 'openrouter' && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) < custoEstimado) {
+    if (provedorUsado === 'openrouter' && orStatus.temLimiteChave === true && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) < custoEstimado) {
       const er=new Error(`Saldo/limite real do OpenRouter insuficiente para esta chamada (restante ~US$ ${Number(orStatus.limiteRestante).toFixed(4)}).`); er.cota=true; throw er;
     }
     if (custoEstimado > 0 && (custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
@@ -1193,7 +1215,13 @@ window.S = window.S || {};
       if(!resp.ok){
         const msg=(dados&&dados.error&&dados.error.message)||`${provInfo.nome} respondeu HTTP ${resp.status}.`;
         if(resp.status===401) throw new Error(`Chave ${provInfo.rotulo} inválida ou expirada.`);
-        if(resp.status===429){
+        if(resp.status===429 || (provedorUsado==='openrouter' && resp.status===402)){
+          if (provedorUsado==='openrouter' && resp.status===402) {
+            sp.status='esgotado';
+            const er=new Error('Créditos do OpenRouter insuficientes. O provedor recusou a chamada paga (HTTP 402).');
+            er.cota=true;
+            throw er;
+          }
           const espera=esperaDoProvedor(resp,dados);
           sp.bloqueadaAte=Date.now()+espera;
           sp.ultimo429=Date.now(); sp.status='esgotado';
@@ -3465,7 +3493,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Modo de provedor</span><b>${o.roteamento === 'automatico' ? 'Groq grátis → OpenRouter' : o.provedor}</b></div>
-        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter sincronizado</span><b>${r.status}${r.limiteRestante!=null?' · US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':''}</b></div>`; })()}
+        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter sincronizado</span><b>${r.status}${r.temLimiteChave && r.limiteRestante!=null?' · US$ '+Number(r.limiteRestante).toFixed(4)+' no limite da chave':(r.status==='disponivel'?' · sem limite de chave':'')}</b></div>`; })()}
         <div class="stat"><span>Modo de trabalho</span><b>${o.modoOrcamento === 'intensivo' ? 'Trabalho intensivo' : 'Normal'}</b></div>
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
         ${(o.esgotado || o.esgotadoDia || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? `<p class="panel-foot" style="color:#E08573"><strong>${o.esgotado ? 'Orçamento do ciclo esgotado.' : 'Limite diário esgotado.'}</strong> A equipe não fará novas chamadas e entra em rotina Sims-like até ${o.esgotado ? 'o próximo ciclo de 30 dias' : 'o próximo dia'}. ${(!o.esgotado && o.modoOrcamento !== 'intensivo') ? 'Ative Trabalho intensivo se quiser usar o saldo mensal restante hoje.' : ''}</p>` : ''}
