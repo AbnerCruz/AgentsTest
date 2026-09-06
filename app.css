@@ -226,14 +226,34 @@ p{margin:0;}
   display:flex;align-items:center;gap:7px;
   font-size:11.5px;color:var(--ink-2);margin-bottom:6px;font-weight:550;
 }
-input[type=text],input[type=password],select,textarea{
-  width:100%;background:var(--bg-2);border:1px solid var(--line);
+/* Campos de formulário — inclui números, que antes ficavam com o estilo
+   nativo do navegador, e separa checkboxes dos campos de texto. */
+input[type=text],input[type=password],input[type=number],input[type=email],
+input[type=url],select,textarea{
+  width:100%;min-width:0;box-sizing:border-box;
+  background:var(--bg-2);border:1px solid var(--line);
   border-radius:var(--r);padding:10px 12px;font-size:14px;color:var(--ink);
-  transition:border-color .14s;
+  transition:border-color .14s,box-shadow .14s,background .14s;
+  -webkit-appearance:none;appearance:none;
 }
 textarea{resize:vertical;min-height:74px;line-height:1.5;}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--ember);}
+input:focus,select:focus,textarea:focus{
+  outline:none;border-color:var(--ember);
+  box-shadow:0 0 0 2px rgba(228,112,62,.10);
+}
 input::placeholder,textarea::placeholder{color:var(--ink-3);}
+input[type=number]{font-variant-numeric:tabular-nums;}
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button{opacity:.55;margin:0;}
+.field > label:has(input[type=checkbox]){
+  display:flex;align-items:center;gap:9px;cursor:pointer;
+  font-size:13px;color:var(--ink);margin-bottom:0;
+}
+.field > label input[type=checkbox]{
+  width:17px;height:17px;min-width:17px;flex:0 0 17px;
+  margin:0;padding:0;appearance:auto;-webkit-appearance:auto;
+  accent-color:var(--ember);box-shadow:none;
+}
 select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236F797D' stroke-width='2'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:34px;}
 
@@ -513,10 +533,10 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
    estouravam a linha do painel e o teclado do iOS dava zoom em campos
    com fonte menor que 16px. */
 select{text-overflow:ellipsis;}
-input[type=text],input[type=password],select,textarea{max-width:100%;}
+input[type=text],input[type=password],input[type=number],input[type=email],input[type=url],select,textarea{max-width:100%;}
 
 @media (max-width:899px){
-  input[type=text],input[type=password],select,textarea{font-size:16px;}
+  input[type=text],input[type=password],input[type=number],input[type=email],input[type=url],select,textarea{font-size:16px;}
   .row-actions{display:flex;flex-wrap:wrap;gap:8px;}
   .row-actions .btn{flex:1 1 auto;min-width:44%;justify-content:center;}
   .hint,.panel-foot,.sub{overflow-wrap:anywhere;}
