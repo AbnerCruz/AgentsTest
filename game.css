@@ -1,0 +1,112 @@
+:root{
+  --bg:#0B0D0F; --painel:#12161A; --painel2:#171C21; --borda:#232A30;
+  --texto:#E7E9EA; --texto-fraco:#8C9497; --accent:#E4703E; --ok:#6FA98A; --alerta:#D9A441;
+  --raio:12px;
+}
+*{box-sizing:border-box;}
+html,body{height:100%;margin:0;overflow:hidden;}
+body{
+  background:var(--bg); color:var(--texto);
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  display:flex; flex-direction:column;
+  image-rendering:pixelated;
+}
+
+/* ---------- HUD superior ---------- */
+.hud{
+  display:flex; align-items:center; gap:14px;
+  padding:8px 14px; background:var(--painel); border-bottom:1px solid var(--borda);
+  flex:0 0 auto; z-index:5;
+}
+.hud-marca{display:flex; align-items:center; gap:8px; min-width:0;}
+.hud-logo{
+  width:34px; height:34px; border-radius:9px; background:linear-gradient(135deg,var(--accent),#c0532a);
+  display:flex; align-items:center; justify-content:center; font-weight:800; flex:0 0 auto;
+}
+.hud-marca b{display:block; font-size:14px; line-height:1.15; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:32vw;}
+.hud-marca small{display:block; color:var(--texto-fraco); font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:32vw;}
+.hud-stats{display:flex; gap:8px; flex:1 1 auto; overflow-x:auto; scrollbar-width:none;}
+.hud-stats::-webkit-scrollbar{display:none;}
+.hud-stat{
+  display:flex; align-items:center; gap:6px; padding:6px 10px; background:var(--painel2);
+  border:1px solid var(--borda); border-radius:9px; font-size:12px; white-space:nowrap; flex:0 0 auto;
+}
+.hud-stat b{font-size:13px;}
+.hud-stat small{color:var(--texto-fraco);}
+.hud-acoes{display:flex; gap:6px; flex:0 0 auto;}
+.hud-icone{
+  width:34px; height:34px; border-radius:9px; background:var(--painel2); border:1px solid var(--borda);
+  color:var(--texto); font-size:15px; cursor:pointer;
+}
+.hud-icone:active{background:var(--accent); border-color:var(--accent);}
+
+/* ---------- mundo (canvas + rail) ---------- */
+.mundo{flex:1 1 auto; display:flex; min-height:0; position:relative;}
+.chao-wrap{flex:1 1 auto; position:relative; background:#08090A; min-width:0;}
+#floor{width:100%; height:100%; display:block;}
+.vazio{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(8,9,10,.86);}
+.vazio.oculto{display:none;}
+.vazio-card{max-width:420px; text-align:center; padding:0 20px;}
+.vazio-card h1{font-size:20px; margin:0 0 8px;}
+.vazio-card p{color:var(--texto-fraco); font-size:13px; line-height:1.5; margin:0 0 18px;}
+
+.rail{
+  width:280px; flex:0 0 auto; background:var(--painel); border-left:1px solid var(--borda);
+  padding:12px; overflow-y:auto; display:flex; flex-direction:column; gap:10px;
+}
+.rail-card{background:var(--painel2); border:1px solid var(--borda); border-radius:var(--raio); padding:10px 12px;}
+.rail-card b{font-size:14px;}
+.rail-sub{color:var(--texto-fraco); font-size:12px; margin:4px 0 0;}
+.rail-rotulo{font-size:10px; letter-spacing:.06em; text-transform:uppercase; color:var(--texto-fraco);}
+.rail-card p{font-size:12.5px; line-height:1.45; margin:4px 0 0; white-space:pre-wrap;}
+
+/* ---------- dock inferior ---------- */
+.dock{
+  flex:0 0 auto; display:flex; gap:1px; background:var(--borda);
+  height:clamp(150px, 24vh, 230px); border-top:1px solid var(--borda);
+}
+.painel{flex:1 1 0; background:var(--painel); display:flex; flex-direction:column; min-width:0;}
+.painel-head{padding:7px 10px; font-size:12px; font-weight:700; border-bottom:1px solid var(--borda); color:var(--texto-fraco); flex:0 0 auto;}
+.painel-corpo{flex:1 1 auto; overflow-y:auto; padding:8px 10px; font-size:12.5px;}
+.painel-corpo.lista .item{padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05);}
+.painel-corpo.lista .item small{display:block; color:var(--texto-fraco); margin-top:2px;}
+.painel-corpo.chat .fala{padding:6px 0; border-bottom:1px solid rgba(255,255,255,.05);}
+.painel-corpo.chat .fala b{color:var(--accent);}
+.chat-input{display:flex; gap:6px; padding:8px; border-top:1px solid var(--borda); flex:0 0 auto;}
+.chat-input input{
+  flex:1 1 auto; background:var(--painel2); border:1px solid var(--borda); border-radius:8px;
+  color:var(--texto); padding:7px 9px; font-size:12.5px;
+}
+.chat-input button{
+  background:var(--accent); border:none; color:#161311; font-weight:700; border-radius:8px; padding:0 14px; font-size:12.5px;
+}
+
+/* ---------- modal ---------- */
+.modal{position:fixed; inset:0; background:rgba(0,0,0,.6); display:flex; align-items:center; justify-content:center; z-index:20;}
+.modal.oculto{display:none;}
+.modal-caixa{background:var(--painel); border:1px solid var(--borda); border-radius:var(--raio); padding:18px; width:min(94vw,460px); max-height:88vh; overflow-y:auto;}
+.modal-caixa h2{margin:0 0 12px; font-size:16px;}
+.modal-caixa label{display:block; font-size:11px; color:var(--texto-fraco); margin:10px 0 4px;}
+.modal-caixa input, .modal-caixa textarea, .modal-caixa select{
+  width:100%; background:var(--painel2); border:1px solid var(--borda); border-radius:8px; color:var(--texto);
+  padding:8px 9px; font-size:13px; font-family:inherit;
+}
+.modal-caixa textarea{min-height:56px; resize:vertical;}
+.modal-linha{display:flex; gap:10px; margin-top:16px;}
+.botao{
+  background:var(--accent); border:none; color:#161311; font-weight:700; border-radius:9px; padding:10px 16px; font-size:13px; cursor:pointer;
+}
+.botao.fraco{background:var(--painel2); color:var(--texto); border:1px solid var(--borda);}
+.botao:disabled{opacity:.55;}
+.modal-fecha{float:right; cursor:pointer; color:var(--texto-fraco); font-size:18px;}
+
+/* ---------- toasts ---------- */
+.toasts{position:fixed; right:14px; bottom:calc(clamp(150px, 24vh, 230px) + 14px); display:flex; flex-direction:column; gap:6px; z-index:30;}
+.toast{background:var(--painel2); border:1px solid var(--borda); border-left:3px solid var(--accent); border-radius:8px; padding:8px 12px; font-size:12.5px; max-width:280px;}
+.toast.ok{border-left-color:var(--ok);}
+.toast.erro{border-left-color:#C9553F;}
+
+@media (max-width: 860px){
+  .rail{display:none;}
+  .dock{height:clamp(130px,30vh,190px);}
+}

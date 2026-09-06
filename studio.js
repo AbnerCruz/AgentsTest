@@ -26,30 +26,48 @@
   let animacao = null;
 
   /* ---------- construção ---------- */
-  function mesa(i, total) {
-    const porLinha = total > 4 ? 3 : 2;
-    const col = i % porLinha, lin = Math.floor(i / porLinha);
-    const largura = 640, margem = 76;
-    const passo = (largura - margem * 2) / Math.max(1, porLinha - 1);
-    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 72 };
-  }
-  const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
-
-  const ESTACOES = {
-    cafe: { x: 120, y: 350, rotulo: 'café/refeição' },
-    reuniao: { x: 345, y: 276, rotulo: 'reunião' },
-    quadro: { x: 525, y: 276, rotulo: 'quadro' },
-    descanso: { x: 350, y: 350, rotulo: 'descanso' },
-    dormitorio: { x: 555, y: 350, rotulo: 'dormitório' },
-    tv: { x: 465, y: 350, rotulo: 'televisão' }
+  /* Layout do chão é trocável: a UI mobile usa o padrão compacto abaixo; a
+     UI de jogo (index.html) injeta um layout de salas por departamento antes
+     de montar(). Nada muda para quem não chama definirLayout(). */
+  const LAYOUT_PADRAO = {
+    largura: 640,
+    mesa(i, total, _pessoa) {
+      const porLinha = total > 4 ? 3 : 2;
+      const col = i % porLinha, lin = Math.floor(i / porLinha);
+      const margem = 76;
+      const passo = (LAYOUT_PADRAO.largura - margem * 2) / Math.max(1, porLinha - 1);
+      return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 72 };
+    },
+    estacoes: {
+      cafe: { x: 120, y: 350, rotulo: 'café/refeição' },
+      reuniao: { x: 345, y: 276, rotulo: 'reunião' },
+      quadro: { x: 525, y: 276, rotulo: 'quadro' },
+      descanso: { x: 350, y: 350, rotulo: 'descanso' },
+      dormitorio: { x: 555, y: 350, rotulo: 'dormitório' },
+      tv: { x: 465, y: 350, rotulo: 'televisão' }
+    },
+    altura(totalPessoas) {
+      const linhas = Math.ceil(Math.max(1, totalPessoas) / (totalPessoas > 4 ? 3 : 2));
+      return Math.max(410, 74 + linhas * 72 + 120);
+    },
+    zonas: {
+      trabalho:{x:82,y:78,w:500,h:132}, arquivo:{x:82,y:214,w:150,h:108}, planejamento:{x:246,y:214,w:198,h:108}, convivio:{x:456,y:214,w:128,h:108}, bemestar:{x:82,y:330,w:150,h:40}, prototipo:{x:246,y:330,w:338,h:40}
+    },
+    limites: { minX:34, maxX:606, minY:36, maxY:355 }
   };
+  let LAYOUT = LAYOUT_PADRAO;
+  function definirLayout(cfg) { LAYOUT = cfg && typeof cfg === 'object' ? cfg : LAYOUT_PADRAO; }
+
+  function mesa(i, total, pessoa) { return LAYOUT.mesa(i, total, pessoa); }
+  const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
+  const ESTACOES = new Proxy({}, { get: (_, k) => LAYOUT.estacoes[k] });
 
   function montar() {
     const e = S.state.atual();
     token++;
     const meu = token;
     rt = (e ? e.equipe : []).map((f, i) => {
-      const m = mesa(i, (e.equipe || []).length);
+      const m = mesa(i, (e.equipe || []).length, f);
       return {
         id: f.id, nome: f.nome, papel: f.papel, cargo: f.cargo,
         especialidade: f.especialidade || 'geral', cor: f.cor,
@@ -459,12 +477,13 @@
     quadro:{nome:'Quadro',custo:140,w:62,h:12, zona:'planejamento'},
     bancada:{nome:'Bancada',custo:240,w:76,h:28, zona:'prototipo'}
   };
-  const AMB_ZONAS = {
-    trabalho:{x:82,y:78,w:500,h:132}, arquivo:{x:82,y:214,w:150,h:108}, planejamento:{x:246,y:214,w:198,h:108}, convivio:{x:456,y:214,w:128,h:108}, bemestar:{x:82,y:330,w:150,h:40}, prototipo:{x:246,y:330,w:338,h:40}
-  };
+  const AMB_ZONAS = new Proxy({}, { get: (_, k) => (LAYOUT.zonas || LAYOUT_PADRAO.zonas)[k],
+    ownKeys: () => Reflect.ownKeys(LAYOUT.zonas || LAYOUT_PADRAO.zonas),
+    getOwnPropertyDescriptor: (_, k) => Object.getOwnPropertyDescriptor(LAYOUT.zonas || LAYOUT_PADRAO.zonas, k) });
   function distObj(a,b){ return Math.hypot((a.x||0)-(b.x||0),(a.y||0)-(b.y||0)); }
   function livreParaObjeto(x,y,spec,objs){
-    if(x-spec.w/2<34 || x+spec.w/2>606 || y-spec.h/2<36 || y+spec.h/2>355) return false;
+    const lim = LAYOUT.limites || LAYOUT_PADRAO.limites;
+    if(x-spec.w/2<lim.minX || x+spec.w/2>lim.maxX || y-spec.h/2<lim.minY || y+spec.h/2>lim.maxY) return false;
     return objs.every(o => {
       const q=OBJETOS_AMBIENTE[o.tipo]||{};
       return Math.abs(x-(o.x||0)) > ((spec.w||30)+(q.w||30))/2+7 || Math.abs(y-(o.y||0)) > ((spec.h||20)+(q.h||20))/2+7;
@@ -596,8 +615,15 @@
   function tarefasAbertas() {
     const e = S.state.atual(); return e ? e.tarefas.filter(t => t.status === 'aberta') : [];
   }
+  /* Trava anti-loop, ponto único: uma tarefa bloqueada (4 falhas seguidas) ou
+     em cooldown de retentativa nunca é escolhida automaticamente — só por uma
+     decisão explícita da gerente (corrigir/continuar cria uma tarefa NOVA). */
+  function prontaParaRetomar(t) {
+    return !t.bloqueada && Date.now() >= Number(t.proximaTentativa || 0);
+  }
   function dependenciasOK(t) {
     const e = S.state.atual(); if (!e) return false;
+    if (!prontaParaRetomar(t)) return false;
     return (t.dependsOn || []).every(id => {
       const dep = e.tarefas.find(x => x.id === id);
       return dep && dep.status === 'feita';
@@ -610,95 +636,18 @@
       || abertas.find(t => !t.para) || null;
   }
 
-  /* Executa uma tarefa do começo ao fim: deliberação autônoma + produção. */
-  async function executar(p, tarefa) {
-    const e = S.state.atual(); if (!e) return false;
-    p.ocupado = true; p.tarefa = tarefa.titulo; p.progresso = 0;
-    p.ref.foco = tarefa.titulo;
-    p.ref.pensamento = `Estou examinando ${tarefa.titulo} e o estado atual do projeto antes de decidir como agir.`;
-    tarefa.status = 'fazendo'; tarefa.para = p.id;
-    S.bus.emit('trabalho'); S.bus.emit('equipe');
-    S.state.registrar(`${p.nome} assumiu: ${tarefa.titulo}`, 'info', p.id);
-    logPessoa(p, `iniciou a tarefa "${tarefa.titulo}". Conferindo briefing, dependências e materiais já produzidos.`, 'trabalho');
-
-    await irPara(p, assento(p));
-    p.estado = 'trabalhando';
-    logPessoa(p, `está executando "${tarefa.titulo}" sobre o contexto persistido do projeto.`, 'trabalho');
-    const relogio = setInterval(() => { p.progresso = Math.min(0.97, p.progresso + 0.03); }, 400);
-
-    let ok = false;
-    try {
-      let deliberacao = null;
-      if (S.ai.disponivel(p.id)) {
-        try {
-          deliberacao = await S.ai.deliberar({
-            sistema: `Você é ${p.nome}, ${p.cargo} do estúdio ${e.nome}. Trabalha dentro de um projeto contínuo. Missão: ${e.missao}. Público: ${e.publico}. Projeto: ${(e.projetos.find(x=>x.id===tarefa.projectId)||{}).objetivo || e.missao}. Tarefa: ${tarefa.titulo}. Briefing: ${tarefa.briefing}.`,
-            pedido: `Pense no que precisa ser feito e transforme essa decisão em uma abordagem executável para esta tarefa. Examine o acervo existente e preserve continuidade. Não invente fatos. Retorne somente a síntese operacional.`,
-            tokens: 420, reasoning_effort: 'low', agente: p.nome, agenteId: p.id, motivo: 'pensamento antes da produção'
-          });
-          if (deliberacao && deliberacao.resumo) {
-            p.ref.pensamento = deliberacao.resumo.slice(0, 500);
-            lembrar(p, `Decisão para ${tarefa.titulo}: ${deliberacao.resumo.slice(0, 160)}`);
-            logPessoa(p, `transformou o pensamento em uma abordagem executável para produzir.`, 'pensamento');
-          }
-        } catch (err) {
-          p.ref.pensamento = 'A camada de pensamento falhou nesta rodada; o briefing persistente continua sendo a instrução de produção.';
-          logPessoa(p, 'a camada de pensamento falhou; preservou o briefing e tentou a IA de produção.', 'alerta');
-        }
-      }
-      const saida = await S.factory.produzir({ kit: tarefa.kit, briefing: tarefa.briefing, deliberacao: deliberacao && deliberacao.resumo, agente: p.ref, projectId: tarefa.projectId, taskId: tarefa.id, baseArquivoId: tarefa.baseArquivoId });
-      if (saida && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, Object.assign({}, saida, {
-          projectId: tarefa.projectId,
-          taskId: tarefa.id,
-          baseArquivoId: tarefa.baseArquivoId || null,
-          briefing: tarefa.briefing || ''
-        }), p);
-        registrarContribuicaoAcervo(p, tarefa, salvos);
-        tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : [];
-        if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
-        tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
-        logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
-        p.ref.pensamento = `Concluí ${tarefa.titulo}. Confiro se a entrega aumentou o acervo e se outra pessoa consegue reutilizá-la.`;
-        lembrar(p, `Concluí ${tarefa.titulo}; entrega vinculada ao projeto ${tarefa.projectId || 'principal'}.`);
-        tarefa.arquivo = salvos[0].id; tarefa.validacao = saida.validacao || null;
-        tarefa.handoff = `${p.nome}: ${salvos.map(a => a.nome).join(', ')} prontos para a próxima etapa.`;
-        const proj = e.projetos.find(x => x.id === tarefa.projectId);
-        if (proj) {
-          salvos.forEach(a => { if (!proj.arquivoIds.includes(a.id)) proj.arquivoIds.unshift(a.id); });
-          proj.atividade.unshift({ t: Date.now(), tipo: 'entrega', texto: `${p.nome} concluiu ${tarefa.titulo}.` });
-          proj.atividade = proj.atividade.slice(-40);
-        }
-        ok = true;
-        humor(p, 8, `entreguei ${salvos[0].nome}`);
-
-      } else {
-        tarefa.status = 'aberta';
-        logPessoa(p, `não conseguiu concluir "${tarefa.titulo}"; deixou a tarefa aberta para recuperação ou revisão.`, 'alerta');
-        humor(p, -7, `empaquei em ${tarefa.titulo}`);
-        S.state.registrar(`${p.nome} não conseguiu concluir "${tarefa.titulo}".`, 'erro', p.id);
-      }
-    } catch (err) {
-      tarefa.status = 'aberta';
-      logPessoa(p, `encontrou um erro durante "${tarefa.titulo}" e registrou a falha para retomada.`, 'erro');
-      S.state.registrar(`${p.nome} travou em "${tarefa.titulo}": ${err && err.message || 'erro'}`, 'erro', p.id);
-    } finally {
-      clearInterval(relogio);
-      p.progresso = 1;
-      p.ocupado = false; p.tarefa = null; p.ref.foco = '';
-      if (!p.ref.pensamento) p.ref.pensamento = 'Estou disponível para contribuir com a próxima etapa do projeto.';
-      await falar(p, ok ? 'Pronto ✓' : 'Travei aqui', 1400);
-      p.progresso = 0;
-      S.state.gravar(); S.bus.emit('trabalho'); S.bus.emit('equipe');
-    }
-    return ok;
-  }
 
   async function avaliar(g) {
     const e = S.state.atual(); if (!e || !g || g.ocupado || (S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel())) return;
-    const candidatos = e.arquivos.filter(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
+    const agora = Date.now();
+    const candidatos = e.arquivos.filter(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado && agora >= (a.proximaAvaliacao || 0));
     const cand = candidatos[0];
     if (!cand) return;
+    // Trava anti-loop: nenhum candidato pode ser reinspecionado indefinidamente.
+    // Depois de algumas tentativas sem uma decisão que resolva a entrega, a
+    // gerente força uma correção e encerra o ciclo — nunca fica repetindo.
+    cand.tentativasAvaliacao = (cand.tentativasAvaliacao || 0) + 1;
+    const ultimaChance = cand.tentativasAvaliacao >= 3;
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'lendo a entrega';
     const projeto = e.projetos.find(x => x.id === cand.projectId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
     const tarefa = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
@@ -713,7 +662,7 @@ ARQUIVO: ${cand.id} | ${cand.nome} | ${cand.tipo} | autor=${cand.autor} | versã
 ARTEFATO BASE: ${cand.baseArquivoId || 'nenhum'}
 
 CONTEÚDO COMPLETO DA ENTREGA:
-${String(cand.conteudo || '').slice(0, 16000)}
+${String(cand.conteudo || '')}
 
 ARTEFATOS RELACIONADOS:
 ${e.arquivos.filter(a => a.id !== cand.id && (a.projectId === cand.projectId || a.linhagem === cand.linhagem)).slice(0,6).map(a => `${a.id} ${a.nome} [${a.classe}]\n${String(a.conteudo||'').slice(0,2200)}`).join('\n\n') || 'nenhum'}
@@ -727,13 +676,14 @@ DECIDA PELO TRABALHO REAL. Você pode:
 - descartar: a entrega não deve continuar;
 - continuar: está correta como etapa, mas outra etapa precisa ser executada antes.
 Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se corrigir/continuar, descreva a próxima ação em termos executáveis.`;
+    let decisaoValida = false;
     try {
       const r = await S.ai.perguntar({
         sistema: contexto + `\n\nRETORNE SOMENTE:\nDECISAO: publicar | corrigir | descartar | continuar\nANALISE: <o que você realmente encontrou no conteúdo, até 100 palavras>\nEVIDENCIAS: <até 3 verificações concretas feitas no conteúdo>\nPENDENCIAS: <o que ainda impede o produto; escreva nenhuma se não houver>\nACAO: <próxima ação concreta, até 80 palavras>\nPARA: <id do funcionário ou vazio>\nBASE: <id do artefato base ou vazio>\nPRONTO: sim | nao`,
         pedido: `Inspecione agora o arquivo ${cand.nome}. Não avalie aparência nem atribua nota. Leia o conteúdo e tome uma decisão executiva que altere o próximo estado do projeto.`,
         tokens: 520, reasoning_effort: 'low', agente: g.nome, agenteId: g.id, motivo: 'auditoria real de artefato'
       });
-      if (!r) return;
+      if (!r) { if (ultimaChance) forcarResolucaoCandidato(e, cand, g, projeto, 'a IA não respondeu após repetidas tentativas'); return; }
       const c = r.campos || {};
       const decisao = String(c.decisao || '').toLowerCase().trim();
       const analise = String(c.analise || '').trim();
@@ -741,13 +691,13 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
       const pendencias = String(c.pendencias || '').trim();
       const pronto = String(c.pronto || '').toLowerCase().trim();
       const acao = String(c.acao || '').trim();
-      g.balao = analise.slice(0, 70) || decisao;
-      registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendencias ? ' Pendências: ' + pendencias : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
-      logPessoa(g, `inspecionou ${cand.nome}: ${decisao}. ${analise}`, 'supervisao');
-      g.ref.pensamento = `${decisao}: ${analise}`.slice(0, 500);
-      cand.avaliado = true;
+      g.balao = analise.slice(0, 70) || decisao || 'sem decisão clara';
+      if (decisao) registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendencias ? ' Pendências: ' + pendencias : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
+      logPessoa(g, decisao ? `inspecionou ${cand.nome}: ${decisao}. ${analise}` : `inspecionou ${cand.nome}, mas a resposta não trouxe uma decisão utilizável (tentativa ${cand.tentativasAvaliacao}).`, 'supervisao');
+      g.ref.pensamento = `${decisao || 'sem decisão'}: ${analise}`.slice(0, 500);
 
       if (decisao === 'publicar' && pronto === 'sim' && (!pendencias || /^nenhuma$|^nenhum$/i.test(pendencias))) {
+        cand.avaliado = true; decisaoValida = true;
         cand.liberadoPublicacao = true;
         const produto = publicar(cand.id, g.nome, analise || 'Aprovado pela gerente após inspeção do conteúdo.');
         if (produto) {
@@ -755,34 +705,63 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
           projeto && projeto.atividade.unshift({t:Date.now(),tipo:'release',texto:`${g.nome} aprovou ${produto.nome} após inspeção do conteúdo.`});
         }
       } else if (decisao === 'publicar') {
-        cand.avaliado = false;
+        // Pendências reais: fecha ESTE candidato (não fica revivendo a
+        // versão antiga) e delega a correção, que vira um artefato novo.
+        cand.avaliado = true; decisaoValida = true;
         const tarefaNova = novaTarefa({titulo:`Resolver pendências de ${cand.nome}`,kit:'autonomo',briefing:acao || pendencias || 'Revisar o produto final e eliminar tudo que ainda impede a publicação.',para:String(c.para||'').trim()||cand.autorId,projectId:cand.projectId||projeto.id,baseArquivoId:cand.id,origem:'gate rigoroso de produto'});
-        if(tarefaNova) registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências ou a verificação final não foi declarada concluída.`,'ordem');
+        registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências ou a verificação final não foi declarada concluída.${tarefaNova?'':' Já existe uma tarefa de correção em andamento.'}`,'ordem');
       } else if (decisao === 'descartar') {
+        cand.avaliado = true; decisaoValida = true;
         e.arquivos = e.arquivos.filter(a => a.id !== cand.id);
         if (projeto) projeto.arquivoIds = projeto.arquivoIds.filter(id => id !== cand.id);
         registrarReuniao(g.nome, `Descartei ${cand.nome}. Motivo: ${analise || 'não atende ao objetivo do projeto'}.`, 'decisao');
       } else if (decisao === 'corrigir') {
+        cand.avaliado = true; decisaoValida = true;
         const alvo = e.equipe.find(f => f.id === String(c.para || '').trim() && f.papel === 'func') || e.equipe.find(f => f.papel === 'func' && f.id === cand.autorId);
         const tarefaNova = novaTarefa({
           titulo: `Corrigir: ${cand.nome}`, kit: 'autonomo', briefing: acao || `Corrigir os problemas encontrados pela gerente em ${cand.nome}: ${analise}`,
           para: alvo ? alvo.id : null, projectId: cand.projectId || (projeto && projeto.id), baseArquivoId: cand.id, origem: 'decisão da gerente após inspeção'
         });
-        if (tarefaNova) { cand.avaliado = true; registrarReuniao(g.nome, `Enviei ${cand.nome} para correção${alvo ? ' com ' + alvo.nome : ''}.`, 'ordem'); }
+        registrarReuniao(g.nome, `Enviei ${cand.nome} para correção${alvo ? ' com ' + alvo.nome : ''}.`, 'ordem');
+        void tarefaNova;
       } else if (decisao === 'continuar') {
+        cand.avaliado = true; decisaoValida = true;
         const tarefaNova = novaTarefa({
           titulo: `Próxima etapa: ${cand.nome}`, kit: 'autonomo', briefing: acao || `Continuar o desenvolvimento a partir de ${cand.nome}. Decisão da gerente: ${analise}`,
           para: String(c.para || '').trim() || null, projectId: cand.projectId || (projeto && projeto.id), baseArquivoId: String(c.base || '').trim() || cand.id, origem: 'decisão da gerente após inspeção'
         });
         if (tarefaNova) registrarReuniao(g.nome, `A entrega ${cand.nome} passou para a próxima etapa.`, 'ordem');
+      } else if (ultimaChance) {
+        forcarResolucaoCandidato(e, cand, g, projeto, 'a gerente não produziu uma decisão executiva válida em 3 tentativas');
+        decisaoValida = true;
       } else {
-        cand.avaliado = false;
-        throw new Error('A gerente não produziu uma decisão executiva válida.');
+        // Resposta sem campo DECISAO reconhecível: tenta de novo em 2 minutos,
+        // sem travar o motor nem repetir a cada 6 segundos.
+        cand.proximaAvaliacao = Date.now() + 120000;
       }
+    } catch (err) {
+      if (ultimaChance) forcarResolucaoCandidato(e, cand, g, projeto, `falha repetida na inspeção: ${err && err.message || err}`);
+      else cand.proximaAvaliacao = Date.now() + 60000;
     } finally {
+      void decisaoValida;
       g.ocupado = false; g.balao = null; g.estado = 'sentado';
       S.state.gravar(); S.bus.emit('arquivos'); S.bus.emit('trabalho'); S.bus.emit('equipe');
     }
+  }
+
+  /* Fecha um candidato que não conseguiu ser avaliado depois de várias
+     tentativas, para nunca mais entrar no ciclo automático. Sempre abre uma
+     tarefa de revisão manual em vez de descartar silenciosamente o trabalho. */
+  function forcarResolucaoCandidato(e, cand, g, projeto, motivo) {
+    cand.avaliado = true;
+    const tarefaNova = novaTarefa({
+      titulo: `Revisar manualmente: ${cand.nome}`, kit: 'autonomo',
+      briefing: `A inspeção automática não conseguiu concluir esta entrega (${motivo}). Releia o conteúdo do zero e decida: publicar, corrigir ou descartar.`,
+      para: cand.autorId, projectId: cand.projectId || (projeto && projeto.id), baseArquivoId: cand.id, origem: 'trava anti-loop de inspeção'
+    });
+    registrarReuniao(g.nome, `Não consegui concluir a inspeção de ${cand.nome} automaticamente (${motivo}). Abri revisão manual para não travar a equipe.`, 'alerta');
+    logPessoa(g, `encerrou a inspeção de ${cand.nome} sem decisão automática e pediu revisão manual.`, 'alerta');
+    void tarefaNova;
   }
 
   function personalidadeInicial(especialidade,nome){
@@ -1161,7 +1140,20 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         lembrar(p, `Entrega: ${salvos[0].nome}; aguardando decisão da gerente.`); sucesso=true;
       } else throw new Error('Nenhuma transformação foi produzida.');
     } catch(err) {
-      tarefa.status='aberta'; logPessoa(p, `não conseguiu concluir “${tarefa.titulo}”: ${err.message || err}`, 'erro'); S.state.registrar(`${p.nome} falhou em ${tarefa.titulo}: ${err.message || err}`, 'erro', p.id);
+      tarefa.status='aberta';
+      tarefa.tentativas = Number(tarefa.tentativas || 0) + 1;
+      if (tarefa.tentativas >= 4) {
+        // Trava anti-loop: depois de 4 falhas seguidas a tarefa para de ser
+        // pega automaticamente. Continua visível no plano de trabalho, mas
+        // só volta com uma decisão explícita (corrigir/continuar/nova tarefa).
+        tarefa.bloqueada = true;
+        logPessoa(p, `não conseguiu concluir "${tarefa.titulo}" depois de ${tarefa.tentativas} tentativas e parou de tentar sozinho. Precisa de uma decisão da gerente ou de uma tarefa nova.`, 'alerta');
+        S.state.registrar(`${tarefa.titulo} foi pausada após ${tarefa.tentativas} falhas seguidas de ${p.nome}.`, 'erro', p.id);
+      } else {
+        tarefa.proximaTentativa = Date.now() + Math.min(600000, 20000 * Math.pow(2, tarefa.tentativas));
+        logPessoa(p, `não conseguiu concluir "${tarefa.titulo}": ${err.message || err}`, 'erro');
+        S.state.registrar(`${p.nome} falhou em "${tarefa.titulo}" (tentativa ${tarefa.tentativas}): ${err.message || err}`, 'erro', p.id);
+      }
     } finally {
       clearInterval(relogio); p.progresso=1; p.ocupado=false; p.tarefa=null; p.ref.foco=''; p.balao=sucesso?'entregue':'falhou';
       await sleep(900); p.balao=null; p.estado='andando'; await irPara(p,assento(p)); p.estado='sentado';
@@ -1233,8 +1225,8 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     cv = document.getElementById('floor'); if (!cv) return;
     cx = cv.getContext('2d');
     if (cx) cx.imageSmoothingEnabled = false;
-    const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
-    alturaLog = Math.max(410, 74 + linhas * 72 + 120);
+    larguraLog = LAYOUT.largura || 640;
+    alturaLog = (LAYOUT.altura ? LAYOUT.altura(rt.length) : Math.max(410, 74 + Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2)) * 72 + 120));
     const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
     if (larguraCSS < 40) return;            // painel oculto: nada a redimensionar
     const escala = larguraCSS / larguraLog;
@@ -1256,6 +1248,23 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
   function desenhar(agora) {
     if (!cx) return;
     cx.clearRect(0, 0, larguraLog, alturaLog);
+    const tileParede = S.assets && S.assets.get('tile_parede');
+    const tilePiso = S.assets && S.assets.get('tile_piso_madeira');
+    const salas = LAYOUT.salas || null;
+    if (salas && salas.length) {
+      // Layout de jogo: uma sala por departamento, com tile de verdade quando existe.
+      cx.fillStyle = '#0B0D0F'; cx.fillRect(0, 0, larguraLog, alturaLog);
+      salas.forEach(s => {
+        if (tilePiso) { for (let x = s.x; x < s.x + s.w; x += 32) for (let y = s.y; y < s.y + s.h; y += 32) cx.drawImage(tilePiso, x, y, 32, 32); }
+        else { cx.fillStyle = s.cor || '#181E22'; cx.fillRect(s.x, s.y, s.w, s.h); }
+        cx.strokeStyle = '#050607'; cx.lineWidth = 4;
+        if (tileParede) { for (let x = s.x; x < s.x + s.w; x += 32) { cx.drawImage(tileParede, x, s.y - 8, 32, 16); } }
+        else cx.strokeRect(s.x, s.y, s.w, s.h);
+        cx.fillStyle = 'rgba(0,0,0,.55)'; cx.fillRect(s.x, s.y, s.w, 20);
+        cx.fillStyle = '#C8CDD0'; cx.font = '700 11px -apple-system,system-ui,sans-serif'; cx.textAlign = 'left';
+        cx.fillText(s.nome, s.x + 8, s.y + 14);
+      });
+    } else {
     // Piso em pixel art: blocos discretos, paredes, janelas e pequenas áreas de uso.
     cx.fillStyle = '#101418'; cx.fillRect(0, 0, larguraLog, alturaLog);
     cx.fillStyle = '#181E22'; cx.fillRect(14, 14, larguraLog-28, alturaLog-28);
@@ -1278,18 +1287,19 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     cx.fillStyle='#39464A'; cx.fillRect(42,42,18,8); cx.fillRect(46,50,10,3);
     cx.fillStyle='#5B5140'; cx.fillRect(612,74,8,90); cx.fillRect(620,78,4,86);
     cx.fillStyle='#26353A'; cx.fillRect(34,206,34,3); cx.fillRect(602,206,22,3);
-    // Objetos persistentes construídos pelos agentes.
+    }
+    // Objetos persistentes construídos pelos agentes: sprite quando existe,
+    // senão um quadrado colorido simples — sem desenho vetorial detalhado.
+    const CORES_OBJETO = { planta:'#4F7A60', estante:'#8A6A4E', sofa:'#4B5961', quadro:'#8B6A50', luminaria:'#B69B61', bancada:'#6A5040' };
     const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
     objs.forEach(o=>{
       const x=Number(o.x)||80,y=Number(o.y)||80;
-      cx.fillStyle='rgba(0,0,0,.3)'; cx.fillRect(x-8,y+20,Math.max(18,(o.tipo==='sofa'?70:40)),5);
-      cx.fillStyle='#3A4448';
-      if(o.tipo==='planta'){ cx.fillStyle='#4F7A60'; cx.fillRect(x-5,y+2,10,18); cx.fillRect(x-12,y-5,8,12); cx.fillRect(x+4,y-8,8,14); cx.fillStyle='#705A43'; cx.fillRect(x-7,y+18,14,8); }
-      else if(o.tipo==='estante'){ cx.fillStyle='#6A5040'; cx.fillRect(x-18,y-24,36,48); cx.fillStyle='#9A7556'; cx.fillRect(x-14,y-14,28,4); cx.fillRect(x-14,y+2,28,4); cx.fillRect(x-14,y+18,28,4); }
-      else if(o.tipo==='sofa'){ cx.fillStyle='#4B5961'; cx.fillRect(x-36,y-8,72,24); cx.fillRect(x-30,y-17,60,12); }
-      else if(o.tipo==='quadro'){ cx.fillStyle='#6B4E3D'; cx.fillRect(x-31,y-6,62,12); cx.fillStyle='#B4C7B4'; cx.fillRect(x-25,y-2,50,4); }
-      else if(o.tipo==='luminaria'){ cx.fillStyle='#B69B61'; cx.fillRect(x-2,y-18,4,30); cx.fillRect(x-9,y-21,18,5); }
-      else { cx.fillStyle='#6A5040'; cx.fillRect(x-(o.tipo==='bancada'?38:27),y-10,o.tipo==='bancada'?76:54,20); cx.fillStyle='#303A3E'; cx.fillRect(x-18,y-6,36,10); }
+      const spec = OBJETOS_AMBIENTE[o.tipo] || {};
+      const w = spec.w || 40, h = spec.h || 28;
+      cx.fillStyle='rgba(0,0,0,.3)'; cx.fillRect(x-w/2, y+h/2-4, w, 5);
+      const sprite = S.assets && S.assets.get(o.tipo);
+      if (sprite) { cx.drawImage(sprite, x - w/2, y - h/2, w, h); }
+      else { cx.fillStyle = CORES_OBJETO[o.tipo] || '#5A6368'; cx.fillRect(x - w/2, y - h/2, w, h); }
     });
 
     // estações
@@ -1303,10 +1313,11 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
 
     // mesas
     rt.forEach(p => {
-      cx.fillStyle = '#1A2024'; cx.strokeStyle = '#252C31'; cx.lineWidth = 1;
-      rrect(p.mesa.x - 46, p.mesa.y - 16, 92, 34, 8); cx.fill(); cx.stroke();
-      cx.fillStyle = p.ocupado ? 'rgba(228,112,62,.32)' : '#20272B';
-      rrect(p.mesa.x - 16, p.mesa.y - 9, 32, 20, 4); cx.fill();
+      const spriteMesa = S.assets && S.assets.get('mesa');
+      if (spriteMesa) { cx.drawImage(spriteMesa, p.mesa.x - 46, p.mesa.y - 16, 92, 34); }
+      else { cx.fillStyle = '#2A3237'; cx.fillRect(p.mesa.x - 46, p.mesa.y - 16, 92, 34); }
+      cx.fillStyle = p.ocupado ? 'rgba(228,112,62,.32)' : '#171C21';
+      cx.fillRect(p.mesa.x - 16, p.mesa.y - 9, 32, 20);
     });
 
     // pessoas
@@ -1326,34 +1337,18 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         cx.beginPath(); cx.arc(x, y, 18, 0, Math.PI * 2); cx.stroke();
       }
 
-      // Sprite vetorial: cabeça, cabelo, roupa, braços e pernas.
-      // Mantém leitura clara mesmo em telas pequenas e dá identidade por agente.
+      // Sprite: usa char_base.png tingido com a cor do agente quando o
+      // asset existe; sem asset, um quadrado da cor do agente é o
+      // suficiente — nada de desenho vetorial detalhado por código.
       const pulse = p.ocupado ? Math.sin(agora / 150) * 1.2 : 0;
-      const skin = ['#E8B08A','#C9825B','#F0C29B','#A96448'][Math.abs(p.id.charCodeAt(1) || 0) % 4];
-      const hair = p.papel === 'gerente' ? '#24272A' : ['#2A211D','#6B3F2A','#B87943','#30343A'][Math.abs(p.id.charCodeAt(2) || 0) % 4];
-      // pernas
-      cx.strokeStyle = '#202428'; cx.lineWidth = 4; cx.lineCap = 'round';
-      cx.beginPath(); cx.moveTo(x-5,y+10); cx.lineTo(x-6,y+18); cx.moveTo(x+5,y+10); cx.lineTo(x+6,y+18); cx.stroke();
-      // corpo
-      cx.fillStyle = p.cor; rrect(x-9,y-1+pulse,18,15,6); cx.fill();
-      // braços
-      cx.strokeStyle = p.cor; cx.lineWidth = 5;
-      cx.beginPath(); cx.moveTo(x-8,y+3+pulse); cx.lineTo(x-13,y+10+pulse); cx.moveTo(x+8,y+3+pulse); cx.lineTo(x+13,y+10+pulse); cx.stroke();
-      // pescoço + cabeça
-      cx.fillStyle = skin; rrect(x-3.5,y-8+pulse,7,6,2); cx.fill();
-      cx.beginPath(); cx.arc(x,y-11+pulse,9,0,Math.PI*2); cx.fill();
-      // cabelo
-      cx.fillStyle = hair; cx.beginPath(); cx.arc(x,y-13+pulse,9.3,Math.PI,Math.PI*2); cx.fill();
-      cx.fillRect(x-9,y-14+pulse,18,4);
-      // olhos
-      cx.fillStyle = '#202124'; cx.fillRect(x-4,y-11+pulse,2,2); cx.fillRect(x+2,y-11+pulse,2,2);
-      // notebook quando trabalhando
-      if (p.ocupado) {
-        cx.fillStyle = '#D6D9D7'; rrect(x-8,y+1+pulse,16,8,2); cx.fill();
-        cx.fillStyle = '#7C8588'; cx.fillRect(x-6,y+3+pulse,12,1.5);
+      const spriteTintado = S.assets && S.assets.tint && S.assets.tint('char_base', p.cor);
+      if (spriteTintado) {
+        const w = 32, h = 48;
+        cx.drawImage(spriteTintado, x - w / 2, y - h + 14 + pulse, w, h);
+      } else {
+        cx.fillStyle = p.cor; cx.fillRect(x - 12, y - 20 + pulse, 24, 24);
+        if (p.estado === 'pausa') { cx.fillStyle = 'rgba(0,0,0,.42)'; cx.fillRect(x - 12, y - 20 + pulse, 24, 24); }
       }
-      // pausa
-      if (p.estado === 'pausa') { cx.fillStyle = 'rgba(0,0,0,.42)'; cx.beginPath(); cx.arc(x,y-4,12,0,Math.PI*2); cx.fill(); }
       // seleção
       if (p.id === selecionado) {
         cx.strokeStyle = '#E9E7E2'; cx.lineWidth = 1.5;
@@ -1437,7 +1432,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     novaTarefa, tarefasAbertas, despacharTarefa, executar, registrarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
-    processarFundacaoAtual, materializarDecisaoAgente, contratarPerfil,
+    processarFundacaoAtual, materializarDecisaoAgente, contratarPerfil, definirLayout, avaliar,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };

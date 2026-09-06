@@ -1,3 +1,27 @@
+# Estúdio — v49
+
+## index.html agora é o jogo (leia primeiro)
+- A porta de entrada principal (`index.html`) é a versão tela-cheia
+  horizontal, pixel art top-down. A versão antiga em painéis (mobile) virou
+  `classico.html` — os dois leem o mesmo estado salvo, é a mesma empresa.
+- Vai e volta entre os dois: `☰` no jogo abre o clássico; `🎮 jogo` no
+  clássico volta pro jogo.
+- Sem PNG definido, o elemento aparece como um quadrado colorido simples —
+  personagem, mesa e móveis de decoração. Nada de desenho vetorial detalhado
+  no lugar da arte que falta; é só um placeholder mesmo, até você soltar o
+  PNG em `./assets/`.
+- **Loop de IA corrigido.** Um agente (a gerente, mas o mesmo bug podia
+  atingir qualquer um) podia ficar reinspecionando o mesmo arquivo pra
+  sempre, gastando chamada a cada poucos segundos sem nunca decidir nada.
+  Causa raiz e a trava: CHANGELOG-v49.md.
+
+# Estúdio — v48.3
+
+## Modo jogo
+- Pixel art top-down, sala por departamento, HUD e dock inferior. Mesmo
+  motor de agentes, mesmo estado salvo.
+- Detalhes técnicos: CHANGELOG-v48.3.md.
+
 # Estúdio — v48.2
 
 ## Correção da fundação (leia primeiro)
@@ -8,6 +32,7 @@
   carregada pelo `index.html` e sem ela nenhuma entrega era possível.
 - A gerente contrata, demite e planeja de verdade: essas decisões alteram o
   quadro de pessoal e o plano, em vez de morrerem na deliberação.
+
 - Uma falha de IA na fundação espera 60s antes de tentar de novo, então não há
   mais sequência de chamadas pagas sem resultado.
 - Teste sem navegador: `node teste/fundacao.test.js`.

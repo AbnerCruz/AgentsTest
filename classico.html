@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0E1113">
+<meta name="description" content="Estúdio — versão clássica em painéis (mobile). A versão principal agora é index.html (modo jogo).">
+<title>Estúdio — clássico (painéis)</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<link rel="stylesheet" href="app.css">
+<script>
+/* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
+(function(){
+  function mostra(txt){
+    var d=document.getElementById('erroFatal');
+    if(!d){ d=document.createElement('pre'); d.id='erroFatal';
+      d.style.cssText='position:fixed;left:8px;right:8px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;margin:0;padding:34px 12px 12px;max-height:32vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #E4703E;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+      var x=document.createElement('button');
+      x.textContent='fechar';
+      x.style.cssText='position:absolute;top:6px;right:8px;background:#E4703E;color:#1A0B08;border:0;border-radius:99px;padding:4px 12px;font:600 11px/1 system-ui;cursor:pointer';
+      x.onclick=function(){d.remove();};
+      d.appendChild(x);
+      (document.body||document.documentElement).appendChild(d); }
+    d.insertBefore(document.createTextNode(txt + '\n'), d.firstChild);
+  }
+  window.addEventListener('error', function(e){
+    if (e.target && e.target.tagName === 'SCRIPT') mostra('Não carregou o arquivo: ' + (e.target.src||'?'));
+    else if (e.target && e.target.tagName === 'LINK') mostra('Não carregou o estilo: ' + (e.target.href||'?'));
+    else mostra((e.message||'erro') + '\n  em ' + (e.filename||'?') + ':' + (e.lineno||0));
+  }, true);
+  window.addEventListener('unhandledrejection', function(e){ mostra('Promessa rejeitada: ' + (e.reason && e.reason.message || e.reason)); });
+})();
+</script>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ══ topo ══ -->
+  <header class="topbar">
+    <button class="brand" id="brandBtn" type="button">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path d="M6 18V6h5.5a3.5 3.5 0 0 1 0 7H8.5l4.5 5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="brand-txt">
+        <b id="brandName">Estúdio</b>
+        <small id="brandSub">nenhum estúdio fundado</small>
+      </span>
+      <svg class="brand-caret" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="m7 10 5 5 5-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+
+    <div class="top-right">
+      <a href="./index.html" class="pulse" style="text-decoration:none;" title="Abrir o modo jogo">🎮 jogo</a>
+      <div class="clock" id="topClock" hidden>
+        <span class="clock-day" id="clockDay">Dia 1</span>
+        <span class="clock-hour" id="clockHour">08:00</span>
+      </div>
+      <button class="pulse" id="pulseBtn" type="button" title="Estado do motor de IA">
+        <span class="pulse-dot" id="pulseDot"></span>
+        <span class="pulse-txt" id="pulseTxt">IA desligada</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- ══ navegação (barra inferior no celular, trilho lateral no desktop) ══ -->
+  <nav class="nav" id="nav" aria-label="Seções">
+    <button class="nav-item is-on" data-view="estudio" type="button">
+      <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10"/></svg>
+      <span>Estúdio</span>
+    </button>
+    <button class="nav-item" data-view="reuniao" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8a2.5 2.5 0 0 1-2.5 2.5H11l-5 4v-4.5A2.5 2.5 0 0 1 4 13.5z"/><path d="M8 8h8M8 11.5h5"/></svg>
+      <span>Reunião</span>
+    </button>
+    <button class="nav-item" data-view="trabalho" type="button">
+      <svg viewBox="0 0 24 24"><path d="M4 7h11M4 12h16M4 17h8"/><path d="m17 15 2 2 3-4"/></svg>
+      <span>Trabalho</span>
+      <i class="nav-badge" id="badgeTrabalho" hidden></i>
+    </button>
+    <button class="nav-item" data-view="entregas" type="button">
+      <svg viewBox="0 0 24 24"><path d="M21 8 12 3 3 8v8l9 5 9-5z"/><path d="M3 8l9 5 9-5M12 13v8"/></svg>
+      <span>Entregas</span>
+      <i class="nav-badge" id="badgeEntregas" hidden></i>
+    </button>
+    <button class="nav-item" data-view="motor" type="button">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 4v2m0 12v2M4 12h2m12 0h2M6.5 6.5 8 8m8 8 1.5 1.5m0-11L16 8M8 16l-1.5 1.5"/></svg>
+      <span>Motor</span>
+    </button>
+  </nav>
+
+  <!-- ══ conteúdo ══ -->
+  <main class="content" id="content">
+
+    <!-- estado inicial -->
+    <section class="view is-on" id="v-vazio">
+      <div class="hero">
+        <div class="hero-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="30" height="30"><path d="M6 18V6h5.5a3.5 3.5 0 0 1 0 7H8.5l4.5 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <h1>Um estúdio que entrega arquivos de verdade</h1>
+        <p>É um ambiente de simulação: você observa uma equipe de agentes trabalhando sozinha em projetos contínuos. O que ela produz não é cenário — são páginas, textos, planilhas e marcas reais.</p>
+        <div class="steps">
+          <div class="step"><b>1</b><span>Funde o estúdio e escolha o ramo.</span></div>
+          <div class="step"><b>2</b><span>Conecte sua chave do OpenRouter no Motor.</span></div>
+          <div class="step"><b>3</b><span>Observe a equipe transformar trabalho em artefatos persistentes.</span></div>
+        </div>
+        <div class="hero-actions">
+          <button class="btn btn-primary btn-lg" id="fundarBtn" type="button">Fundar estúdio</button>
+          <button class="btn btn-ghost btn-lg" id="irMotorBtn" type="button">Conectar IA</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ESTÚDIO -->
+    <section class="view" id="v-estudio">
+      <div class="floor-wrap panel pixel-office">
+        <div class="panel-head">
+          <div><span class="panel-label">Ambiente vivo</span><span class="panel-subtitle">a equipe também constrói o próprio local de trabalho</span></div>
+          <span class="chip" id="floorStatus">parado</span>
+        </div>
+        <canvas id="floor" aria-label="Ambiente pixel art com a equipe e objetos construídos"></canvas>
+        <div class="environment-bar" id="environmentBar"></div>
+        <p class="panel-foot" id="floorFoot">Os agentes podem reorganizar o espaço quando uma mudança tiver utilidade real. Móveis e decoração permanecem salvos.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><span class="chip">quadro decidido pela gerente</span></div>
+        <div class="team" id="teamList"></div>
+      </div>
+      <div class="panel" id="gerenciaPanel"></div>
+      <div class="panel" id="xpPanel"></div>
+    </section>
+
+    <!-- REUNIÃO -->
+    <section class="view" id="v-reuniao">
+      <div class="meeting-room panel">
+        <div class="meeting-room-head">
+          <div>
+            <span class="panel-label">Sala de reuniões</span>
+            <h1>Conversa direta com a equipe</h1>
+            <p class="panel-foot">Debata ideias, alinhe o projeto, dê ordens, peça feedbacks e solicite relatórios. Tudo fica registrado no histórico do estúdio.</p>
+          </div>
+          <div class="meeting-table" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="meeting-people" id="meetingPeople"></div>
+      </div>
+      <div class="panel meeting-chat">
+        <div class="panel-head"><span class="panel-label">Ata viva</span><span class="chip">persistente</span></div>
+        <div class="meeting-messages" id="meetingMessages"></div>
+        <div class="meeting-actions">
+          <button class="btn btn-mini" id="pedirRelatorioBtn" type="button">Pedir relatório</button>
+          <button class="btn btn-mini" id="pedirFeedbackBtn" type="button">Pedir feedback</button>
+          <button class="btn btn-mini" id="limparReuniaoBtn" type="button">Limpar conversa</button>
+        </div>
+        <form class="meeting-composer" id="meetingForm">
+          <textarea id="meetingInput" rows="3" placeholder="Fale com a equipe. Ex.: Quero que o site atual seja atualizado com todos os produtos já publicados e que a Bia revise o texto."></textarea>
+          <div class="meeting-send"><span class="hint">Uma intervenção usa uma chamada de decisão; a equipe recebe o contexto do projeto antes de responder.</span><button class="btn btn-primary" id="meetingSend" type="submit">Enviar à reunião</button></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- TRABALHO -->
+    <section class="view" id="v-trabalho">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Projetos em andamento</span><span class="chip">autônomo</span></div>
+        <p class="panel-foot">A equipe decide o próximo passo, distribui tarefas por especialidade e reutiliza os artefatos já produzidos. Você acompanha; não precisa ficar jogando.</p>
+        <div id="projetosList"></div>
+      </div>
+      <div class="panel" id="aprovacoesPanel" hidden></div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Plano de trabalho</span><span class="chip" id="backlogChip">0 abertas</span></div>
+        <div id="backlogList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Ideias e decisões da equipe</span><span class="chip">descoberta contínua</span></div>
+        <p class="panel-foot">As próximas iniciativas nascem das observações da equipe. Ideias podem ser discutidas, descartadas ou transformadas em projetos e etapas reais.</p>
+        <div id="ideiasList"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Diário do estúdio</span><button class="btn btn-mini" id="limparLogBtn" type="button">Limpar</button></div>
+        <div class="logbox" id="logList"></div>
+      </div>
+    </section>
+
+    <!-- ENTREGAS -->
+    <section class="view" id="v-entregas">
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Produção e arquivos</span><span class="chip">persistente</span></div>
+        <p class="panel-foot"><span class="tag tag-real">REAL</span> Cada entrega vira um arquivo persistido no projeto. Versões anteriores continuam disponíveis; quando um produto muda, a equipe pode gerar uma nova versão. Sites e catálogos usam o que já existe no projeto.</p>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <span class="panel-label">Arquivos do projeto</span>
+          <button class="btn btn-mini" id="exportarTudoBtn" type="button">Exportar .zip</button>
+        </div>
+        <div class="segmented" id="filtroArquivos">
+          <button class="is-on" data-classe="todos" type="button">Todos</button>
+          <button data-classe="esboco" type="button">Esboços</button>
+          <button data-classe="prototipo" type="button">Protótipos</button>
+          <button data-classe="candidato" type="button">Candidatos</button>
+          <button data-classe="produto" type="button">Produtos</button>
+        </div>
+        <p class="panel-foot" id="pipelineNota"></p>
+        <div id="filesList"></div>
+      </div>
+    </section>
+
+    <!-- MOTOR -->
+    <section class="view" id="v-motor">
+      <div class="panel" id="conexaoPanel">
+        <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
+        <div class="field">
+          <label for="provedorSel">Provedor</label>
+          <select id="provedorSel" disabled>
+            <option value="openrouter">OpenRouter</option>
+          </select>
+          <p class="hint" id="provedorHint">OpenRouter é o único provedor. O saldo real da conta é sincronizado automaticamente.</p>
+        </div>
+        <div class="field" id="chaveManualField">
+          <label for="apiKeyInput" id="apiKeyLabel">Chave do OpenRouter</label>
+          <input id="apiKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
+          <p class="hint" id="apiKeyHint"></p>
+        </div>
+        <div class="field" id="managementKeyField">
+          <label for="openrouterManagementKeyInput">Management Key OpenRouter · sincronização do saldo</label>
+          <input id="openrouterManagementKeyInput" type="password" placeholder="Management Key OpenRouter" autocomplete="off" spellcheck="false">
+          <p class="hint" id="openrouterManagementStatus">Cole a Management Key e salve para ativar a sincronização automática.</p>
+          <p class="hint">Usada somente para consultar o crédito real da conta. A chave fica no armazenamento local deste navegador.</p>
+        </div>
+        <div class="field">
+          <label for="modeloPensamentoSel">IA de pensamento <span class="tag tag-real">barata</span></label>
+          <select id="modeloPensamentoSel"></select>
+        </div>
+        <div class="field">
+          <label for="modeloProducaoSel">IA de produção <span class="tag">forte</span></label>
+          <select id="modeloProducaoSel"></select>
+        </div>
+        <div class="field">
+          <label for="orcamentoMensalInput">Orçamento de IA por mês</label>
+          <input id="orcamentoMensalInput" type="number" min="0.10" max="1000" step="0.10" inputmode="decimal" value="3.00">
+          <p class="hint">Ciclo de 30 dias. O gasto nunca ultrapassa este teto local. O limite diário pode ser calculado automaticamente a partir do saldo restante.</p>
+        </div>
+        <div class="field">
+          <label>Limite diário de IA</label>
+          <div class="field-readonly" id="limiteDiarioAutomaticoDisplay">Calculado automaticamente</div>
+          <p class="hint">Calculado todos os dias com base no orçamento restante do ciclo de 30 dias e nos dias restantes.</p>
+        </div>
+        <div class="field">
+          <label for="modoOrcamentoSel">Modo de trabalho</label>
+          <select id="modoOrcamentoSel">
+            <option value="normal">Normal — respeita o limite diário</option>
+            <option value="intensivo">Trabalho intensivo — ignora o limite diário</option>
+          </select>
+          <p class="hint">No Trabalho intensivo, a equipe pode consumir o orçamento disponível sem o teto diário. O orçamento do ciclo de 30 dias continua sendo o limite absoluto.</p>
+        </div>
+<div class="row-actions">
+          <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>
+          <button class="btn" id="testarIABtn" type="button">Testar</button>
+          <button class="btn btn-ghost" id="pausarBtn" type="button">Pausar equipe</button>
+        </div>
+        <p class="hint" id="conexaoMsg"></p>
+      </div>
+
+      <div class="panel" id="consumoPanel"></div>
+      <div class="panel">
+        <div class="panel-head"><span class="panel-label">Chamadas recentes</span><span class="tag tag-real">REAL</span></div>
+        <div class="calls" id="callsList"></div>
+      </div>
+      <div class="panel" id="empresaCfgPanel"></div>
+      <div class="panel danger-zone">
+        <div class="panel-head"><span class="panel-label">Zona de risco</span></div>
+        <div class="row-actions">
+          <button class="btn btn-danger" id="fecharEstudioBtn" type="button">Fechar este estúdio</button>
+          <button class="btn btn-danger" id="zerarTudoBtn" type="button">Apagar tudo</button>
+        </div>
+        <p class="hint">Fechar apaga um estúdio e seus arquivos. Apagar tudo limpa a base inteira. A chave da API não é removida.</p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ══ camadas ══ -->
+<div class="sheet-backdrop" id="sheetBackdrop" hidden>
+  <div class="sheet" id="sheet" role="dialog" aria-modal="true">
+    <button class="sheet-grip" id="sheetClose" type="button" aria-label="Fechar"></button>
+    <div id="sheetBody"></div>
+  </div>
+</div>
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="./core.js"></script>
+<script src="./ai.js"></script>
+<script src="./factory.js"></script>
+<script src="./agency.js"></script>
+<script src="./studio.js"></script>
+<script src="./ui.js"></script>
+</body>
+</html>

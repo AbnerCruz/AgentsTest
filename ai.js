@@ -372,7 +372,11 @@
 
     const q = usoHoje();
     renovarPeriodoSeNecessario();
-    const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
+    // O prompt vai inteiro, sem nenhum corte de caracteres. Um truncamento
+    // aqui já cortou instruções que ficavam no fim do prompt e travou
+    // agentes em loop (ver CHANGELOG-v49.md) — o teto real de custo é o
+    // orçamento em dólar checado logo abaixo, não o tamanho do texto.
+    const mensagens = [{ role:'user', content: String(sistema||'') + '\n\n' + String(pedido||'') }];
     const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
     const custoEstimado = estimarCusto(provedorUsado, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
     if (provedorUsado === 'openrouter' && orStatus.temLimiteChave === true && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) < custoEstimado) {
