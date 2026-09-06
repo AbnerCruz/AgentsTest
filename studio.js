@@ -376,16 +376,58 @@
   }
 
   /* ---------- tarefas ---------- */
+  /* Texto vindo do modelo nunca entra cru na interface nem em título de
+     tarefa. Modelos pequenos vazam marcadores de template ("|constrain|>",
+     "<|channel|>", cercas de código, tags), e isso acabava virando o nome
+     da tarefa na tela. */
+  function limpo(txt, maxPalavras) {
+    let t = String(txt == null ? '' : txt);
+    t = t.replace(/<\|[^|>]*\|>/g, ' ')      // <|tokens especiais|>
+         .replace(/\|[a-z_]{3,20}\|>?/gi, ' ') // |constrain|>, |channel|
+         .replace(/```[a-z]*|```/gi, ' ')
+         .replace(/<\/?[a-z][^>]{0,40}>/gi, ' ')
+         .replace(/[<>{}]/g, ' ')
+         .replace(/\s+/g, ' ')
+         .trim()
+         .replace(/^[\s\-–—:*"'.,]+|[\s\-–—:*"']+$/g, '')
+         .trim();
+    if (maxPalavras) t = t.split(' ').slice(0, maxPalavras).join(' ');
+    return t;
+  }
+  /* Um texto só vale como instrução se sobrar conteúdo de verdade depois
+     da limpeza. Restos como "csv" ou "revisar" não viram tarefa. */
+  function textoUtil(t) {
+    const x = limpo(t);
+    return x.length >= 12 && /\s/.test(x) ? x : '';
+  }
+
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
-    const titulo = String(dados.titulo || '').trim(); if (!titulo) return null;
+    const titulo = limpo(dados.titulo, 16); if (!titulo || titulo.length < 6) return null;
     if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
+    // Dedupe real: o mesmo kit não pode ter duas etapas abertas no mesmo
+    // projeto, e uma etapa idêntica concluída há pouco não volta em loop.
+    // Comparar só o título exato entre tarefas abertas deixava "Produzir
+    // Catálogo..." nascer de novo assim que a anterior virava "feita".
+    const projAlvo = dados.projectId || null;
+    if (e.tarefas.some(t => t.status !== 'feita' && t.kit === dados.kit && (t.projectId || null) === projAlvo)) return null;
+    const repetidaRecente = e.tarefas.some(t => t.status === 'feita' &&
+      t.titulo.toLowerCase() === titulo.toLowerCase() &&
+      Date.now() - (t.concluidaEm || 0) < 20 * 60000);
+    if (repetidaRecente) return null;
     const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     const t = {
-      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: dados.briefing || titulo,
+      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: limpo(dados.briefing) || titulo,
+      rodada: Number(dados.rodada) || 0,
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
       projectId: projeto ? projeto.id : null,
       dependsOn: Array.isArray(dados.dependsOn) ? dados.dependsOn : [],
+      // Este campo era recebido por cinco chamadas diferentes e nunca era
+      // gravado. Sem ele, nenhuma tarefa conseguia provar que era evolução
+      // de um produto existente: a gerente segurava toda entrega com
+      // "já existe uma versão publicada" e a produção travava no primeiro
+      // produto de cada kit.
+      baseArquivoId: dados.baseArquivoId || null,
       handoff: dados.handoff || null, criadaEm: Date.now()
     };
     e.tarefas.unshift(t);
@@ -507,9 +549,16 @@
     if (e.tarefas.some(t => t.status !== 'feita')) return 0;
 
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
-    const publicados = arquivos.filter(a => a.classe === 'produto');
-    const tem = kit => publicados.some(a => a.kit === kit);
-    const sequencia = ['landing','catalogo','artigo','emails','anuncios'].find(k => !tem(k));
+    // "Já existe" não pode significar apenas "já foi publicado": enquanto o
+    // portão de release segurava tudo, esta fila recriava eternamente a mesma
+    // etapa ("Produzir Catálogo...") porque nenhum candidato virava produto.
+    const tem = kit => arquivos.some(a => a.kit === kit &&
+      (a.classe === 'produto' || a.classe === 'candidato' || a.classe === 'prototipo'));
+    // A obra vem primeiro. Não faz sentido montar catálogo, anúncio ou página
+    // de vendas antes de existir o que vender: era exatamente isso que gerava
+    // "catálogo de produtos" sem nenhum produto e briefing citando um
+    // portfólio que nunca foi criado.
+    const sequencia = ['obra','landing','catalogo','artigo','emails','anuncios'].find(k => !tem(k));
     if (!sequencia) return 0;
     const kit = S.factory.porId(sequencia);
     if (!kit) return 0;
@@ -518,10 +567,19 @@
       || rt.find(p => p.papel === 'func' && !p.ocupado && p.ref.energia > 20);
     if (!alvo) return 0;
 
-    const briefing = tem('landing')
-      ? `Produzir ou evoluir ${kit.nome} usando exclusivamente os artefatos e produtos já registrados no projeto. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`
-      : `Criar a primeira entrega pública completa do projeto usando exclusivamente missão, público e materiais registrados. Não inventar fatos, clientes, preços, métricas, datas ou prazos.`;
-    const titulo = tem('landing') ? `Produzir ${kit.nome} a partir do portfólio existente` : `Construir a primeira entrega pública`;
+    // O briefing não pode afirmar que existe um acervo quando não existe.
+    // "a partir do portfólio existente" aparecia mesmo com o projeto vazio,
+    // e o modelo então inventava produtos para preencher.
+    const obras = arquivos.filter(a => a.kit === 'obra');
+    const acervo = obras.map(a => a.nome).slice(0, 4).join(', ');
+    const briefing = sequencia === 'obra'
+      ? `Escrever a obra principal do estúdio: o produto que o cliente realmente recebe, completo e acabado. Usar exclusivamente ramo, público e missão registrados. Não inventar clientes, preços, métricas, datas ou prazos.`
+      : acervo
+        ? `Produzir ${kit.nome} baseado exclusivamente nas obras já existentes no projeto (${acervo}). Descrever apenas o que essas obras realmente contêm. Não inventar outros itens, preços, métricas ou datas.`
+        : `Produzir ${kit.nome} usando exclusivamente missão, público e ramo registrados. O projeto ainda não tem obras publicadas, então não cite catálogo, portfólio, itens ou resultados que não existem.`;
+    const titulo = sequencia === 'obra'
+      ? `Escrever a obra principal do estúdio`
+      : acervo ? `Produzir ${kit.nome} a partir das obras existentes` : `Produzir ${kit.nome}`;
     const t = novaTarefa({titulo, kit:kit.id, briefing, para:alvo.id, projectId:projeto.id, origem:'fila produtiva'});
     if (t) {
       g.ref.foco = 'Garantindo uma entrega concreta em produção';
@@ -541,14 +599,19 @@
     const abertas = e.tarefas.filter(t => t.status !== 'feita');
     if (abertas.length >= 2) return 0;
     const arquivos = (projeto.arquivoIds || []).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean);
+    // Mesmo sem IA, a ordem é a mesma: obra antes de qualquer material sobre
+    // a obra. E o catálogo só entra quando existe o que catalogar.
+    const temObra = arquivos.some(a => a.kit === 'obra' && (a.classe === 'produto' || a.classe === 'candidato'));
+    const obrasPublicadas = arquivos.filter(a => a.classe === 'produto' && a.kit === 'obra');
     const temSite = arquivos.some(a => a.classe === 'produto' && a.kit === 'landing');
     const temCatalogo = arquivos.some(a => a.classe === 'produto' && a.kit === 'catalogo');
     const temArtigo = arquivos.some(a => a.classe === 'produto' && a.kit === 'artigo');
     const temEmails = arquivos.some(a => a.classe === 'produto' && a.kit === 'emails');
     const temAnuncios = arquivos.some(a => a.classe === 'produto' && a.kit === 'anuncios');
     let spec = null;
-    if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e materiais já registrados.' };
-    else if (!temCatalogo) spec = { kit:'catalogo', titulo:'Organizar os produtos já produzidos', briefing:'Consolidar somente os produtos existentes em um catálogo coerente para uso no site e nas próximas etapas.' };
+    if (!temObra) spec = { kit:'obra', titulo:'Escrever a obra principal do estúdio', briefing:'Produzir a obra em si — o que o cliente recebe — completa e acabada, usando apenas ramo, público e missão registrados.' };
+    else if (!temSite) spec = { kit:'landing', titulo:'Construir a primeira entrega pública', briefing:'Criar uma página completa e publicável usando apenas a missão, público, identidade e as obras já registradas.' };
+    else if (!temCatalogo && obrasPublicadas.length) spec = { kit:'catalogo', titulo:'Organizar as obras já publicadas', briefing:`Consolidar em catálogo somente as obras que existem no projeto (${obrasPublicadas.map(a=>a.nome).slice(0,4).join(', ')}). Não inventar itens, preços ou coleções.` };
     else if (!temArtigo) spec = { kit:'artigo', titulo:'Criar conteúdo público de apoio', briefing:'Criar um artigo completo usando somente fatos e materiais já registrados no projeto.' };
     else if (!temEmails) spec = { kit:'emails', titulo:'Criar comunicação de lançamento', briefing:'Criar a sequência de e-mails usando somente informações reais já registradas no projeto.' };
     else if (!temAnuncios) spec = { kit:'anuncios', titulo:'Criar peças de divulgação', briefing:'Criar peças completas de divulgação sem inventar resultados, preços, prazos ou métricas.' };
@@ -581,11 +644,14 @@
     const recentes = (projeto.arquivoIds || []).slice(0, 6).map(id => e.arquivos.find(a => a.id === id)).filter(Boolean)
       .map(a => `${a.nome} [${a.classe}, q${a.qualidade}]`).join(', ') || 'nenhuma entrega ainda';
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'planejando';
-    const r = await S.ai.perguntar({
+    let r = null;
+    try {
+      r = await S.ai.perguntar({
       sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Trabalhe como gerente de um projeto contínuo, não como um jogo.
 Projeto: ${projeto.nome}. Objetivo: ${projeto.objetivo}.
 Equipe: ${equipe}.
 Entregas existentes: ${recentes}.
+ORDEM OBRIGATÓRIA: o kit "obra" é o produto que o estúdio realmente vende. Enquanto não existir nenhuma obra registrada acima, a próxima tarefa TEM QUE ser kit "obra". Catálogo, anúncios, e-mails e página de vendas são material SOBRE as obras — só fazem sentido depois que existe obra. Nunca peça catálogo de produtos se não há produto listado nas entregas existentes.
 Crie no máximo 1 próxima tarefa produtiva que dependa do estado REAL acima. Primeiro verifique se existe uma lacuna concreta no acervo. A tarefa deve produzir, integrar, corrigir ou melhorar um artefato concreto. Se não houver contribuição verificável ao acervo, retorne KIT1 vazio.
 NUNCA invente cliente, pedido, contrato, orçamento, prazo, data futura, métrica, resultado, número, aprovação externa ou acontecimento. Se a informação não existe, não a crie.
 Não crie uma tarefa apenas para conversar, pesquisar sem entregar, fazer reunião ou "definir estratégia".
@@ -603,9 +669,14 @@ BRIEF2: vazio
 DEP2: vazio
 BASE2: vazio`,
       pedido: `Missão: ${e.missao}. Produza a próxima etapa verificável. Só use fatos presentes no projeto. Se não houver base suficiente para uma nova etapa, retorne KIT1 vazio.`,
-      tokens: 300, agente: g.nome, motivo: 'planejar projeto'
-    });
-    g.ocupado = false; g.balao = null; g.estado = 'sentado';
+        tokens: 300, agente: g.nome, motivo: 'planejar projeto'
+      });
+    } finally {
+      // Sem este finally, uma exceção no meio do planejamento deixava a
+      // gerente marcada como ocupada para sempre — e o ciclo nunca mais
+      // entrava no ramo de gerência. Ela simplesmente parava de trabalhar.
+      g.ocupado = false; g.balao = null; g.estado = 'sentado';
+    }
     if (!r) return;
     let criadas = 0;
     ['1','2'].forEach(n => {
@@ -614,15 +685,34 @@ BASE2: vazio`,
       const kit = S.factory.porId(kitId) || S.factory.porId(kitPorPalavra(r.campos['brief'+n]));
       if (!kit) return;
       const alvo = rt.find(p => p.papel === 'func' && p.id === String(r.campos['para'+n] || '').trim());
-      const brief = String(r.campos['brief'+n] || kit.desc).trim();
+      // Instrução no prompt não basta: modelos pequenos ignoram a ordem.
+      // Aqui o código recusa material de divulgação enquanto não houver obra.
+      const temObraNoProjeto = e.arquivos.some(a => a.kit === 'obra' &&
+        ((a.projectId || '') === projeto.id || !a.projectId) &&
+        (a.classe === 'produto' || a.classe === 'candidato'));
+      if (!temObraNoProjeto && kit.id !== 'obra') {
+        S.state.registrar(`${g.nome} redirecionou a etapa: o projeto ainda não tem obra própria, então a prioridade é produzi-la antes de qualquer material de divulgação.`, 'info', g.id);
+        if (novaTarefa({ titulo: 'Escrever a obra principal do estúdio', kit: 'obra',
+          briefing: 'Produzir a obra em si — o que o cliente recebe — completa e acabada, usando apenas ramo, público e missão registrados.',
+          para: alvo ? alvo.id : null, projectId: projeto.id, origem: 'gerente' })) criadas++;
+        return;
+      }
+      const brief = textoUtil(r.campos['brief'+n]) || kit.desc;
       const dep = e.tarefas.find(t => t.id === String(r.campos['dep'+n] || '').trim() && t.status === 'feita');
       const baseId = String(r.campos['base'+n] || '').trim();
-      const existente = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === projeto.id && a.kit === kit.id).sort((a,b)=>(b.versao||1)-(a.versao||1))[0] || null;
-      // Um kit já publicado não pode voltar à fila como se fosse um produto novo.
-      // Só entra novamente se o planejamento declarar explicitamente uma evolução
-      // baseada na última versão publicada.
-      if (existente && baseId !== existente.id) return;
-      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: brief, para: alvo ? alvo.id : null,
+      const existente = e.arquivos.filter(a => a.classe === 'produto' && a.kit === kit.id &&
+        ((a.projectId || '') === projeto.id || !a.projectId)).sort((a,b)=>(b.versao||1)-(a.versao||1))[0] || null;
+      // Um kit já publicado não volta à fila como produto novo. Antes, quando a
+      // IA não repetia exatamente o id da versão anterior em BASE, a etapa era
+      // simplesmente descartada — e a gerente passava ciclos inteiros
+      // "mantendo o plano" sem produzir nada. Agora a etapa é convertida em
+      // evolução explícita daquela versão; publicar continua barrado pelas
+      // travas de conteúdo, então não há risco de republicação.
+      const evolucao = Boolean(existente);
+      const briefFinal = evolucao && baseId !== existente.id
+        ? `${brief}. Trabalhe sobre ${existente.nome}, preservando o que já funciona e alterando apenas o necessário.`
+        : brief;
+      if (novaTarefa({ titulo: `${kit.nome}: ${brief}`, kit: kit.id, briefing: briefFinal, para: alvo ? alvo.id : null,
         projectId: projeto.id, dependsOn: dep ? [dep.id] : [], baseArquivoId: existente ? existente.id : null })) criadas++;
     });
     S.state.registrar(criadas ? `${g.nome} atualizou o projeto e criou ${criadas} próxima(s) etapa(s).` : `${g.nome} revisou o projeto e manteve o plano.`, criadas ? 'ok' : 'info', g.id);
@@ -632,19 +722,34 @@ BASE2: vazio`,
     const e = S.state.atual(); if (!e) return;
     const cand = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
     if (!cand) return;
-    cand.avaliado = false;
     g.ocupado = true; g.balao = 'revisando';
-    const r = await S.ai.perguntar({
+    let r = null;
+    try {
+      r = await S.ai.perguntar({
       sistema: `Você é ${g.nome}, sócia-gerente do estúdio ${e.nome}. Decida se este material já pode ser publicado como produto final, aquele que o cliente recebe. Publicar congela a versão.
 Responda SOMENTE nestas linhas:
 PUBLICAR: sim ou não
 MOTIVO: <até 14 palavras>
 CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       pedido: `Arquivo ${cand.nome} (${cand.tipo}), qualidade aferida ${cand.qualidade}/100, autor ${cand.autor}.\nTrecho: ${String(cand.conteudo).slice(0, 900)}`,
-      tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
-    });
-    g.ocupado = false; g.balao = null;
-    if (!r) { cand.avaliado = false; S.state.gravar(); return; }
+        tokens: 160, agente: g.nome, motivo: 'avaliar entrega'
+      });
+    } finally {
+      g.ocupado = false; g.balao = null;
+    }
+    if (!r) {
+      // Um candidato que nunca consegue ser avaliado bloqueia todo o ramo de
+      // gerência: enquanto ele existe, a gerente não planeja nem supervisiona.
+      // Depois de três tentativas sem resposta, ele sai da frente.
+      cand.tentativasAvaliacao = (cand.tentativasAvaliacao || 0) + 1;
+      if (cand.tentativasAvaliacao >= 3) {
+        cand.avaliado = true;
+        S.state.registrar(`${g.nome} não conseguiu avaliar ${cand.nome} após 3 tentativas; o artefato ficou no acervo e a fila seguiu.`, 'alerta', g.id);
+      }
+      S.state.gravar();
+      return;
+    }
+    cand.tentativasAvaliacao = 0;
     cand.avaliado = true;
     const tarefaOrigem = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
     const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.kit === cand.kit &&
@@ -655,21 +760,43 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       const released = publicar(cand.id, g.nome, String(r.campos.motivo || ''));
       if (released) e.decisoes.unshift({ t: Date.now(), tipo: 'publicação', quem: g.nome, texto: `${cand.nome}: ${r.campos.motivo || 'aprovado'}` });
     } else {
-      const correcao = String(r.campos.correcao || r.campos.motivo || '').trim();
+      const correcao = textoUtil(r.campos.correcao || r.campos.motivo || '');
       const motivoBloqueio = !evolucaoValida ? `já existe uma versão publicada de ${cand.kit}; a tarefa não aponta para ela` : (correcao || 'ainda não está pronto');
       S.state.registrar(`${g.nome} segurou ${cand.nome}: ${motivoBloqueio}.`, 'alerta', g.id);
       e.decisoes.unshift({ t: Date.now(), tipo: 'segurou', quem: g.nome, texto: `${cand.nome}: ${correcao}` });
+
+      // Quantas rodadas de correção este kit já consumiu neste projeto.
+      // Sem esse teto, cada correção gerava outra correção indefinidamente —
+      // e a qualidade descia a cada volta em vez de subir.
+      const rodada = (tarefaOrigem && Number(tarefaOrigem.rodada) || 0) + 1;
+      const LIMITE_RODADAS = 2;
+      if (rodada > LIMITE_RODADAS) {
+        const melhor = e.arquivos
+          .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
+          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
+        S.state.registrar(`${g.nome} encerrou o ciclo de correções de ${cand.kit} após ${LIMITE_RODADAS} rodadas. Melhor versão: ${melhor.nome} (q${melhor.qualidade}). A equipe segue para outra frente.`, 'alerta', g.id);
+        S.state.gravar(); S.bus.emit('arquivos'); S.bus.emit('trabalho');
+        return;
+      }
       if (correcao) {
         const ultima = e.arquivos
           .filter(a => a.classe === 'produto' && a.kit === cand.kit &&
             ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
           .sort((a,b) => (b.versao || 1) - (a.versao || 1))[0] || null;
+        // A correção parte da melhor versão existente, não da última produzida.
+        // Antes, uma entrega pior virava base da próxima e a qualidade
+        // despencava a cada rodada.
+        const melhorBase = e.arquivos
+          .filter(a => a.kit === cand.kit && ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
+          .sort((a, b) => (Number(b.qualidade) || 0) - (Number(a.qualidade) || 0))[0] || cand;
+        const base = ultima || melhorBase;
         novaTarefa({
-          titulo: `Corrigir ${cand.nome}: ${correcao}`,
+          titulo: `Corrigir ${cand.kit} (rodada ${rodada}): ${correcao}`,
           kit: cand.kit,
-          briefing: `${correcao}. Base de trabalho: ${ultima ? ultima.nome : cand.nome}. Preserve o que já funciona e altere somente o necessário.`,
+          briefing: `${correcao}. Base de trabalho: ${base.nome} (qualidade ${base.qualidade}). Preserve o que já funciona e altere somente o necessário. A nova versão precisa ficar melhor que a atual.`,
           projectId: cand.projectId,
-          baseArquivoId: ultima ? ultima.id : (cand.baseArquivoId || null),
+          baseArquivoId: base.id,
+          rodada,
           origem: 'revisão da gerente'
         });
       }
@@ -1075,6 +1202,9 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       // A gerente faz um único gate de release; se aprovar, congela esta versão.
       if (candidato) {
         if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+        // Sem IA disponível a gerente não julga o candidato, mas também não
+        // fica de braços cruzados: segue supervisionando a operação.
+        monitorarEquipe(g);
         return;
       }
       // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.

@@ -507,8 +507,9 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .meeting-composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg-2)}
 .meeting-composer textarea{min-height:70px;resize:vertical}
 .meeting-send{display:flex;align-items:center;gap:10px;margin-top:7px}.meeting-send .hint{flex:1}
-.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px}.management-summary b{display:block;font-size:20px}.management-summary span{font-size:10px;color:var(--ink-3)}.manager-focus{margin:8px 0;line-height:1.5}.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0}.manager-recommendation span{font-size:12px}.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2)}
-@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.management-summary{grid-template-columns:1fr 1fr 1fr}.meeting-person{min-width:0;flex:1}}
+.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;min-width:0}.management-summary b{display:block;font-size:20px;overflow-wrap:anywhere}.management-summary span{font-size:10px;color:var(--ink-3);overflow-wrap:anywhere}.manager-focus{margin:8px 0;line-height:1.5;overflow-wrap:anywhere}.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0;overflow-wrap:anywhere}.manager-recommendation span{font-size:12px}.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere}
+@media (max-width:380px){.management-summary{grid-template-columns:1fr}.management-summary>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px}}
+@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.meeting-person{min-width:0;flex:1}}
 
 .person-log{max-height:280px;overflow:auto;padding-right:4px}.person-log .log-line{margin:4px 0}
 
@@ -611,6 +612,7 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
         <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
         <div class="team" id="teamList"></div>
       </div>
+      <div class="panel" id="gerenciaPanel"></div>
       <div class="panel" id="xpPanel"></div>
     </section>
 
@@ -2809,6 +2811,7 @@ Sem numeração, sem markdown.`;
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
       projectId: projeto ? projeto.id : null,
       dependsOn: Array.isArray(dados.dependsOn) ? dados.dependsOn : [],
+      baseArquivoId: dados.baseArquivoId || null,
       handoff: dados.handoff || null, criadaEm: Date.now()
     };
     e.tarefas.unshift(t);

@@ -117,3 +117,51 @@ Acervos gravados antes desta versão continuam funcionando: como a linhagem anti
 - Campos de formulário usam 16px em telas pequenas, evitando o zoom automático do navegador ao focar.
 - Rótulos longos em `select` ganharam reticência; estatísticas, chamadas e nomes de arquivo quebram linha em vez de estourar o painel.
 - Botões de ação empilham em duas colunas quando não cabem lado a lado.
+
+
+## Painel da gerência estava ausente (v31)
+
+A função que desenha "Supervisão da gerente" (etapas abertas, concluídas, funcionários, foco da gerente, recomendações e alertas) procurava por um elemento `#gerenciaPanel` que **nunca existiu no HTML** — nem em `index.html`, nem em `estudio-arquivo-unico.html`. O painel silenciosamente não aparecia, em nenhum aparelho, desde a v21 original.
+
+Corrigido nos dois arquivos: o container foi adicionado na view do Estúdio, entre a lista de equipe e o painel de XP. De quebra, o grid de 3 colunas do resumo (que nunca tinha sido testado numa tela realmente estreita) ganhou `min-width:0`, quebra de palavra e empilha em 1 coluna abaixo de 380px de largura.
+
+
+## Gerente travada (v32)
+
+Quatro defeitos no fluxo da gerente, do mais grave ao menor:
+
+1. **`novaTarefa` descartava `baseArquivoId`.** Cinco chamadas diferentes passavam esse campo e ele nunca era gravado na tarefa. Como o portão de release exige que a tarefa aponte para o produto anterior, nenhuma entrega passava depois do primeiro produto de cada kit: a gerente segurava tudo com "já existe uma versão publicada de X". Era o motivo de a produção parecer parada.
+2. **Planejamento descartado em silêncio.** Quando a IA não repetia exatamente o id da versão anterior no campo BASE, a etapa planejada era jogada fora e a gerente registrava "revisou o projeto e manteve o plano" sem produzir nada. Agora a etapa vira uma evolução explícita daquela versão.
+3. **`ocupado` sem `finally`.** Uma exceção no meio de planejar ou avaliar deixava a gerente marcada como ocupada para o resto da sessão, e o ciclo nunca mais entrava no ramo de gerência.
+4. **Candidato impossível de avaliar bloqueava tudo.** Enquanto existisse um artefato não avaliado, a gerente não planejava nem supervisionava. Após três tentativas sem resposta da IA, ele sai da frente com registro no log; e sem IA disponível ela passa a supervisionar em vez de não fazer nada.
+
+As travas contra republicação da v30 continuam valendo, então liberar as evoluções não reabre aquele problema.
+
+
+## Loop de correções e lixo de template (v33)
+
+O log mostrava a mesma entrega girando: "Produzir Catálogo..." duplicado, "Corrigir catalogo-...csv" repetido cinco vezes e qualidade caindo a cada volta (63, 81, 62, 36). Quatro causas:
+
+1. **Texto do modelo entrava cru.** Marcadores de template vazados pelos modelos pequenos (`|constrain|>`, `<|channel|>`, cercas de código, tags) viravam título de tarefa. Agora todo campo vindo da IA passa por `limpo()`, e só vira instrução se sobrar texto real depois da limpeza.
+2. **Dedupe fraca.** Só comparava título exato entre tarefas **abertas**: assim que a primeira virava "feita", a idêntica nascia de novo. Agora um kit não tem duas etapas abertas no mesmo projeto, e uma etapa idêntica concluída nos últimos 20 minutos não volta.
+3. **Correções sem teto.** Cada revisão da gerente gerava outra correção, indefinidamente. Agora são no máximo 2 rodadas por kit; depois disso ela encerra o ciclo, registra qual foi a melhor versão e a equipe segue para outra frente.
+4. **Correção partia da versão errada.** A base era a última produzida, não a melhor — por isso a qualidade despencava a cada rodada. Agora parte da melhor versão do kit, e o briefing exige que a nova fique acima dela.
+
+Também corrigido: a fila produtiva contava só produtos **publicados** para decidir o que falta. Enquanto o portão de release segurava tudo, ela recriava eternamente a mesma etapa. Agora candidatos e protótipos em andamento também contam.
+
+Estas correções de fluxo estão apenas em `index.html` (versão modular). O `estudio-arquivo-unico.html` recebeu as correções estruturais até a v32, mas não este ajuste de fluxo.
+
+
+## O produto que faltava (v34)
+
+Diagnóstico: a fábrica tinha 8 kits e **todos eram material de marketing** — página de vendas, anúncios, artigo, e-mails, catálogo, marca, proposta, calendário. Nenhum produzia o produto em si. Para uma editora, isso significava que a equipe só conseguia fabricar divulgação de livros que nunca seriam escritos: daí o "catálogo de produtos" sem nenhum produto e o briefing citando um "portfólio existente" que nunca existiu.
+
+**Novo kit `obra`** (nível 1, especialidade criação): produz a entrega central do negócio, seja ela qual for — capítulo ou conto para uma editora, aula para quem ensina, documentação para software, material entregue ao cliente para um serviço. Entre 700 e 1200 palavras, obra completa e acabada; a aferição penaliza texto curto, porque obra curta é esboço, não produto.
+
+**Ordem corrigida em três lugares**, porque instrução no prompt não basta com modelos pequenos:
+
+- Fila produtiva: a sequência passou a ser `obra → landing → catalogo → artigo → emails → anuncios`.
+- Planejamento sem IA: obra primeiro; catálogo só entra quando existem obras publicadas, e cita nominalmente quais são.
+- Planejamento com IA: o prompt declara a ordem obrigatória, e o código **recusa** qualquer kit de divulgação enquanto não houver obra no projeto, convertendo a etapa em produção da obra.
+
+**Briefings honestos:** o texto "a partir do portfólio existente" aparecia mesmo com o projeto vazio, o que empurrava o modelo a inventar produtos para preencher. Agora o briefing só menciona acervo quando ele existe, e nesse caso lista os arquivos reais.

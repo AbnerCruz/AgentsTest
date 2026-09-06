@@ -310,6 +310,56 @@ ${texto || '## Introdução\n\nConteúdo em elaboração.'}
       }
     },
 
+    /* ---------------- obra: o produto principal do estúdio ----------------
+       Todos os outros kits são material sobre o produto: página que vende,
+       catálogo que lista, anúncio que divulga. Faltava o kit que produz A
+       COISA em si. Sem ele, uma editora só conseguia fazer propaganda de
+       livros que nunca seriam escritos — e o catálogo saía vazio porque
+       não havia produto nenhum para catalogar. */
+    {
+      id: 'obra', nome: 'Obra — produto principal', ext: 'md', nivel: 1, especialidade: 'criacao',
+      desc: 'A entrega central do negócio: o texto, a peça ou o material que o estúdio realmente vende.',
+      vende: 'É o produto de verdade. Tudo o mais (site, catálogo, anúncio) existe para apresentá-lo.',
+      tokens: 2600,
+      instrucao(ctx) {
+        return `Você é ${ctx.autor}, ${ctx.cargo} do estúdio ${ctx.estudio}. Produza A OBRA PRINCIPAL deste negócio, em português do Brasil.
+Negócio: ${ctx.ramo}. Público: ${ctx.publico}. Missão: ${ctx.missao}. Tom: ${ctx.tom}.
+Pedido: ${ctx.briefing}
+
+Isto NÃO é material de divulgação. Não escreva página de vendas, anúncio, catálogo, e-mail ou plano. Escreva a obra em si, aquilo que o cliente consome ou compra.
+Se o negócio escreve livros, entregue capítulo ou conto completo. Se ensina, entregue a aula ou o módulo. Se faz software, entregue a documentação funcional. Se presta serviço, entregue o material que o cliente recebe.
+
+Comece com estas linhas:
+TITULO: <título da obra, até 12 palavras>
+FORMATO: <o que é: capítulo, conto, aula, guia, manual...>
+SINOPSE: <até 30 palavras>
+---
+Depois escreva a obra completa em Markdown, com começo, meio e fim. Entre 700 e 1200 palavras. Conteúdo real e acabado, não esboço, não índice, não promessa do que será feito.`;
+      },
+      obrigatorios: ['titulo', 'formato'],
+      montar(c, ctx, bruto) {
+        const texto = String(bruto || '').trim();
+        const md = `---
+titulo: "${limpa(c.titulo).replace(/"/g, "'")}"
+formato: "${limpa(c.formato)}"
+sinopse: "${limpa(c.sinopse).replace(/"/g, "'")}"
+autor: "${ctx.autor} — ${ctx.estudio}"
+data: ${new Date().toISOString().slice(0, 10)}
+---
+
+# ${limpa(c.titulo)}
+
+${texto || 'Conteúdo em elaboração.'}
+`;
+        return [{ nome: slug(limpa(c.titulo)) + '.md', tipo: 'md', conteudo: md }];
+      },
+      checarExtra(c, arquivos) {
+        const palavras = arquivos[0].conteudo.split(/\s+/).length;
+        // Uma obra curta demais é esboço, não produto.
+        return palavras > 700 ? 14 : palavras > 450 ? 8 : palavras > 250 ? 3 : 0;
+      }
+    },
+
     /* ---------------- sequência de e-mails ---------------- */
     {
       id: 'emails', nome: 'Sequência de e-mails', ext: 'md', nivel: 2, especialidade: 'comercial',
