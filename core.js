@@ -132,6 +132,7 @@ window.S = window.S || {};
     e.gerencia.ultimaAvaliacao = Number(e.gerencia.ultimaAvaliacao) || 0;
     e.gerencia.recomendacao = String(e.gerencia.recomendacao || 'A gerente está observando a carga, qualidade e dependências da equipe.');
     e.gerencia.alertas = Array.isArray(e.gerencia.alertas) ? e.gerencia.alertas.slice(-20) : [];
+    e.gerencia.revisoesPorLinhagem = e.gerencia.revisoesPorLinhagem && typeof e.gerencia.revisoesPorLinhagem === 'object' ? e.gerencia.revisoesPorLinhagem : {};
     e.tarefas = Array.isArray(e.tarefas) ? e.tarefas : [];
     e.equipe = Array.isArray(e.equipe) ? e.equipe : [];
     e.equipe.forEach((f, i) => {
@@ -208,7 +209,20 @@ window.S = window.S || {};
       delete a.qualidade;
       a.versao = Number(a.versao) || 1;
       a.linhagem = a.linhagem || slug(a.nome);
+      a.tentativasAvaliacao = Number(a.tentativasAvaliacao) || 0;
     });
+    // Migração de continuidade: versões antigas podiam receber uma linhagem
+    // nova só porque o modelo trocou o nome do arquivo. A cadeia baseArquivoId
+    // é evidência mais forte; propagamos a identidade do ancestral.
+    const porArquivoId = new Map(e.arquivos.map(a => [a.id, a]));
+    for (let passe = 0; passe < 8; passe++) {
+      let mudou = false;
+      e.arquivos.forEach(a => {
+        const base = a.baseArquivoId && porArquivoId.get(a.baseArquivoId);
+        if (base && base.linhagem && a.linhagem !== base.linhagem) { a.linhagem = base.linhagem; mudou = true; }
+      });
+      if (!mudou) break;
+    }
     e.projetos.forEach(pr => {
       pr.tarefaIds = e.tarefas.filter(t => t.projectId === pr.id).map(t => t.id);
       pr.arquivoIds = e.arquivos.filter(a => a.projectId === pr.id).map(a => a.id);

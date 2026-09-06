@@ -23,7 +23,8 @@
   const TIPOS = ['md', 'html', 'txt', 'csv', 'json', 'js', 'css'];
   const PLACEHOLDERS = [
     /lorem ipsum/i, /\bTODO\b/, /\bTBD\b/, /\bxxx+\b/i, /\{\{[^}]*\}\}/,
-    /<preencher>/i, /\[inserir[^\]]*\]/i, /coloque aqui/i, /texto de exemplo/i
+    /<preencher>/i, /\[inserir[^\]]*\]/i, /coloque aqui/i, /texto de exemplo/i,
+    /\[nome(?:\s+do|\s+da)?[^\]]*\]/i, /\[(?:data|assinatura|url|link|cargo|respons[aá]vel|pre[çc]o|m[eé]trica|meta|canal)(?:[^\]]*)\]/i
   ];
 
   function limparNome(nome, tipo) {
@@ -39,22 +40,40 @@
     return TIPOS.includes(v) ? v : porId(kit).tipo;
   }
 
-  function validar(conteudo) {
+  function validar(conteudo, tipo) {
     const texto = String(conteudo || '');
+    const t = String(tipo || 'md').toLowerCase();
     const notas = [];
-    if (texto.trim().length < 200) notas.push('conteúdo curto demais para ser uma entrega completa');
-    if (texto.split(/\n/).length < 4) notas.push('estrutura insuficiente: poucas linhas');
-    PLACEHOLDERS.forEach(rx => { if (rx.test(texto)) notas.push('marcador de preenchimento encontrado: ' + rx.source); });
-    return { pronto: notas.length === 0, notas: notas.slice(0, 4), verificadoEm: Date.now() };
+    const minimo = ['json','csv','css','js'].includes(t) ? 80 : 200;
+    if (texto.trim().length < minimo) notas.push('conteúdo curto demais para uma entrega completa deste tipo');
+    if (!['json','csv','css','js'].includes(t) && texto.split(/\n/).length < 4) notas.push('estrutura insuficiente: poucas linhas');
+    PLACEHOLDERS.forEach(rx => { rx.lastIndex = 0; if (rx.test(texto)) notas.push('marcador de preenchimento encontrado: ' + rx.source); });
+    if (t === 'json') { try { JSON.parse(texto); } catch (_) { notas.push('JSON inválido'); } }
+    if (t === 'html' && !/<(?:html|body|main|section|article|div)[\s>]/i.test(texto)) notas.push('HTML sem estrutura utilizável');
+    if (t === 'csv') {
+      const linhas = texto.trim().split(/\n/).filter(Boolean);
+      if (linhas.length < 2 || !/[;,\t]/.test(linhas[0] || '')) notas.push('CSV sem cabeçalho e linhas de dados verificáveis');
+    }
+    return { pronto: notas.length === 0, notas: notas.slice(0, 6), verificadoEm: Date.now(), tipo: t };
   }
 
   function contextoAcervo(e, baseArquivo, projectId) {
     if (!e) return 'nenhum';
-    const relacionados = (e.arquivos || [])
-      .filter(a => (!projectId || a.projectId === projectId) && (!baseArquivo || a.id !== baseArquivo.id))
-      .slice(0, 4)
+    const todos = (e.arquivos || []).filter(a => (!projectId || a.projectId === projectId) && (!baseArquivo || a.id !== baseArquivo.id));
+    const mesmaLinha = baseArquivo ? todos.filter(a => a.linhagem && a.linhagem === baseArquivo.linhagem) : [];
+    const outros = todos.filter(a => !mesmaLinha.includes(a));
+    const relacionados = mesmaLinha.concat(outros).slice(0, 4)
       .map(a => `${a.nome} [${a.classe}]: ${String(a.conteudo || '').slice(0, 700)}`);
     return relacionados.join('\n\n') || 'nenhum';
+  }
+
+  function pedeCrescimento(briefing) {
+    return /\b(expandir|expans[aã]o|estender|extens[aã]o|acrescentar (?:cap[ií]tulos?|se[cç][oõ]es?)|mais cap[ií]tulos?|\d+\s*p[aá]ginas?|continuar (?:o |a )?(?:livro|texto|romance|conto|cap[ií]tulo)|aprofundar narrativa)\b/i.test(String(briefing||''));
+  }
+  function trechoBaseParaPrompt(base, incremental) {
+    const txt=String(base&&base.conteudo||'');
+    if(!incremental || txt.length<=18000) return txt;
+    return txt.slice(0,3500)+`\n\n[... ${txt.length-15500} caracteres intermediários preservados no arquivo persistente ...]\n\n`+txt.slice(-12000);
   }
 
   /* Produz um artefato real a partir da decisão já tomada pelo agente. */
@@ -68,6 +87,8 @@
     const base = op && op.baseArquivoId ? (e.arquivos || []).find(a => a.id === op.baseArquivoId) : null;
     const projeto = (e.projetos || []).find(p => p.id === (op && op.projectId)) ||
                     (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0] || null;
+    const incremental = Boolean(base && (String(base.conteudo||'').length > 12000 || pedeCrescimento(briefing)));
+    const basePrompt = base ? trechoBaseParaPrompt(base, incremental) : '';
 
     const sistema = [
       `Você é ${agente.nome || 'um integrante'}, ${agente.cargo || 'da equipe'} da empresa ${e.nome}.`,
@@ -86,12 +107,15 @@
       `- Entregue o conteúdo integral do arquivo, sem resumo, sem comentários sobre o processo e sem pedir aprovação.`,
       `- Nada de texto de exemplo, lorem ipsum, TODO, colchetes para preencher ou dados inventados sobre o mundo real.`,
       `- Não invente clientes, vendas, métricas, datas ou aprovações. Hipóteses devem ser declaradas como hipóteses.`,
-      `- Se estiver evoluindo o artefato base, entregue a versão nova completa, não um diff.`,
+      `- Você só pode produzir/editar arquivos dentro deste simulador. Não prometa enviar e-mail, criar tarefa no Asana, obter assinatura, fazer upload externo ou executar qualquer ação em serviço externo.`,
+      `- Se o briefing pedir uma ação externa impossível, converta-a em algo interno e verificável (ex.: checklist, minuta, campo marcado como dependência externa) sem fingir que a ação aconteceu e sem torná-la requisito para concluir o arquivo.`,
+      incremental ? `- Em OPERACAO: anexar, não repita o conteúdo base; produza apenas continuação substantiva e coerente.` : `- Se estiver evoluindo o artefato base, entregue a versão nova completa, não um diff.`,
       ``,
       `RETORNE EXATAMENTE NESTE FORMATO:`,
       `ARQUIVO: <nome do arquivo com extensão>`,
       `TIPO: <md | html | txt | csv | json | js | css>`,
       `RESUMO: <uma frase sobre o que foi entregue>`,
+      `OPERACAO: <substituir | anexar>`,
       `PRONTO: sim | nao`,
       `---`,
       `<conteúdo integral do arquivo a partir daqui>`
@@ -99,7 +123,7 @@
 
     const r = await S.ai.chamar({
       sistema,
-      pedido: 'Produza agora o arquivo completo, no formato pedido. O conteúdo depois de --- é o arquivo, exatamente como será salvo.',
+      pedido: incremental ? 'Evolua o arquivo agora. Se a tarefa for de crescimento, prefira OPERACAO: anexar e entregue depois de --- apenas o novo trecho que será unido ao arquivo persistente.' : 'Produza agora o arquivo completo, no formato pedido. O conteúdo depois de --- é o arquivo, exatamente como será salvo.',
       tipo: 'conteudo',
       tokens: (op && op.tokens) || 3000,
       agente: agente.nome,
@@ -112,17 +136,33 @@
     let conteudo = S.ai.corpo(texto);
     if (!conteudo) {
       // Sem o separador, aproveitamos o que veio removendo as linhas de cabeçalho.
-      conteudo = texto.split(/\n/).filter(l => !/^\s*(ARQUIVO|TIPO|RESUMO|PRONTO)\s*:/i.test(l)).join('\n').trim();
+      conteudo = texto.split(/\n/).filter(l => !/^\s*(ARQUIVO|TIPO|RESUMO|OPERACAO|PRONTO)\s*:/i.test(l)).join('\n').trim();
     }
     conteudo = conteudo.replace(/^```[a-z]*\n?|```$/gi, '').trim();
     if (conteudo.length < 80) throw new Error('A IA de produção não devolveu conteúdo utilizável.');
+    const operacao = incremental && String(campos.operacao || '').toLowerCase().trim() === 'anexar' ? 'anexar' : 'substituir';
+    if (base && operacao === 'anexar') {
+      const anterior=String(base.conteudo||'').trimEnd();
+      const novo=conteudo.trimStart();
+      // Evita anexar uma cópia integral do começo caso o modelo ignore a regra.
+      const inicioAnterior=anterior.slice(0,500).replace(/\s+/g,' ').trim();
+      const inicioNovo=novo.slice(0,500).replace(/\s+/g,' ').trim();
+      if (inicioAnterior && inicioNovo && (inicioNovo.startsWith(inicioAnterior.slice(0,180)) || inicioAnterior.startsWith(inicioNovo.slice(0,180)))) {
+        throw new Error('A IA repetiu o artefato base em modo incremental; a duplicação foi bloqueada.');
+      }
+      conteudo = anterior + '\n\n' + novo;
+    }
 
-    const tipo = tipoValido(campos.tipo, kit);
-    const nome = limparNome(campos.arquivo || (base ? base.nome : (op && op.titulo) || 'entrega'), tipo);
-    const validacao = validar(conteudo);
+    // Em uma evolução, identidade de arquivo e formato pertencem à linhagem,
+    // não à resposta do modelo. Isto impede renomeações acidentais a cada revisão.
+    const tipo = base ? tipoValido(base.tipo, kit) : tipoValido(campos.tipo, kit);
+    const nome = base ? limparNome(base.nome, tipo) : limparNome(campos.arquivo || (op && op.titulo) || 'entrega', tipo);
+    const validacao = validar(conteudo, tipo);
+    validacao.prontoEstrutural = validacao.pronto;
+    validacao.declaradoPronto = String(campos.pronto || '').toLowerCase() === 'sim' || campos.pronto === true;
     if (String(campos.pronto || '').toLowerCase() === 'nao' || campos.pronto === false) {
       validacao.pronto = false;
-      validacao.notas = (validacao.notas || []).concat('o próprio autor declarou a entrega incompleta').slice(0, 5);
+      validacao.notas = (validacao.notas || []).concat('o próprio autor declarou a entrega incompleta').slice(0, 6);
     }
 
     return {
@@ -133,7 +173,8 @@
       kit,
       viaIA: true,
       linhagem: base ? base.linhagem : null,
-      baseArquivoId: base ? base.id : null
+      baseArquivoId: base ? base.id : null,
+      operacao
     };
   }
 

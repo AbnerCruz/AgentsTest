@@ -86,6 +86,73 @@
   function logEscritorio(texto, tag) { S.state.registrar(texto, tag || 'info'); }
   const gerente = () => rt.find(p => p.papel === 'gerente') || null;
 
+  const MAX_CORRECOES_LINHAGEM = 3;
+  function chaveLinhagem(a) { return String((a && a.linhagem) || (a && a.id) || 'sem-linhagem'); }
+  function estadoLinhagem(e, a) {
+    e.gerencia = e.gerencia || {};
+    e.gerencia.revisoesPorLinhagem = e.gerencia.revisoesPorLinhagem || {};
+    const k = chaveLinhagem(a);
+    const st = e.gerencia.revisoesPorLinhagem[k] || { avaliacoes:0, correcoes:0, repeticoes:0, ultimaPendencia:'', atualizadoEm:0 };
+    e.gerencia.revisoesPorLinhagem[k] = st;
+    return st;
+  }
+  function normalizarFrase(v) { return String(v || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').replace(/\s+/g,' ').trim(); }
+  function dependeDeAcaoExterna(v) {
+    const t = normalizarFrase(v);
+    if (!t) return false;
+    return /(asana|trello|notion|google drive|dropbox|email|e mail|assinatur|docusign|upload|repositorio externo|publicar em|rede social|loja externa|enviar para|notificar .*@|link real)/i.test(t);
+  }
+  function similaridadeTexto(a,b) {
+    const toks = t => new Set(normalizarFrase(t).split(' ').filter(x => x.length > 3).slice(0,1200));
+    const A=toks(a), B=toks(b); if(!A.size||!B.size)return 0;
+    let inter=0; A.forEach(x=>{if(B.has(x))inter++;});
+    return inter / Math.max(1, A.size + B.size - inter);
+  }
+  function limparFilaCandidatos(e) {
+    const ativos=(e.arquivos||[]).filter(a=>(a.classe==='candidato'||a.classe==='prototipo')&&!a.avaliado).sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0));
+    const vistos=new Map();
+    ativos.forEach(a=>{
+      const k=chaveLinhagem(a);
+      if(!vistos.has(k)){vistos.set(k,a);return;}
+      const novo=vistos.get(k);
+      a.avaliado=true; a.superadoPor=novo.id; a.motivoEncerramento='versão anterior da mesma linhagem';
+    });
+    // Acervos antigos podem ter linhagens diferentes por renomeação. Só
+    // consolidamos automaticamente quando o conteúdo é praticamente o mesmo.
+    const folhas=[...vistos.values()];
+    for(let i=0;i<folhas.length;i++) for(let j=i+1;j<folhas.length;j++) {
+      const a=folhas[i], b=folhas[j];
+      if(a.avaliado||b.avaliado||a.projectId!==b.projectId) continue;
+      if(similaridadeTexto(a.conteudo,b.conteudo)>=0.90){
+        const novo=(a.criadoEm||0)>=(b.criadoEm||0)?a:b, velho=novo===a?b:a;
+        velho.avaliado=true; velho.superadoPor=novo.id; velho.motivoEncerramento='quase duplicado consolidado localmente';
+        if(novo.baseArquivoId===velho.id || velho.baseArquivoId===novo.id) novo.linhagem=velho.linhagem||novo.linhagem;
+      }
+    }
+  }
+  function descendeDe(e, arq, ancestralId) {
+    if (!arq || !ancestralId) return false;
+    let atual=arq, passos=0;
+    while(atual && passos++<40){
+      if(atual.id===ancestralId || atual.baseArquivoId===ancestralId)return true;
+      atual=atual.baseArquivoId ? e.arquivos.find(x=>x.id===atual.baseArquivoId) : null;
+    }
+    return false;
+  }
+  function conteudoParaAvaliacao(v) {
+    const t=String(v||'');
+    if(t.length<=22000) return t;
+    const meio=Math.max(0,Math.floor(t.length/2)-3500);
+    return t.slice(0,8000)+`\n\n[... amostra: ${t.length-19000} caracteres omitidos para controlar custo ...]\n\n`+t.slice(meio,meio+7000)+`\n\n[... fim da amostra ...]\n\n`+t.slice(-4000);
+  }
+  function relacionadosParaAvaliacao(e, cand) {
+    const todos=(e.arquivos||[]).filter(a=>a.id!==cand.id && a.projectId===cand.projectId);
+    const mesma=todos.filter(a=>a.linhagem===cand.linhagem);
+    const publicados=todos.filter(a=>a.classe==='produto' && !mesma.includes(a));
+    const outros=todos.filter(a=>!mesma.includes(a) && !publicados.includes(a));
+    return mesma.concat(publicados, outros).slice(0,6);
+  }
+
   function irPara(p, alvo) {
     p.estado = 'andando'; p.alvo = alvo;
     return new Promise(res => { p._chegou = res; setTimeout(() => { if (p._chegou === res) { p._chegou = null; res(); } }, 6000); });
@@ -407,8 +474,8 @@
     // que uma IA mude "index.html" para outro nome e consiga republicar
     // essencialmente o mesmo produto como se fosse uma novidade.
     const ultimoDoKit = produtosDoMesmoKit[0] || null;
-    if (ultimoDoKit && (!base.baseArquivoId || base.baseArquivoId !== ultimoDoKit.id)) {
-      S.state.registrar(`Release bloqueado para ${base.nome}: o projeto já possui ${ultimoDoKit.nome}; uma nova versão precisa apontar explicitamente para ela.`, 'alerta');
+    if (ultimoDoKit && !descendeDe(e, base, ultimoDoKit.id)) {
+      S.state.registrar(`Release bloqueado para ${base.nome}: o projeto já possui ${ultimoDoKit.nome}; uma nova versão precisa descender explicitamente dela.`, 'alerta');
       return null;
     }
 
@@ -423,7 +490,7 @@
     // explícita da última versão. Isso impede o motor de transformar o mesmo
     // trabalho em v2, v3, v4 apenas porque a fila ficou vazia.
     if (ultima) {
-      if (!base.baseArquivoId || base.baseArquivoId !== ultima.id) {
+      if (!descendeDe(e, base, ultima.id)) {
         S.state.registrar(`Release bloqueado para ${base.nome}: não é uma evolução explícita de ${ultima.nome}.`, 'alerta');
         return null;
       }
@@ -562,15 +629,17 @@
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
     const titulo = limpo(dados.titulo, 24); if (!titulo || titulo.length < 6) return null;
-    if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
-    // Dedupe real: o mesmo kit não pode ter duas etapas abertas no mesmo
-    // projeto, e uma etapa idêntica concluída há pouco não volta em loop.
-    // Comparar só o título exato entre tarefas abertas deixava "Produzir
-    // Catálogo..." nascer de novo assim que a anterior virava "feita".
+    const baseAlvo = dados.baseArquivoId || null;
+    // Duas tarefas realmente idênticas (mesmo título + mesma base) não coexistem.
+    // Já uma nova revisão da MESMA LINHAGEM usa uma base nova e precisa ser
+    // permitida; o dedupe antigo bloqueava a segunda correção assim que o nome
+    // do arquivo passou a ser estável.
+    if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase() && (t.baseArquivoId || null) === baseAlvo)) return null;
     const projAlvo = dados.projectId || null;
     if (dados.kit !== 'autonomo' && e.tarefas.some(t => t.status !== 'feita' && t.kit === dados.kit && (t.projectId || null) === projAlvo)) return null;
     const repetidaRecente = e.tarefas.some(t => t.status === 'feita' &&
       t.titulo.toLowerCase() === titulo.toLowerCase() &&
+      (t.baseArquivoId || null) === baseAlvo &&
       Date.now() - (t.concluidaEm || 0) < 20 * 60000);
     if (repetidaRecente) return null;
     const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
@@ -640,14 +709,15 @@
   async function avaliar(g) {
     const e = S.state.atual(); if (!e || !g || g.ocupado || (S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel())) return;
     const agora = Date.now();
+    limparFilaCandidatos(e);
     const candidatos = e.arquivos.filter(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado && agora >= (a.proximaAvaliacao || 0));
     const cand = candidatos[0];
     if (!cand) return;
-    // Trava anti-loop: nenhum candidato pode ser reinspecionado indefinidamente.
-    // Depois de algumas tentativas sem uma decisão que resolva a entrega, a
-    // gerente força uma correção e encerra o ciclo — nunca fica repetindo.
     cand.tentativasAvaliacao = (cand.tentativasAvaliacao || 0) + 1;
-    const ultimaChance = cand.tentativasAvaliacao >= 3;
+    const rev = estadoLinhagem(e, cand);
+    rev.avaliacoes++; rev.atualizadoEm=agora;
+    // O limite é da LINHAGEM, não do id transitório do arquivo.
+    const ultimaChance = rev.correcoes >= MAX_CORRECOES_LINHAGEM || cand.tentativasAvaliacao >= 3;
     g.ocupado = true; g.estado = 'trabalhando'; g.balao = 'lendo a entrega';
     const projeto = e.projetos.find(x => x.id === cand.projectId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
     const tarefa = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
@@ -660,9 +730,12 @@ OBJETIVO: ${projeto ? projeto.objetivo : e.missao}
 TAREFA QUE GEROU A ENTREGA: ${tarefa ? tarefa.titulo + ' | ' + tarefa.briefing : 'não registrada'}
 ARQUIVO: ${cand.id} | ${cand.nome} | ${cand.tipo} | autor=${cand.autor} | versão=${cand.versao || 1}
 ARTEFATO BASE: ${cand.baseArquivoId || 'nenhum'}
+VALIDAÇÃO LOCAL (sem IA): ${cand.validacao ? (cand.validacao.prontoEstrutural === false ? (cand.validacao.notas||[]).filter(n=>!/próprio autor declarou/i.test(n)).join(' | ') : (cand.validacao.prontoEstrutural === true ? 'sem bloqueios estruturais' : (cand.validacao.pronto ? 'sem bloqueios estruturais' : (cand.validacao.notas||[]).join(' | ')))) : 'não registrada'}
+DECLARAÇÃO DO AUTOR: ${cand.validacao && cand.validacao.declaradoPronto === false ? 'o autor marcou a versão como incompleta; confira se é limitação interna real ou apenas dependência externa' : 'sem ressalva registrada'}
+HISTÓRICO DA LINHAGEM: ${rev.avaliacoes} avaliações; ${rev.correcoes} correções solicitadas; repetição=${rev.repeticoes || 0}
 
 CONTEÚDO COMPLETO DA ENTREGA:
-${String(cand.conteudo || '')}
+${conteudoParaAvaliacao(cand.conteudo)}
 
 ARTEFATOS RELACIONADOS:
 ${e.arquivos.filter(a => a.id !== cand.id && (a.projectId === cand.projectId || a.linhagem === cand.linhagem)).slice(0,6).map(a => `${a.id} ${a.nome} [${a.classe}]\n${String(a.conteudo||'').slice(0,2200)}`).join('\n\n') || 'nenhum'}
@@ -675,7 +748,9 @@ DECIDA PELO TRABALHO REAL. Você pode:
 - corrigir: existe problema concreto e você deve mandar alguém corrigi-lo;
 - descartar: a entrega não deve continuar;
 - continuar: está correta como etapa, mas outra etapa precisa ser executada antes.
-Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se corrigir/continuar, descreva a próxima ação em termos executáveis.`;
+Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se corrigir/continuar, descreva a próxima ação em termos executáveis.
+LIMITE DE CAPACIDADE: a equipe só pode criar/editar arquivos no estúdio. Assinatura digital real, Asana/Trello/Notion, e-mail, upload, publicação externa, contato com terceiros ou qualquer confirmação fora do simulador NÃO podem ser requisito de aceite. Se o arquivo recomenda uma ação externa futura, isso pode permanecer como recomendação, mas não bloqueia o release. Nunca mande um agente "obter", "enviar", "assinar", "subir" ou "criar link real" fora do estúdio.
+${ultimaChance ? 'MODO ANTI-LOOP: esta linhagem já consumiu o máximo de correções automáticas. Não escolha corrigir/continuar por pendência repetida. Decida publicar se o conteúdo interno é utilizável apesar de ações externas futuras, ou descartar se o conteúdo em si não serve.' : ''}`;
     let decisaoValida = false;
     try {
       const r = await S.ai.perguntar({
@@ -690,33 +765,63 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
       const evidencias = String(c.evidencias || '').trim();
       const pendencias = String(c.pendencias || '').trim();
       const pronto = String(c.pronto || '').toLowerCase().trim();
-      const acao = String(c.acao || '').trim();
-      g.balao = analise.slice(0, 70) || decisao || 'sem decisão clara';
-      if (decisao) registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendencias ? ' Pendências: ' + pendencias : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
-      logPessoa(g, decisao ? `inspecionou ${cand.nome}: ${decisao}. ${analise}` : `inspecionou ${cand.nome}, mas a resposta não trouxe uma decisão utilizável (tentativa ${cand.tentativasAvaliacao}).`, 'supervisao');
-      g.ref.pensamento = `${decisao || 'sem decisão'}: ${analise}`.slice(0, 500);
+      let acao = String(c.acao || '').trim();
+      let decisaoEfetiva = decisao;
+      let pendenciasEfetivas = pendencias;
+      const bloqueioLocal = Boolean(cand.validacao && (
+        cand.validacao.prontoEstrutural === false ||
+        (cand.validacao.prontoEstrutural == null && cand.validacao.pronto === false && !(cand.validacao.notas||[]).every(n=>/próprio autor declarou/i.test(n)))
+      ));
+      const externo = dependeDeAcaoExterna(pendencias) || dependeDeAcaoExterna(acao);
+      // Não gastamos rodadas tentando realizar ações que o runtime não possui.
+      // Se o conteúdo em si passou pela validação local, uma pendência puramente
+      // externa deixa de ser gate e vira apenas recomendação futura.
+      if (externo && !bloqueioLocal && ['corrigir','continuar','publicar'].includes(decisaoEfetiva)) {
+        decisaoEfetiva = 'publicar'; pendenciasEfetivas = 'nenhuma';
+        acao = 'Registrar a ação externa apenas como recomendação futura; nenhuma execução externa foi simulada.';
+      }
+      // Validação determinística tem precedência sobre um "publicar" otimista.
+      if (decisaoEfetiva === 'publicar' && bloqueioLocal) decisaoEfetiva = 'corrigir';
+      const pendHash = normalizarFrase(pendenciasEfetivas || analise).slice(0,220);
+      if (pendHash && rev.ultimaPendencia && (pendHash === rev.ultimaPendencia || pendHash.includes(rev.ultimaPendencia) || rev.ultimaPendencia.includes(pendHash))) rev.repeticoes++;
+      else rev.repeticoes = 0;
+      rev.ultimaPendencia = pendHash;
+      g.balao = analise.slice(0, 70) || decisaoEfetiva || 'sem decisão clara';
+      if (decisaoEfetiva) registrarReuniao(g.nome, `${decisaoEfetiva.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendenciasEfetivas ? ' Pendências: ' + pendenciasEfetivas : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
+      logPessoa(g, decisaoEfetiva ? `inspecionou ${cand.nome}: ${decisaoEfetiva}. ${analise}` : `inspecionou ${cand.nome}, mas a resposta não trouxe uma decisão utilizável (tentativa da linhagem ${rev.avaliacoes}).`, 'supervisao');
+      g.ref.pensamento = `${decisaoEfetiva || 'sem decisão'}: ${analise}`.slice(0, 500);
 
-      if (decisao === 'publicar' && pronto === 'sim' && (!pendencias || /^nenhuma$|^nenhum$/i.test(pendencias))) {
+      if (decisaoEfetiva === 'publicar' && (pronto === 'sim' || (externo && !bloqueioLocal)) && (!pendenciasEfetivas || /^nenhuma$|^nenhum$/i.test(pendenciasEfetivas))) {
         cand.avaliado = true; decisaoValida = true;
-        cand.liberadoPublicacao = true;
+        cand.liberadoPublicacao = true; rev.correcoes = 0; rev.repeticoes = 0;
         const produto = publicar(cand.id, g.nome, analise || 'Aprovado pela gerente após inspeção do conteúdo.');
         if (produto) {
           registrarReuniao(g.nome, `Liberei ${produto.nome} para sair do estúdio.`, 'decisao');
           projeto && projeto.atividade.unshift({t:Date.now(),tipo:'release',texto:`${g.nome} aprovou ${produto.nome} após inspeção do conteúdo.`});
         }
-      } else if (decisao === 'publicar') {
-        // Pendências reais: fecha ESTE candidato (não fica revivendo a
-        // versão antiga) e delega a correção, que vira um artefato novo.
+      } else if (decisaoEfetiva === 'publicar') {
+        // "Publicar" contraditório (PRONTO=não ou bloqueio local) vira correção,
+        // mas continua obedecendo ao teto da linhagem.
         cand.avaliado = true; decisaoValida = true;
-        const tarefaNova = novaTarefa({titulo:`Resolver pendências de ${cand.nome}`,kit:'autonomo',briefing:acao || pendencias || 'Revisar o produto final e eliminar tudo que ainda impede a publicação.',para:String(c.para||'').trim()||cand.autorId,projectId:cand.projectId||projeto.id,baseArquivoId:cand.id,origem:'gate rigoroso de produto'});
-        registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências ou a verificação final não foi declarada concluída.${tarefaNova?'':' Já existe uma tarefa de correção em andamento.'}`,'ordem');
-      } else if (decisao === 'descartar') {
-        cand.avaliado = true; decisaoValida = true;
+        if (ultimaChance) {
+          cand.revisaoPausada = true;
+          registrarReuniao(g.nome, `Não liberei ${cand.nome} e encerrei novas correções automáticas: a linhagem atingiu o limite anti-loop.`, 'alerta');
+        } else {
+          rev.correcoes++;
+          const tarefaNova = novaTarefa({titulo:`Resolver pendências de ${cand.nome}`,kit:'autonomo',briefing:acao || pendenciasEfetivas || (cand.validacao&&cand.validacao.notas||[]).join('; ') || 'Revisar o produto final e eliminar tudo que ainda impede a publicação.',para:String(c.para||'').trim()||cand.autorId,projectId:cand.projectId||(projeto&&projeto.id),baseArquivoId:cand.id,origem:'gate rigoroso de produto'});
+          registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências internas verificáveis.${tarefaNova?'':' Já existe uma tarefa equivalente para esta base.'}`,'ordem');
+        }
+      } else if (decisaoEfetiva === 'descartar') {
+        cand.avaliado = true; decisaoValida = true; rev.correcoes = 0; rev.repeticoes = 0;
         e.arquivos = e.arquivos.filter(a => a.id !== cand.id);
         if (projeto) projeto.arquivoIds = projeto.arquivoIds.filter(id => id !== cand.id);
         registrarReuniao(g.nome, `Descartei ${cand.nome}. Motivo: ${analise || 'não atende ao objetivo do projeto'}.`, 'decisao');
-      } else if (decisao === 'corrigir') {
-        cand.avaliado = true; decisaoValida = true;
+      } else if (decisaoEfetiva === 'corrigir') {
+        if (ultimaChance) {
+          cand.avaliado = true; cand.revisaoPausada = true; decisaoValida = true;
+          registrarReuniao(g.nome, `Parei a revisão automática de ${cand.nome}: a linhagem já atingiu ${MAX_CORRECOES_LINHAGEM} correções. O arquivo permanece como protótipo para evitar gasto em loop.`, 'alerta');
+        } else {
+        cand.avaliado = true; decisaoValida = true; rev.correcoes++;
         const alvo = e.equipe.find(f => f.id === String(c.para || '').trim() && f.papel === 'func') || e.equipe.find(f => f.papel === 'func' && f.id === cand.autorId);
         const tarefaNova = novaTarefa({
           titulo: `Corrigir: ${cand.nome}`, kit: 'autonomo', briefing: acao || `Corrigir os problemas encontrados pela gerente em ${cand.nome}: ${analise}`,
@@ -724,15 +829,21 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
         });
         registrarReuniao(g.nome, `Enviei ${cand.nome} para correção${alvo ? ' com ' + alvo.nome : ''}.`, 'ordem');
         void tarefaNova;
-      } else if (decisao === 'continuar') {
-        cand.avaliado = true; decisaoValida = true;
+        }
+      } else if (decisaoEfetiva === 'continuar') {
+        if (ultimaChance) {
+          cand.avaliado = true; cand.revisaoPausada = true; decisaoValida = true;
+          registrarReuniao(g.nome, `Interrompi novas etapas automáticas de ${cand.nome}: a linhagem atingiu o limite anti-loop.`, 'alerta');
+        } else {
+        cand.avaliado = true; decisaoValida = true; rev.correcoes++;
         const tarefaNova = novaTarefa({
           titulo: `Próxima etapa: ${cand.nome}`, kit: 'autonomo', briefing: acao || `Continuar o desenvolvimento a partir de ${cand.nome}. Decisão da gerente: ${analise}`,
           para: String(c.para || '').trim() || null, projectId: cand.projectId || (projeto && projeto.id), baseArquivoId: String(c.base || '').trim() || cand.id, origem: 'decisão da gerente após inspeção'
         });
         if (tarefaNova) registrarReuniao(g.nome, `A entrega ${cand.nome} passou para a próxima etapa.`, 'ordem');
+        }
       } else if (ultimaChance) {
-        forcarResolucaoCandidato(e, cand, g, projeto, 'a gerente não produziu uma decisão executiva válida em 3 tentativas');
+        forcarResolucaoCandidato(e, cand, g, projeto, 'a linhagem atingiu o limite de correções sem uma decisão final');
         decisaoValida = true;
       } else {
         // Resposta sem campo DECISAO reconhecível: tenta de novo em 2 minutos,
@@ -749,19 +860,19 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     }
   }
 
-  /* Fecha um candidato que não conseguiu ser avaliado depois de várias
-     tentativas, para nunca mais entrar no ciclo automático. Sempre abre uma
-     tarefa de revisão manual em vez de descartar silenciosamente o trabalho. */
+  /* Fecha um candidato que não conseguiu ser resolvido depois do teto da
+     linhagem. O protótipo é preservado, mas nenhuma nova tarefa circular é criada. */
   function forcarResolucaoCandidato(e, cand, g, projeto, motivo) {
     cand.avaliado = true;
-    const tarefaNova = novaTarefa({
-      titulo: `Revisar manualmente: ${cand.nome}`, kit: 'autonomo',
-      briefing: `A inspeção automática não conseguiu concluir esta entrega (${motivo}). Releia o conteúdo do zero e decida: publicar, corrigir ou descartar.`,
-      para: cand.autorId, projectId: cand.projectId || (projeto && projeto.id), baseArquivoId: cand.id, origem: 'trava anti-loop de inspeção'
-    });
-    registrarReuniao(g.nome, `Não consegui concluir a inspeção de ${cand.nome} automaticamente (${motivo}). Abri revisão manual para não travar a equipe.`, 'alerta');
-    logPessoa(g, `encerrou a inspeção de ${cand.nome} sem decisão automática e pediu revisão manual.`, 'alerta');
-    void tarefaNova;
+    cand.revisaoPausada = true;
+    cand.classe = cand.classe === 'candidato' ? 'prototipo' : cand.classe;
+    cand.motivoEncerramento = motivo;
+    // O comportamento antigo dizia "revisão manual", mas abria outra tarefa que
+    // era executada automaticamente pelo mesmo motor, reiniciando o loop.
+    // Agora a linhagem é realmente retirada da fila automática e permanece no
+    // acervo; a agência pode trabalhar em outras prioridades sem queimar tokens.
+    registrarReuniao(g.nome, `Retirei ${cand.nome} da fila automática: ${motivo}. O protótipo foi preservado no acervo sem criar outra tarefa circular.`, 'alerta');
+    logPessoa(g, `encerrou a inspeção automática de ${cand.nome} e preservou o protótipo para evitar loop.`, 'alerta');
   }
 
   function personalidadeInicial(especialidade,nome){
@@ -874,6 +985,7 @@ Sua primeira responsabilidade é fundar a empresa de verdade. Você decide NOME,
 Escreva de forma objetiva: o plano de negócio e o planejamento do produto devem ser densos, mas curtos o suficiente para caber na resposta. Não use asteriscos, markdown decorativo nem títulos enfeitados nos campos de identidade.
 O plano deve cobrir problema/oportunidade, cliente ideal, proposta de valor, diferenciais, modelo de negócio, canais, operação, métricas, riscos e roadmap inicial. Não invente faturamento, clientes, validações ou fatos externos: marque hipóteses.
 O primeiro produto deve ter nome, problema, público, escopo, entregáveis, critérios de aceitação e o que fica fora do v1.
+Os critérios de aceitação precisam ser verificáveis dentro das capacidades do estúdio. Não use como gate assinatura real, Asana/Trello/Notion, e-mail, upload, publicação externa, aprovação de terceiros nem outra ação que o runtime não executa. Produtos longos podem ser planejados em partes/capítulos incrementais; não exija que dezenas ou centenas de páginas apareçam em uma única chamada.
 Monte a equipe inicial mínima, com 2 a 4 funcionários além da gerente, usando somente os cargos-base criacao, comercial, dados, producao e geral. Um cargo pode repetir. Não crie outra gerente geral. Para cada funcionário, crie uma ficha individual coerente.
 
 ${fundacaoContexto(e)}
@@ -1131,7 +1243,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.handoff=`${p.nome} removeu um artefato conforme sua decisão: ${saida.resumo || 'não servia ao objetivo'}.`;
         logPessoa(p, `removeu um artefato que julgou inadequado ao objetivo.`, 'entrega'); sucesso=true;
       } else if (saida.arquivos && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', siteCentral:Boolean(saida.siteCentral), sitePath:saida.sitePath||null, clienteVisivel:true, linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || null }, p);
+        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', validacao:saida.validacao || null, siteCentral:Boolean(saida.siteCentral), sitePath:saida.sitePath||null, clienteVisivel:true, linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || saida.linhagem || null }, p);
         tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : []; if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.arquivo=salvos[0] && salvos[0].id; tarefa.handoff=`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')} para inspeção da gerente.`; tarefa.validacao=saida.validacao || null;
         const proj=e.projetos.find(x=>x.id===tarefa.projectId); if(proj){ salvos.forEach(a=>{if(!proj.arquivoIds.includes(a.id))proj.arquivoIds.unshift(a.id);}); proj.atividade.unshift({t:Date.now(),tipo:'entrega',texto:`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')}.`}); proj.atividade=proj.atividade.slice(-40); }
