@@ -101,7 +101,7 @@
         <p>É um ambiente de simulação: você observa uma equipe de agentes trabalhando sozinha em projetos contínuos. O que ela produz não é cenário — são páginas, textos, planilhas e marcas reais.</p>
         <div class="steps">
           <div class="step"><b>1</b><span>Funde o estúdio e escolha o ramo.</span></div>
-          <div class="step"><b>2</b><span>Conecte uma chave Groq gratuita no Motor.</span></div>
+          <div class="step"><b>2</b><span>Conecte sua chave do OpenRouter no Motor.</span></div>
           <div class="step"><b>3</b><span>Observe a equipe transformar trabalho em artefatos persistentes.</span></div>
         </div>
         <div class="hero-actions">
@@ -210,41 +210,21 @@
         <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
         <div class="field">
           <label for="provedorSel">Provedor</label>
-          <select id="provedorSel">
-            <option value="auto">Automático — Groq grátis → OpenRouter</option>
-            <option value="groq">Groq — manual</option>
-            <option value="openrouter">OpenRouter — manual</option>
+          <select id="provedorSel" disabled>
+            <option value="openrouter">OpenRouter</option>
           </select>
-          <p class="hint" id="provedorHint"></p>
+          <p class="hint" id="provedorHint">OpenRouter é o único provedor. O saldo real da conta é sincronizado automaticamente.</p>
         </div>
         <div class="field" id="chaveManualField">
-          <label for="apiKeyInput" id="apiKeyLabel">Chave</label>
-          <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+          <label for="apiKeyInput" id="apiKeyLabel">Chave do OpenRouter</label>
+          <input id="apiKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
           <p class="hint" id="apiKeyHint"></p>
         </div>
         <div class="field" id="managementKeyField">
           <label for="openrouterManagementKeyInput">Management Key OpenRouter · sincronização do saldo</label>
           <input id="openrouterManagementKeyInput" type="password" placeholder="Management Key OpenRouter" autocomplete="off" spellcheck="false">
-          <div class="row-actions" style="margin-top:8px">
-            <button class="btn" id="sincronizarSaldoBtn" type="button">Sincronizar saldo</button>
-          </div>
-          <p class="hint" id="openrouterManagementStatus">Cole a Management Key e sincronize o saldo.</p>
+          <p class="hint" id="openrouterManagementStatus">Cole a Management Key e salve para ativar a sincronização automática.</p>
           <p class="hint">Usada somente para consultar o crédito real da conta. A chave fica no armazenamento local deste navegador.</p>
-        </div>
-        <div class="field" id="chavesAutoField" hidden>
-          <label for="groqKeyInput">Chave Groq · gratuita primeiro</label>
-          <input id="groqKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
-          <label for="openrouterKeyInput" style="margin-top:10px">Chave OpenRouter · fallback pago</label>
-          <input id="openrouterKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
-          <p class="hint">O Estúdio tenta a Groq primeiro. Quando a cota real da Groq acabar, muda sozinho para o OpenRouter. A chave do OpenRouter é consultada para sincronizar o limite restante.</p>
-        </div>
-        <div class="field" id="tierField">
-          <label for="tierSel">Plano da sua conta Groq</label>
-          <select id="tierSel">
-            <option value="free">Gratuito — com teto diário</option>
-            <option value="dev">Developer — sem teto diário</option>
-          </select>
-          <p class="hint">O Developer é liberado só cadastrando um cartão em console.groq.com, sem mínimo de gasto: você paga apenas os tokens que usar. Esta escolha ajusta a estimativa de custo abaixo.</p>
         </div>
         <div class="field">
           <label for="modeloPensamentoSel">IA de pensamento <span class="tag tag-real">barata</span></label>
@@ -260,13 +240,9 @@
           <p class="hint">Ciclo de 30 dias. O gasto nunca ultrapassa este teto local. O limite diário pode ser calculado automaticamente a partir do saldo restante.</p>
         </div>
         <div class="field">
-          <label><input id="diarioAutoInput" type="checkbox" checked> Calcular limite diário automaticamente</label>
-          <p class="hint">Com esta opção, o Estúdio divide o orçamento restante pelos dias restantes. Se economizar hoje, o limite dos próximos dias aumenta; se gastar mais, diminui.</p>
-        </div>
-        <div class="field">
-          <label for="limiteDiarioUSDInput">Limite diário de IA (US$)</label>
-          <input id="limiteDiarioUSDInput" type="number" min="0.01" max="100" step="0.01" inputmode="decimal" value="0.10">
-          <p class="hint" id="limiteDiarioHint">Usado somente quando o cálculo automático estiver desligado.</p>
+          <label>Limite diário de IA</label>
+          <div class="field-readonly" id="limiteDiarioAutomaticoDisplay">Calculado automaticamente</div>
+          <p class="hint">Calculado todos os dias com base no orçamento restante do ciclo de 30 dias e nos dias restantes.</p>
         </div>
         <div class="field">
           <label for="modoOrcamentoSel">Modo de trabalho</label>
@@ -275,16 +251,6 @@
             <option value="intensivo">Trabalho intensivo — ignora o limite diário</option>
           </select>
           <p class="hint">No Trabalho intensivo, a equipe pode consumir o orçamento disponível sem o teto diário. O orçamento do ciclo de 30 dias continua sendo o limite absoluto.</p>
-        </div>
-        <div class="field">
-          <label for="limiteTokensSel">Teto de segurança de tokens por dia</label>
-          <select id="limiteTokensSel">
-            <option value="60000">60 mil tokens</option>
-            <option value="120000">120 mil tokens</option>
-            <option value="200000">200 mil tokens</option>
-            <option value="300000">300 mil tokens</option>
-          </select>
-          <p class="hint">Freio local para impedir que a equipe continue consumindo sua chave indefinidamente. O limite real do provedor continua valendo.</p>
         </div>
 <div class="row-actions">
           <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>

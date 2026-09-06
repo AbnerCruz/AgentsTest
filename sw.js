@@ -1,7 +1,7 @@
 /* Service worker do Estúdio.
-   Só o shell é cacheado. A IA é remota (OpenRouter/Groq) e nunca passa por aqui:
+   Só o shell é cacheado. A IA é remota (OpenRouter) e nunca passa por aqui:
    requisições para outras origens são ignoradas de propósito. */
-const CACHE = 'estudio-v47-quadro-ia';
+const CACHE = 'estudio-v48-quadro-ia';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './app.css',

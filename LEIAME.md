@@ -1,3 +1,13 @@
+# Estúdio — v48
+
+## Motor de IA
+- O único provedor disponível é o **OpenRouter**.
+- A chave de API do OpenRouter é usada para as chamadas de produção.
+- A **Management Key** consulta o saldo real da conta automaticamente, sem botão manual de sincronização.
+- O limite diário em dólar é **sempre calculado automaticamente** a partir do orçamento restante do ciclo de 30 dias e dos dias restantes.
+- O antigo teto diário de tokens (120.000) foi removido; continuam valendo os limites reais retornados pelo OpenRouter e o orçamento em dólar do ciclo.
+- O orçamento local continua sendo uma trava de segurança independente do saldo real do provedor.
+
 # Estúdio — simulação de equipe com produção real
 
 ## Arquitetura atual (v42)

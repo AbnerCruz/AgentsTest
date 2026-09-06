@@ -591,3 +591,5 @@ input[type=text],input[type=password],input[type=number],input[type=email],input
 .foundation-summary summary{cursor:pointer;font-weight:700}
 .foundation-text{white-space:pre-wrap;overflow:auto;max-height:420px;font:inherit;line-height:1.5;color:var(--muted,#9aa5aa);margin:10px 0 0}
 .status-chip{font-size:11px;padding:4px 8px;border:1px solid var(--line,#263039);border-radius:999px;color:var(--muted,#9aa5aa)}
+
+.field-readonly{padding:10px 12px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:rgba(255,255,255,.03);font-weight:600}

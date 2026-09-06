@@ -428,28 +428,23 @@
     if (pausar) pausar.textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
     if (msg) msg.textContent = st.detalhe || '';
 
-    const pv = S.ai.provedorAtual();
-    const info = S.ai.PROVEDORES[pv] || S.ai.PROVEDORES.groq;
-    const auto = S.ai.cfg.roteamento === 'automatico';
+    const pv = 'openrouter';
+    const info = S.ai.PROVEDORES.openrouter;
     const provSel = $('#provedorSel');
-    if (provSel) provSel.value = auto ? 'auto' : pv;
+    if (provSel) { provSel.value = 'openrouter'; provSel.disabled = true; }
     const pHint = $('#provedorHint');
-    if (pHint) pHint.textContent = auto ? 'Roteamento real: Groq primeiro, OpenRouter somente quando a Groq atingir a cota. O orçamento local continua valendo para o gasto pago.' : info.nota;
-    const manualField=$('#chaveManualField'), autoField=$('#chavesAutoField');
-    if(manualField) manualField.hidden=auto; if(autoField) autoField.hidden=!auto;
+    if (pHint) pHint.textContent = info.nota;
+    const manualField=$('#chaveManualField');
+    if(manualField) manualField.hidden=false;
     const kLabel = $('#apiKeyLabel');
-    if (kLabel) kLabel.textContent = `Chave ${info.rotulo}`;
+    if (kLabel) kLabel.textContent = 'Chave do OpenRouter';
     const kHint = $('#apiKeyHint');
     if (kHint) kHint.textContent = `A chave fica só neste aparelho, no armazenamento do navegador. Pegue a sua em ${info.console}.`;
-    if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
-    const tierField = $('#tierField');
-    if (tierField) tierField.hidden = !auto && pv !== 'groq';
-    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput'), mgmtStatus=$('#openrouterManagementStatus');
+    if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : 'sk-or-...';
+    const mgmt=$('#openrouterManagementKeyInput'), mgmtStatus=$('#openrouterManagementStatus');
     const ps=S.ai.statusFornecedores();
-    if(gki) gki.placeholder=ps.groq.status==='disponivel'?'gsk_••••••':'gsk_...';
-    if(ori) ori.placeholder=ps.openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
     if(mgmt) mgmt.placeholder=ps.openrouterManagementConfigured?'Management Key · ••••••':'Management Key OpenRouter';
-    if(mgmtStatus) { const r=ps.openrouter; mgmtStatus.textContent = r.saldoConta!=null ? `Saldo real: US$ ${Number(r.saldoConta).toFixed(4)}${r.ultimoSyncCreditos ? ' · sincronizado' : ''}` : (r.erroCreditos ? `Falha ao sincronizar: ${r.erroCreditos}` : (ps.openrouterManagementConfigured ? 'Management Key configurada · sincronizando…' : 'Cole a Management Key e sincronize o saldo.')); mgmtStatus.style.color = r.erroCreditos ? '#E08573' : ''; }
+    if(mgmtStatus) { const r=ps.openrouter; mgmtStatus.textContent = r.saldoConta!=null ? `Saldo real: US$ ${Number(r.saldoConta).toFixed(4)} · sincronizado automaticamente` : (r.erroCreditos ? `Falha ao sincronizar: ${r.erroCreditos}` : (ps.openrouterManagementConfigured ? 'Management Key configurada · sincronizando…' : 'Cole a Management Key e salve para ativar a sincronização automática.')); mgmtStatus.style.color = r.erroCreditos ? '#E08573' : ''; }
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -457,57 +452,38 @@
     const producao = $('#modeloProducaoSel');
     if (pensamento) pensamento.innerHTML = opcoes('pensamento');
     if (producao) producao.innerHTML = opcoes('producao');
-    const limite = $('#limiteTokensSel');
-    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 120000);
-    const mensal = $('#orcamentoMensalInput');
-    if (mensal) mensal.value = Number(S.ai.cfg.orcamentoUSD || 3).toFixed(2);
-    const autoDia = $('#diarioAutoInput');
-    if (autoDia) autoDia.checked = S.ai.cfg.diarioAutomatico !== false;
-    const diario = $('#limiteDiarioUSDInput');
-    if (diario) diario.value = Number(S.ai.cfg.limiteDiarioUSD || 0.10).toFixed(2);
-    const diarioHint = $('#limiteDiarioHint');
-    if (diarioHint) diarioHint.textContent = S.ai.cfg.diarioAutomatico !== false ? 'Calculado automaticamente a cada novo dia a partir do saldo do orçamento e dos dias restantes.' : 'Limite fixo por dia. O orçamento de 30 dias continua sendo o teto absoluto.';
-    if (diario) diario.disabled = S.ai.cfg.diarioAutomatico !== false;
+    const diario = $('#limiteDiarioAutomaticoDisplay');
+    if (diario) diario.textContent = `US$ ${Number(S.ai.orcamento().limiteDiarioUSD || 0).toFixed(4)} hoje · calculado automaticamente`;
 
     const o = S.ai.orcamento();
     const h = o.headers;
-    const autoDiaInput = $('#diarioAutoInput');
-    const modoOrcamento = $('#modoOrcamentoSel');
-    if (modoOrcamento) modoOrcamento.value = S.ai.cfg.modoOrcamento || 'normal';
-    if (autoDiaInput) autoDiaInput.onchange = () => { const d=$('#limiteDiarioUSDInput'); if(d) d.disabled=autoDiaInput.checked; };
-    const tierSel = $('#tierSel');
-    if (tierSel && tierSel.value !== o.tier) tierSel.value = o.tier;
     const espera = S.ai.estado.bloqueadaAte - Date.now();
     $('#consumoPanel').innerHTML = `
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
-      ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
         <div class="stat"><span>Orçamento do ciclo</span><b>US$ ${Number(o.orcamentoUSD||3).toFixed(2)} / 30 dias</b></div>
         <div class="stat"><span>Gasto estimado no ciclo</span><b>US$ ${Number(o.custoPeriodo||0).toFixed(4)}</b></div>
         <div class="stat"><span>Restante do ciclo</span><b>US$ ${Number(o.restanteUSD||0).toFixed(4)}</b></div>
-        <div class="stat"><span>Limite de hoje</span><b>US$ ${Number(o.limiteDiarioUSD||0).toFixed(4)} ${o.modoOrcamento === 'intensivo' ? '· ignorado no intensivo' : (o.diarioAutomatico ? '· automático' : '· fixo')}</b></div>
+        <div class="stat"><span>Limite de hoje</span><b>US$ ${Number(o.limiteDiarioUSD||0).toFixed(4)} · automático</b></div>
         <div class="stat"><span>Gasto de hoje</span><b>US$ ${Number(o.custoDiaUSD||0).toFixed(4)}</b></div>
         <div class="stat"><span>Restante hoje</span><b>US$ ${Number(o.restanteDiaUSD||0).toFixed(4)}</b></div>
         <div class="stat"><span>Dias restantes</span><b>${Math.ceil(o.diasRestantes||0)}</b></div>
         <div class="stat"><span>Ritmo médio disponível</span><b>US$ ${Number(o.ritmoDiarioUSD||0).toFixed(4)}/dia</b></div>
         <div class="stat"><span>Tokens usados hoje</span><b>${F.num(o.tokens)}</b></div>
-        <div class="stat"><span>Teto de segurança diário</span><b>${F.num(o.limiteTokensDia || 120000)}</b></div>
         <div class="stat"><span>Chamadas feitas hoje</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
-        <div class="stat"><span>Modo de provedor</span><b>${o.roteamento === 'automatico' ? 'Groq grátis → OpenRouter' : o.provedor}</b></div>
-        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; const saldo=r.saldoConta; const efetivo=ps.openrouterSaldo; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>Saldo real OpenRouter</span><b>${saldo!=null?'US$ '+Number(saldo).toFixed(4):'não sincronizado'}</b></div><div class="stat"><span>Disponível para o Estúdio</span><b>${efetivo!=null?'US$ '+Number(efetivo).toFixed(4):'—'}</b></div><div class="stat"><span>Limite da chave</span><b>${r.temLimiteChave===true && r.limiteRestante!=null?'US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':'sem limite específico'}</b></div>`; })()}
+        <div class="stat"><span>Provedor</span><b>OpenRouter</b></div>
+        ${(()=>{ const ps=S.ai.statusFornecedores(); const r=ps.openrouter; const saldo=r.saldoConta; const efetivo=ps.openrouterSaldo; return `<div class="stat"><span>Saldo real OpenRouter</span><b>${saldo!=null?'US$ '+Number(saldo).toFixed(4):'não sincronizado'}</b></div><div class="stat"><span>Disponível para o Estúdio</span><b>${efetivo!=null?'US$ '+Number(efetivo).toFixed(4):'—'}</b></div><div class="stat"><span>Limite da chave</span><b>${r.temLimiteChave===true && r.limiteRestante!=null?'US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':'sem limite específico'}</b></div>`; })()}
         <div class="stat"><span>Modo de trabalho</span><b>${o.modoOrcamento === 'intensivo' ? 'Trabalho intensivo' : 'Normal'}</b></div>
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
         ${(o.esgotado || o.esgotadoDia || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? `<p class="panel-foot" style="color:#E08573"><strong>${o.esgotado ? 'Orçamento do ciclo esgotado.' : 'Limite diário esgotado.'}</strong> A equipe não fará novas chamadas e entra em rotina Sims-like até ${o.esgotado ? 'o próximo ciclo de 30 dias' : 'o próximo dia'}. ${(!o.esgotado && o.modoOrcamento !== 'intensivo') ? 'Ative Trabalho intensivo se quiser usar o saldo mensal restante hoje.' : ''}</p>` : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
-      ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
-      <p class="panel-foot">${o.fonte === 'groq'
-        ? 'Os limites de janela vêm dos cabeçalhos do provedor. O limite local acima é um freio de segurança escolhido no aparelho.'
-        : 'O saldo real do OpenRouter é consultado pela Management Key diretamente do navegador e sincronizado periodicamente.'}</p>`;
+
+      <p class="panel-foot">O saldo real do OpenRouter é consultado pela Management Key diretamente do navegador e sincronizado automaticamente.</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -697,76 +673,26 @@
     const salvarIABtn = $('#salvarIABtn');
     if (salvarIABtn) salvarIABtn.onclick = async () => {
       try {
-        const key = $('#apiKeyInput');
-        const pensamento = $('#modeloPensamentoSel');
-        const producao = $('#modeloProducaoSel');
-        const limite = $('#limiteTokensSel');
-        const mensal = $('#orcamentoMensalInput');
-        const diario = $('#limiteDiarioUSDInput');
-        const autoDia = $('#diarioAutoInput');
-        const modoOrcamento = $('#modoOrcamentoSel');
-        const digitada = key ? key.value.trim() : '';
-        const mgmt = $('#openrouterManagementKeyInput');
+        const key = $('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
         if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
-        if (S.ai.cfg.roteamento === 'automatico') {
-          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
-          S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
-          if(g) g.value=''; if(r) r.value='';
-        } else {
-          S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
-          if (key) key.value = '';
-        }
-        S.ai.salvarCfg(undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined); 
-        toast('Configuração salva.', 'ok');
-        pintarMotor();
+        S.ai.salvarCfg(key && key.value.trim() ? key.value : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual');
+        if(key) key.value='';
+        toast('Configuração salva.', 'ok'); pintarMotor();
       } catch (err) { toast(err.message, 'erro'); }
     };
     const testarIABtn = $('#testarIABtn');
     if (testarIABtn) testarIABtn.onclick = async () => {
-      const b = testarIABtn; b.disabled = true; b.textContent = 'testando…';
+      const b=testarIABtn; b.disabled=true; b.textContent='testando…';
       try {
-        const key = $('#apiKeyInput');
-        const pensamento = $('#modeloPensamentoSel');
-        const producao = $('#modeloProducaoSel');
-        const limite = $('#limiteTokensSel');
-        const mensal = $('#orcamentoMensalInput');
-        const diario = $('#limiteDiarioUSDInput');
-        const autoDia = $('#diarioAutoInput');
-        const modoOrcamento = $('#modoOrcamentoSel');
-        const mgmt = $('#openrouterManagementKeyInput');
+        const key=$('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
         if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
-        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(g) g.value=''; if(r) r.value=''; }
-        else if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
-        const r = await S.ai.testar();
-        toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
-      } catch (err) { toast(err.message, 'erro'); }
-      b.disabled = false; b.textContent = 'Testar'; pintarMotor();
-    };
-    const sincronizarSaldoBtn = $('#sincronizarSaldoBtn');
-    if (sincronizarSaldoBtn) sincronizarSaldoBtn.onclick = async () => {
-      const b=sincronizarSaldoBtn; const mgmt=$('#openrouterManagementKeyInput');
-      try {
-        b.disabled=true; b.textContent='sincronizando…';
-        if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
-        else if (!S.ai.statusFornecedores().openrouterManagementConfigured) throw new Error('Cole a Management Key do OpenRouter primeiro.');
-        const r=await S.ai.sincronizarCreditosOpenRouter();
-        if (!r) throw new Error(S.ai.statusFornecedores().openrouter.erroCreditos || 'Não foi possível consultar os créditos.');
-        toast('Saldo OpenRouter sincronizado.', 'ok');
-      } catch(err) { toast(err.message, 'erro'); }
-      finally { b.disabled=false; b.textContent='Sincronizar saldo'; pintarMotor(); }
+        if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual');
+        const r=await S.ai.testar(); toast('Conexão ok — o OpenRouter respondeu: '+r.slice(0,40),'ok');
+      } catch(err) { toast(err.message,'erro'); }
+      b.disabled=false; b.textContent='Testar'; pintarMotor();
     };
     const pausarBtn = $('#pausarBtn');
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
-    const tierSel = $('#tierSel');
-    if (tierSel) tierSel.onchange = () => { S.ai.definirTier(tierSel.value); pintarMotor(); };
-    const provedorSel = $('#provedorSel');
-    if (provedorSel) provedorSel.onchange = () => {
-      S.ai.definirProvedor(provedorSel.value);
-      const k = $('#apiKeyInput'); if (k) k.value = '';
-      toast(provedorSel.value==='auto' ? 'Roteamento automático: Groq grátis → OpenRouter.' : `Provedor: ${S.ai.PROVEDORES[provedorSel.value].nome}.`, 'ok');
-      pintarMotor();
-    };
-
     const fecharEstudioBtn = $('#fecharEstudioBtn');
     if (fecharEstudioBtn) fecharEstudioBtn.onclick = () => {
       const e = S.state.atual(); if (!e) return;
