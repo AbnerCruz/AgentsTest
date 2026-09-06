@@ -140,12 +140,13 @@ window.S = window.S || {};
       f.nome = String(f.nome || 'Alguém');
       f.papel = f.papel === 'gerente' ? 'gerente' : 'func';
       f.cargo = String(f.cargo || 'Generalista');
-      f.especialidade = f.especialidade || 'geral';
+      f.especialidade = ({dados:'operacoes',geral:'producao'}[f.especialidade] || f.especialidade || mapearEspecialidade(f.cargo));
       f.cor = f.cor || PALETA[i % PALETA.length];
       f.energia = Number.isFinite(f.energia) ? f.energia : 80;
       f.humor = Number.isFinite(f.humor) ? f.humor : 68;
       f.entregas = Number(f.entregas) || 0;
-      f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-24) : [];
+      f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-80).map(m=>typeof m==='string'?{texto:m,t:0,tipo:'legado',peso:2,refs:[]}:Object.assign({tipo:'episodio',peso:2,refs:[]},m)) : [];
+      f.memoriaResumo = String(f.memoriaResumo || '').slice(0,2600);
       f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
       f.foco = String(f.foco || '').slice(0, 180);
       // Ficha persistente: a personalidade orienta comportamento, comunicação e colaboração.
@@ -301,10 +302,10 @@ window.S = window.S || {};
   function mapearEspecialidade(cargo) {
     const c = String(cargo || '').toLowerCase();
     if (/cria|design|arte|marca/.test(c)) return 'criacao';
-    if (/opera|produ|tec/.test(c)) return 'producao';
-    if (/atend|vend|comerc|client/.test(c)) return 'comercial';
-    if (/dado|anal|financ/.test(c)) return 'dados';
-    return 'geral';
+    if (/produ|tec|dev|engen|program/.test(c)) return 'producao';
+    if (/atend|vend|comerc|client|marketing|crescimento/.test(c)) return 'comercial';
+    if (/dado|anal|financ|opera|qa|document/.test(c)) return 'operacoes';
+    return 'producao';
   }
 
   let timerGravacao = null;
@@ -391,7 +392,11 @@ window.S = window.S || {};
     let deslocamento = 0;
     arquivos.forEach(f => {
       const nome = cod.encode(f.nome);
-      const dados = cod.encode(String(f.conteudo == null ? '' : f.conteudo));
+      let dados;
+      if(f.bytes instanceof Uint8Array) dados=f.bytes;
+      else if(typeof f.conteudo==='string' && /^data:[^;]+;base64,/i.test(f.conteudo)){
+        const b64=f.conteudo.split(',')[1]||'', bin=atob(b64);dados=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)dados[i]=bin.charCodeAt(i);
+      } else dados = cod.encode(String(f.conteudo == null ? '' : f.conteudo));
       const crc = crc32(dados);
       const local = new DataView(new ArrayBuffer(30));
       local.setUint32(0, 0x04034b50, true); local.setUint16(4, 20, true);
@@ -428,6 +433,7 @@ window.S = window.S || {};
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 3000);
   }
-  S.arquivo = { zip, baixarBlob, crc32 };
+  function dataUrlBlob(v){const m=String(v||'').match(/^data:([^;]+);base64,(.+)$/s);if(!m)return new Blob([String(v||'')],{type:'application/octet-stream'});const bin=atob(m[2]),u=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i);return new Blob([u],{type:m[1]});}
+  S.arquivo = { zip, baixarBlob, crc32, dataUrlBlob };
 
 })(window.S);

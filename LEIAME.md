@@ -309,3 +309,13 @@ O modo **Trabalho intensivo** permite que a equipe ignore o teto diário em dól
 
 ## v46.1
 Correção do sincronismo de limite da chave OpenRouter: `limit_remaining=null` agora é tratado como ausência de limite, não como US$ 0. HTTP 402 é tratado como falta real de créditos.
+
+## v51: rotina sem trabalho e produção visual
+Funcionários sem tarefa ficam em rotina Sims-like sem chamar IA. A fila de trabalho é verificada localmente; quando aparece uma tarefa, o agente volta ao trabalho. Conversas ociosas são raras, curtas e usam uma única chamada compartilhada.
+
+A organização usa quatro setores (Produto & Criação, Tecnologia & Produção, Operações & Dados, Crescimento & Comercial) e a gerente só consegue contratar automaticamente quando existe sobrecarga real. A memória individual agora é estruturada e selecionada por relevância.
+
+Tarefas visuais podem chamar um modelo dedicado do OpenRouter pela Images API. O modelo é configurável no painel do Motor. Projetos multi-arquivo podem ser produzidos em uma única entrega e cada projeto pode ser exportado como ZIP.
+
+### v51 — vida sem custo e produção multimodal
+Funcionários sem tarefa usam rotinas locais de convivência e lazer, sem chamada de IA. Conversas ociosas são raras e curtas. A equipe foi reorganizada em quatro setores, com contratação condicionada a backlog real. A memória combina histórico individual relevante e marcos organizacionais persistentes. Tarefas de arte podem usar o modelo de imagem configurado no OpenRouter. Projetos multi-arquivo são persistidos como arquivos reais e podem ser exportados em ZIP.

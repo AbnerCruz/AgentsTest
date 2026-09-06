@@ -18,7 +18,7 @@
     criacao:   { id:'criacao',   nome:'Design',          x:610, y:10,  w:290, h:180 },
     producao:  { id:'producao',  nome:'Desenvolvimento', x:910, y:10,  w:280, h:180 },
     comercial: { id:'comercial', nome:'Marketing',       x:10,  y:200, w:280, h:180 },
-    dados:     { id:'dados',     nome:'Financeiro',      x:300, y:200, w:300, h:180 },
+    operacoes: { id:'operacoes', nome:'Operações & Dados', x:300, y:200, w:300, h:180 },
     geral:     { id:'geral',     nome:'Equipe',          x:610, y:200, w:580, h:180 }
   };
   const salaDe = f => (f.papel === 'gerente') ? SALAS.gerencia : (SALAS[f.especialidade] || SALAS.geral);
@@ -48,7 +48,7 @@
       reuniao:    { x: SALAS.reuniao.x + 210, y: SALAS.reuniao.y + 60, rotulo: 'mesa de reunião' }
     },
     zonas: {
-      trabalho: SALAS.geral, arquivo: SALAS.dados, planejamento: SALAS.reuniao,
+      trabalho: SALAS.geral, arquivo: SALAS.operacoes, planejamento: SALAS.reuniao,
       convivio: SALAS.geral, bemestar: SALAS.geral, prototipo: SALAS.producao
     },
     limites: { minX: 10, maxX: 1190, minY: 10, maxY: 390 }
@@ -200,6 +200,9 @@
       <h2>Motor de IA · OpenRouter</h2>
       <label>Chave da API</label>
       <input id="cChave" type="password" placeholder="${S.ai.temChave() ? S.ai.chaveMascarada() : 'sk-or-...'}">
+      <label>Modelo de imagem</label>
+      <select id="cImagem">${(S.ai.MODELOS_IMAGEM||[]).map(m=>`<option value="${m.id}" ${cfg.imagem===m.id?'selected':''}>${esc(m.nome)}</option>`).join('')}</select>
+      <p style="font-size:11.5px;color:var(--texto-fraco);margin:0 0 8px">Só é usado quando uma tarefa pede arte visual.</p>
       <label>Orçamento do ciclo de 30 dias (US$)</label>
       <input id="cOrcamento" type="number" min="0.10" step="0.10" value="${cfg.orcamentoUSD}">
       <label>Status</label>
@@ -213,7 +216,7 @@
     $('#okConfig').onclick = () => {
       try {
         const chave = $('#cChave').value.trim();
-        S.ai.salvarCfg(chave || undefined, cfg.pensamento, cfg.producao, undefined, Number($('#cOrcamento').value) || cfg.orcamentoUSD, undefined, undefined, cfg.modoOrcamento);
+        S.ai.salvarCfg(chave || undefined, cfg.pensamento, cfg.producao, undefined, Number($('#cOrcamento').value) || cfg.orcamentoUSD, undefined, undefined, cfg.modoOrcamento, undefined, $('#cImagem').value);
         toast('Configuração salva.', 'ok');
         fecharModal(); pintarHud();
       } catch (err) { toast(err.message || 'Não foi possível salvar.', 'erro'); }
