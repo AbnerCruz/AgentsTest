@@ -49,7 +49,8 @@
         `EQUIPE: ${equipeContexto(e)}`,
         `MEMÓRIA DE ${p.nome}: ${memorias.slice(-8).map(m => typeof m === 'string' ? m : (m.texto || '')).filter(Boolean).join(' | ') || 'nenhuma'}`,
         `DECISÕES RECENTES: ${decisoes || 'nenhuma'}`,
-        `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`
+        `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`,
+        `AMBIENTE: ${((e.ambiente&&e.ambiente.objetos)||[]).slice(-12).map(o => `${o.id}:${o.nome}@${Math.round(o.x)},${Math.round(o.y)} uso=${o.uso||0} por=${o.por||'equipe'}`).join('; ') || 'vazio'} | orçamento=${e.ambiente&&e.ambiente.moedas!=null?e.ambiente.moedas:'indisponível'}`
       ].join('\n'),
       arquivos: arqs,
       tarefas,
@@ -59,7 +60,7 @@
 
   function normalizar(c, ctx) {
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','esperar'];
+    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','reorganizar','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
@@ -107,6 +108,7 @@ Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, 
 - colaborar: procure outro membro porque existe uma dependência ou decisão que se beneficia de colaboração.
 - planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
 - construir: só quando uma mudança física no ambiente tiver valor para trabalho, bem-estar ou identidade da equipe; escolha um tipo simples de mobiliário.
+- reorganizar: só quando mover um objeto existente resolver um problema concreto de fluxo, colaboração ou uso do espaço.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
@@ -128,7 +130,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
       const r = await S.ai.chamar({
         sistema,
         pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta. Retorne SOMENTE os campos solicitados.',
-        tipo: 'decisao', tokens: 520, reasoning_effort: 'high', agente: p.nome,
+        tipo: 'decisao', tokens: 620, reasoning_effort: 'low', agente: p.nome,
         motivo: 'deliberação autônoma organizacional'
       });
       const d = normalizar(S.ai.campos(r && r.texto || ''), ctx);

@@ -8,574 +8,7 @@
 <title>Estúdio — simulação de equipe com projetos persistentes</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230E1113'/><path d='M9 22V10h7a4 4 0 0 1 0 8h-4l5 4' stroke='%23E4703E' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
-<style>
-/* ============================================================
-   ESTÚDIO — sistema visual
-   Base grafite + acento brasa. Sem sombras pesadas, sem gradiente
-   decorativo: hierarquia feita com espaçamento, fio de 1px e peso
-   tipográfico. Números sempre em tabular para não "dançar".
-   ============================================================ */
-
-:root{
-  /* superfícies */
-  --bg:#0E1113;
-  --bg-2:#13171A;
-  --surf:#171C1F;
-  --surf-2:#1D2327;
-  --line:#252C31;
-  --line-soft:#1E2429;
-
-  /* tinta */
-  --ink:#E9E7E2;
-  --ink-2:#A8B0B3;
-  --ink-3:#6F797D;
-
-  /* acentos */
-  --ember:#E4703E;
-  --ember-soft:rgba(228,112,62,.14);
-  --sage:#6FA98A;
-  --sage-soft:rgba(111,169,138,.14);
-  --gold:#D9A441;
-  --gold-soft:rgba(217,164,65,.14);
-  --rust:#C9553F;
-  --rust-soft:rgba(201,85,63,.14);
-
-  /* medidas */
-  --r-sm:6px; --r:10px; --r-lg:14px; --r-xl:20px;
-  --gap:12px;
-  --pad:14px;
-  --safe-b:env(safe-area-inset-bottom,0px);
-
-  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
-  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
-}
-
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-html,body{height:100%;}
-body{
-  margin:0; background:var(--bg); color:var(--ink);
-  font-family:var(--sans); font-size:15px; line-height:1.5;
-  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
-  overscroll-behavior-y:none;
-}
-button,input,select,textarea{font:inherit;color:inherit;}
-h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.015em;}
-p{margin:0;}
-[hidden]{display:none !important;}
-::selection{background:var(--ember-soft);}
-
-/* rolagem discreta */
-*::-webkit-scrollbar{width:6px;height:6px;}
-*::-webkit-scrollbar-thumb{background:var(--line);border-radius:99px;}
-
-/* ─────────── esqueleto ─────────── */
-.shell{
-  display:grid;
-  grid-template-columns:100%;
-  grid-template-rows:auto 1fr auto;
-  grid-template-areas:"top" "content" "nav";
-  min-height:100dvh;
-}
-.content{
-  grid-area:content;
-  padding:var(--pad) var(--pad) calc(var(--pad) + 4px);
-  display:flex; flex-direction:column; gap:var(--gap);
-  max-width:820px; width:100%; margin:0 auto; min-width:0;
-}
-.view{display:none;flex-direction:column;gap:var(--gap);}
-.view.is-on{display:flex;animation:fadeUp .22s ease both;}
-@keyframes fadeUp{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
-@media (prefers-reduced-motion:reduce){*{animation:none !important;transition:none !important;}}
-
-/* ─────────── topo ─────────── */
-.topbar{
-  grid-area:top;
-  position:sticky; top:0; z-index:30;
-  display:flex; align-items:center; gap:10px;
-  padding:10px var(--pad); min-height:56px;
-  background:rgba(14,17,19,.82); backdrop-filter:blur(14px);
-  border-bottom:1px solid var(--line-soft);
-}
-.brand{
-  display:flex; align-items:center; gap:9px; min-width:0;
-  background:none; border:0; padding:4px 6px 4px 2px; margin:0;
-  border-radius:var(--r); cursor:pointer; text-align:left;
-}
-.brand:active{background:var(--surf);}
-.brand-mark{
-  width:30px;height:30px;flex:none;display:grid;place-items:center;
-  border-radius:9px; background:var(--surf-2); color:var(--ember);
-  border:1px solid var(--line);
-}
-.brand-txt{min-width:0;display:block;}
-.brand-txt b{display:block;font-size:14.5px;font-weight:650;letter-spacing:-.01em;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}
-.brand-txt small{display:block;font-size:11px;color:var(--ink-3);
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:44vw;}
-.brand-caret{color:var(--ink-3);flex:none;}
-
-.top-right{margin-left:auto;display:flex;align-items:center;gap:8px;}
-.clock{
-  display:flex;flex-direction:column;align-items:flex-end;line-height:1.15;
-  font-family:var(--mono);font-variant-numeric:tabular-nums;
-}
-.clock-day{font-size:9.5px;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;}
-.clock-hour{font-size:13px;color:var(--ink-2);}
-.pulse{
-  display:flex;align-items:center;gap:6px;
-  background:var(--surf); border:1px solid var(--line); border-radius:99px;
-  padding:5px 10px 5px 8px; cursor:pointer;
-}
-.pulse-dot{width:7px;height:7px;border-radius:99px;background:var(--ink-3);flex:none;}
-.pulse-dot.on{background:var(--sage);}
-.pulse-dot.busy{background:var(--gold);animation:blink 1.1s ease-in-out infinite;}
-.pulse-dot.err{background:var(--rust);}
-.pulse-txt{font-size:11px;color:var(--ink-2);white-space:nowrap;}
-@keyframes blink{0%,100%{opacity:.35}50%{opacity:1}}
-
-/* ─────────── navegação ─────────── */
-.nav{
-  grid-area:nav;
-  position:sticky; bottom:0; z-index:30;
-  display:flex; justify-content:space-around; gap:2px;
-  padding:6px 6px calc(6px + var(--safe-b));
-  background:rgba(14,17,19,.9); backdrop-filter:blur(14px);
-  border-top:1px solid var(--line-soft);
-}
-.nav-item{
-  position:relative;
-  flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
-  background:none;border:0;padding:7px 2px 5px;border-radius:var(--r);
-  color:var(--ink-3); cursor:pointer; transition:color .16s;
-}
-.nav-item svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.7;
-  stroke-linecap:round;stroke-linejoin:round;}
-.nav-item span{font-size:10px;letter-spacing:.01em;}
-.nav-item.is-on{color:var(--ember);}
-.nav-badge{
-  position:absolute;top:5px;right:calc(50% - 18px);
-  width:6px;height:6px;border-radius:99px;background:var(--ember);
-}
-
-@media (min-width:900px){
-  .shell{
-    grid-template-columns:212px 1fr;
-    grid-template-rows:auto 1fr;
-    grid-template-areas:"top top" "nav content";
-  }
-  .topbar{padding:12px 20px;}
-  .brand-txt b,.brand-txt small{max-width:none;}
-  .nav{
-    position:sticky; top:57px; align-self:start;
-    flex-direction:column; justify-content:flex-start; gap:2px;
-    padding:16px 12px; border-top:0; border-right:1px solid var(--line-soft);
-    background:transparent; height:calc(100dvh - 57px);
-  }
-  .nav-item{flex:none;flex-direction:row;justify-content:flex-start;gap:11px;padding:9px 11px;}
-  .nav-item span{font-size:13px;}
-  .nav-item.is-on{background:var(--surf);}
-  .nav-badge{position:static;margin-left:auto;}
-  .content{padding:20px 24px 40px;max-width:760px;margin:0;}
-}
-
-/* ─────────── painéis ─────────── */
-.panel{
-  background:var(--surf); border:1px solid var(--line-soft);
-  border-radius:var(--r-lg); padding:var(--pad);
-}
-.panel-head{
-  display:flex;align-items:center;gap:8px;margin-bottom:11px;min-height:24px;
-}
-.panel-label{
-  font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;
-  color:var(--ink-3);
-}
-.panel-head .btn,.panel-head .chip,.panel-head .tag{margin-left:auto;}
-.panel-head .btn + .btn,.panel-head .chip + .btn{margin-left:6px;}
-.panel-foot{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:10px;}
-.hint{font-size:11.5px;color:var(--ink-3);line-height:1.5;margin-top:6px;}
-
-.chip{
-  font-size:10.5px;padding:3px 8px;border-radius:99px;
-  background:var(--surf-2);border:1px solid var(--line);color:var(--ink-2);
-  white-space:nowrap;
-}
-.tag{
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;
-  padding:2px 6px;border-radius:4px;background:var(--surf-2);color:var(--ink-3);
-  text-transform:uppercase;white-space:nowrap;
-}
-.tag-real{background:var(--sage-soft);color:var(--sage);}
-.tag-sim{background:var(--gold-soft);color:var(--gold);}
-.tag-ember{background:var(--ember-soft);color:var(--ember);}
-.tag-rust{background:var(--rust-soft);color:var(--rust);}
-
-/* ─────────── botões ─────────── */
-.btn{
-  display:inline-flex;align-items:center;justify-content:center;gap:6px;
-  background:var(--surf-2);border:1px solid var(--line);color:var(--ink);
-  border-radius:var(--r); padding:8px 13px; font-size:13px; font-weight:550;
-  cursor:pointer; transition:background .14s,border-color .14s,opacity .14s;
-  white-space:nowrap;
-}
-.btn:active{transform:translateY(1px);}
-.btn:hover{border-color:#333C42;}
-.btn:disabled{opacity:.4;cursor:default;transform:none;}
-.btn-primary{background:var(--ember);border-color:var(--ember);color:#15100D;font-weight:650;}
-.btn-primary:hover{background:#EE7C48;border-color:#EE7C48;}
-.btn-ghost{background:transparent;}
-.btn-danger{background:transparent;border-color:rgba(201,85,63,.5);color:#E08573;}
-.btn-danger:hover{border-color:var(--rust);}
-.btn-mini{padding:5px 9px;font-size:11.5px;border-radius:var(--r-sm);}
-.btn-lg{padding:12px 20px;font-size:14.5px;}
-.row-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;}
-
-/* ─────────── campos ─────────── */
-.field{margin-top:12px;}
-.field:first-of-type{margin-top:0;}
-.field label{
-  display:flex;align-items:center;gap:7px;
-  font-size:11.5px;color:var(--ink-2);margin-bottom:6px;font-weight:550;
-}
-input[type=text],input[type=password],select,textarea{
-  width:100%;background:var(--bg-2);border:1px solid var(--line);
-  border-radius:var(--r);padding:10px 12px;font-size:14px;color:var(--ink);
-  transition:border-color .14s;
-}
-textarea{resize:vertical;min-height:74px;line-height:1.5;}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--ember);}
-input::placeholder,textarea::placeholder{color:var(--ink-3);}
-select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236F797D' stroke-width='2'%3E%3Cpath d='m7 10 5 5 5-5'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 10px center;background-size:16px;padding-right:34px;}
-
-.composer{display:flex;gap:8px;}
-.composer input{flex:1;min-width:0;}
-
-.segmented{
-  display:flex;gap:4px;overflow-x:auto;padding-bottom:2px;margin-bottom:10px;
-  scrollbar-width:none;
-}
-.segmented::-webkit-scrollbar{display:none;}
-.segmented button{
-  background:var(--bg-2);border:1px solid var(--line);color:var(--ink-3);
-  border-radius:99px;padding:6px 12px;font-size:12px;cursor:pointer;white-space:nowrap;
-}
-.segmented button.is-on{background:var(--ink);border-color:var(--ink);color:var(--bg);font-weight:600;}
-
-/* ─────────── hero / estado vazio ─────────── */
-.hero{padding:26px 4px 10px;text-align:left;}
-.hero-mark{
-  width:52px;height:52px;border-radius:16px;display:grid;place-items:center;
-  background:var(--surf);border:1px solid var(--line);color:var(--ember);margin-bottom:18px;
-}
-.hero h1{font-size:25px;line-height:1.2;margin-bottom:10px;letter-spacing:-.02em;}
-.hero p{color:var(--ink-2);font-size:14.5px;line-height:1.58;max-width:52ch;}
-.steps{display:flex;flex-direction:column;gap:9px;margin:22px 0;}
-.step{display:flex;gap:11px;align-items:baseline;}
-.step b{
-  font-family:var(--mono);font-size:11px;color:var(--ember);
-  width:20px;height:20px;flex:none;display:grid;place-items:center;
-  border:1px solid var(--line);border-radius:6px;background:var(--surf);
-}
-.step span{font-size:13.5px;color:var(--ink-2);}
-.hero-actions{display:flex;gap:9px;flex-wrap:wrap;}
-.empty{
-  font-size:13px;color:var(--ink-3);line-height:1.55;
-  padding:18px 2px;text-align:left;
-}
-
-/* ─────────── chão do estúdio ─────────── */
-.floor-wrap{padding:var(--pad) var(--pad) 12px;}
-#floor{
-  display:block;width:100%;height:auto;border-radius:var(--r);
-  background:var(--bg-2);border:1px solid var(--line-soft);cursor:pointer;
-  touch-action:manipulation;
-}
-
-/* ─────────── equipe ─────────── */
-.team{display:flex;flex-direction:column;gap:7px;}
-.member{
-  display:flex;align-items:center;gap:11px;width:100%;text-align:left;
-  background:var(--bg-2);border:1px solid var(--line-soft);border-radius:var(--r);
-  padding:10px 11px;cursor:pointer;transition:border-color .14s;
-}
-.member:hover{border-color:var(--line);}
-.avatar{
-  width:32px;height:32px;border-radius:99px;flex:none;display:grid;place-items:center;
-  font-size:12px;font-weight:700;color:#12100E;letter-spacing:-.02em;
-}
-.member-body{min-width:0;flex:1;}
-.member-name{font-size:13.5px;font-weight:600;display:flex;align-items:center;gap:6px;}
-.member-role{font-size:11px;color:var(--ink-3);}
-.member-status{font-size:11.5px;color:var(--ink-2);margin-top:2px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.bars{display:flex;flex-direction:column;gap:3px;width:44px;flex:none;}
-.bar{height:3px;border-radius:99px;background:var(--line);overflow:hidden;}
-.bar i{display:block;height:100%;border-radius:99px;background:var(--ink-3);}
-.bar.energia i{background:var(--sage);}
-.bar.humor i{background:var(--gold);}
-.thinking{
-  font-size:9.5px;padding:1px 6px;border-radius:99px;
-  background:var(--ember-soft);color:var(--ember);
-  animation:blink 1.2s ease-in-out infinite;
-}
-
-/* ─────────── listas de tarefas / contratos ─────────── */
-.item{
-  display:flex;gap:11px;align-items:flex-start;
-  padding:11px 0;border-top:1px solid var(--line-soft);
-}
-.item:first-child{border-top:0;padding-top:2px;}
-.item-body{min-width:0;flex:1;}
-.item-title{font-size:13.5px;font-weight:550;line-height:1.4;}
-.item-meta{font-size:11px;color:var(--ink-3);margin-top:3px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
-.item-actions{display:flex;gap:6px;flex:none;align-items:center;}
-.dot-state{width:7px;height:7px;border-radius:99px;flex:none;margin-top:6px;background:var(--ink-3);}
-.dot-state.fazendo{background:var(--gold);animation:blink 1.2s ease-in-out infinite;}
-.dot-state.feita{background:var(--sage);}
-.dot-state.falhou{background:var(--rust);}
-
-/* ─────────── kits ─────────── */
-.kits{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px;}
-.kit{
-  text-align:left;background:var(--bg-2);border:1px solid var(--line-soft);
-  border-radius:var(--r);padding:11px;cursor:pointer;transition:border-color .14s;
-  display:flex;flex-direction:column;gap:4px;
-}
-.kit:hover{border-color:var(--ember);}
-.kit[disabled]{opacity:.42;cursor:default;}
-.kit-top{display:flex;align-items:center;gap:7px;}
-.kit-ext{font-family:var(--mono);font-size:9.5px;color:var(--ember);
-  background:var(--ember-soft);padding:2px 5px;border-radius:4px;text-transform:uppercase;}
-.kit-nome{font-size:13px;font-weight:600;line-height:1.3;}
-.kit-desc{font-size:11px;color:var(--ink-3);line-height:1.45;}
-
-/* ─────────── arquivos ─────────── */
-.file{
-  border:1px solid var(--line-soft);border-radius:var(--r);
-  background:var(--bg-2);margin-bottom:8px;overflow:hidden;
-}
-.file-head{display:flex;gap:10px;align-items:flex-start;padding:11px 12px;}
-.file-info{min-width:0;flex:1;}
-.file-name{font-size:13.5px;font-weight:600;word-break:break-word;line-height:1.35;}
-.file-meta{font-size:10.5px;color:var(--ink-3);font-family:var(--mono);margin-top:4px;
-  display:flex;flex-wrap:wrap;gap:5px;align-items:center;}
-.file-tools{display:flex;flex-wrap:wrap;gap:5px;padding:0 12px 11px;}
-.file-view{
-  border-top:1px solid var(--line-soft);background:#0B0E10;
-  font-family:var(--mono);font-size:11px;line-height:1.62;color:#C6CCCF;
-  padding:12px;white-space:pre-wrap;word-break:break-word;max-height:300px;overflow:auto;
-}
-.file-frame{width:100%;height:340px;border:0;border-top:1px solid var(--line-soft);background:#fff;display:block;}
-.quality{display:inline-flex;align-items:center;gap:5px;}
-.quality-bar{width:34px;height:3px;border-radius:99px;background:var(--line);overflow:hidden;}
-.quality-bar i{display:block;height:100%;background:var(--sage);}
-
-/* ─────────── KPIs e negócio ─────────── */
-.kpis{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;}
-@media(min-width:560px){.kpis{grid-template-columns:repeat(4,1fr);}}
-.kpi{
-  background:var(--surf);border:1px solid var(--line-soft);border-radius:var(--r-lg);
-  padding:12px;display:flex;flex-direction:column;gap:2px;
-}
-.kpi-v{font-size:21px;font-weight:680;letter-spacing:-.03em;
-  font-variant-numeric:tabular-nums;line-height:1.15;}
-.kpi-l{font-size:10.5px;color:var(--ink-3);line-height:1.35;}
-.kpi-d{font-size:10px;font-family:var(--mono);}
-.up{color:var(--sage);} .down{color:var(--rust);}
-
-.stats{display:flex;flex-direction:column;}
-.stat{
-  display:flex;align-items:baseline;gap:10px;padding:8px 0;
-  border-top:1px solid var(--line-soft);font-size:12.5px;
-}
-.stat:first-child{border-top:0;}
-.stat span{color:var(--ink-2);}
-.stat b{margin-left:auto;font-family:var(--mono);font-variant-numeric:tabular-nums;
-  font-weight:550;font-size:12.5px;}
-.spark{display:block;width:100%;height:54px;margin:2px 0 8px;}
-
-.meter{height:5px;border-radius:99px;background:var(--line);overflow:hidden;margin:8px 0 4px;}
-.meter i{display:block;height:100%;background:var(--ember);border-radius:99px;transition:width .3s;}
-.meter.ok i{background:var(--sage);}
-.meter.warn i{background:var(--gold);}
-.meter.bad i{background:var(--rust);}
-
-/* ─────────── diário / chamadas ─────────── */
-.logbox{max-height:280px;overflow-y:auto;margin:0 -4px;}
-.log-line{
-  display:flex;gap:9px;padding:6px 4px;font-size:12px;line-height:1.45;
-  border-top:1px solid var(--line-soft);
-}
-.log-line:first-child{border-top:0;}
-.log-ts{font-family:var(--mono);font-size:10px;color:var(--ink-3);flex:none;padding-top:2px;}
-.log-txt{min-width:0;color:var(--ink-2);}
-.log-line.ok .log-txt{color:var(--ink);}
-.log-line.alerta .log-txt{color:#E3B972;}
-.log-line.erro .log-txt{color:#E08573;}
-
-.calls{max-height:260px;overflow-y:auto;}
-.call{padding:8px 0;border-top:1px solid var(--line-soft);font-size:12px;}
-.call:first-child{border-top:0;}
-.call-head{display:flex;gap:8px;align-items:center;}
-.call-head b{font-weight:600;font-size:12.5px;}
-.call-head .tag{margin-left:auto;}
-.call-meta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin-top:3px;}
-
-/* ─────────── folha inferior / modal ─────────── */
-.sheet-backdrop{
-  position:fixed;inset:0;z-index:60;background:rgba(6,8,9,.66);
-  backdrop-filter:blur(3px);display:flex;align-items:flex-end;justify-content:center;
-  animation:fade .18s ease both;
-}
-@keyframes fade{from{opacity:0}to{opacity:1}}
-.sheet{
-  width:100%;max-width:520px;max-height:88dvh;overflow-y:auto;
-  background:var(--bg-2);border:1px solid var(--line);
-  border-radius:var(--r-xl) var(--r-xl) 0 0;
-  padding:8px 16px calc(20px + var(--safe-b));
-  animation:slideUp .24s cubic-bezier(.2,.8,.3,1) both;
-}
-@keyframes slideUp{from{transform:translateY(22px);opacity:.4}to{transform:none;opacity:1}}
-@media(min-width:600px){
-  .sheet-backdrop{align-items:center;}
-  .sheet{border-radius:var(--r-xl);padding-bottom:20px;}
-}
-.sheet-grip{
-  display:block;width:38px;height:4px;border-radius:99px;background:var(--line);
-  border:0;margin:6px auto 14px;cursor:pointer;padding:0;
-}
-.sheet h2{font-size:18px;margin-bottom:5px;letter-spacing:-.02em;}
-.sheet .sub{font-size:12.5px;color:var(--ink-3);line-height:1.5;margin-bottom:14px;}
-.sheet-actions{display:flex;gap:8px;margin-top:16px;}
-.sheet-actions .btn{flex:1;}
-.pick{
-  display:flex;gap:10px;align-items:center;width:100%;text-align:left;
-  background:var(--surf);border:1px solid var(--line-soft);border-radius:var(--r);
-  padding:11px 12px;margin-bottom:6px;cursor:pointer;
-}
-.pick.is-on{border-color:var(--ember);}
-.pick b{font-size:13.5px;font-weight:600;display:block;}
-.pick small{font-size:11px;color:var(--ink-3);display:block;line-height:1.4;}
-.pick .tag{margin-left:auto;flex:none;}
-
-/* ─────────── avisos ─────────── */
-.toasts{
-  position:fixed;left:0;right:0;bottom:calc(76px + var(--safe-b));z-index:70;
-  display:flex;flex-direction:column;align-items:center;gap:6px;pointer-events:none;padding:0 12px;
-}
-@media(min-width:900px){.toasts{bottom:20px;align-items:flex-end;padding-right:20px;}}
-.toast{
-  background:var(--surf-2);border:1px solid var(--line);color:var(--ink);
-  border-radius:99px;padding:9px 15px;font-size:12.5px;max-width:min(440px,92vw);
-  box-shadow:0 8px 26px rgba(0,0,0,.4);
-  animation:toastIn .22s ease both;
-}
-.toast.ok{border-color:rgba(111,169,138,.5);}
-.toast.erro{border-color:rgba(201,85,63,.5);}
-@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
-
-.callout{
-  border:1px solid var(--line);border-left:2px solid var(--ember);
-  background:var(--bg-2);border-radius:var(--r-sm);
-  padding:10px 12px;font-size:12px;color:var(--ink-2);line-height:1.55;
-}
-.callout.warn{border-left-color:var(--gold);}
-.callout.bad{border-left-color:var(--rust);}
-.danger-zone{border-color:rgba(201,85,63,.28);}
-
-/* ─────────── sala de reuniões ─────────── */
-.meeting-room{overflow:hidden;position:relative;background:linear-gradient(180deg,var(--bg-2),var(--surf));}
-.meeting-room-head{display:flex;justify-content:space-between;gap:18px;align-items:center;min-height:128px;padding:4px 2px}
-.meeting-room h1{font-size:25px;margin:5px 0;letter-spacing:-.03em}
-.meeting-room-head p{max-width:720px}
-.meeting-table{width:112px;height:70px;border:1px solid var(--line);border-radius:50%;background:var(--bg);display:grid;grid-template-columns:1fr 1fr;place-items:center;flex:none;position:relative;box-shadow:inset 0 0 0 10px var(--bg-2)}
-.meeting-table:before{content:'';position:absolute;inset:13px 22px;border:1px solid var(--line-soft);border-radius:50%}
-.meeting-table span{width:9px;height:9px;border-radius:50%;background:var(--ember);position:relative;z-index:1;opacity:.8}
-.meeting-people{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px;padding-top:12px;border-top:1px solid var(--line-soft)}
-.meeting-person{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:999px;background:var(--bg);min-width:150px}
-.meeting-person .avatar{width:30px;height:30px;font-size:10px;flex:none}
-.meeting-person b{font-size:12px}.meeting-person small{display:block;color:var(--ink-3);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
-.meeting-chat{display:flex;flex-direction:column;min-height:560px;padding:0;overflow:hidden}
-.meeting-chat>.panel-head{padding:14px 16px;border-bottom:1px solid var(--line)}
-.meeting-messages{display:flex;flex-direction:column;gap:12px;max-height:590px;min-height:360px;overflow:auto;padding:18px 16px;background:radial-gradient(circle at 50% 0%,var(--surf-2),transparent 42%)}
-.meeting-msg{width:min(76%,680px);border:1px solid var(--line);background:var(--bg-2);border-radius:4px 16px 16px 16px;padding:10px 13px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
-.meeting-msg.mine{align-self:flex-end;background:var(--ember-soft);border-color:rgba(228,112,62,.3);border-radius:16px 4px 16px 16px}
-.meeting-msg.system{align-self:center;width:auto;max-width:92%;background:var(--surf-2);border-style:dashed;text-align:center}
-.meeting-msg .who{font-size:10px;font-weight:700;color:var(--ink-3);margin-bottom:4px;letter-spacing:.04em}
-.meeting-msg.mine .who{color:var(--ember)}
-.meeting-msg .txt{font-size:13px;white-space:pre-wrap;line-height:1.55}
-.meeting-msg .time{font-size:9px;color:var(--ink-3);margin-top:6px;text-align:right}
-.meeting-actions{display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid var(--line-soft);padding:9px 16px}
-.meeting-composer{border-top:1px solid var(--line);padding:12px 16px;background:var(--bg-2)}
-.meeting-composer textarea{min-height:70px;resize:vertical}
-.meeting-send{display:flex;align-items:center;gap:10px;margin-top:7px}.meeting-send .hint{flex:1}
-@media(max-width:520px){.meeting-room-head{align-items:flex-start}.meeting-table{display:none}.meeting-room h1{font-size:20px}.meeting-send{align-items:stretch;flex-direction:column}.meeting-msg{width:88%;max-width:94%}.meeting-person{min-width:0;flex:1}}
-
-.person-log{max-height:280px;overflow:auto;padding-right:4px}.person-log .log-line{margin:4px 0}
-
-.idea-item { border-left: 3px solid var(--accent, #E4703E); }
-.idea-item .panel-foot { margin: 6px 0; }
-.member-personality{display:block;color:var(--ink-3);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
-
-
-/* ─────────── correções de layout no celular ───────────
-   Rótulos longos em select cortavam sem reticência, valores longos
-   estouravam a linha do painel e o teclado do iOS dava zoom em campos
-   com fonte menor que 16px. */
-select{text-overflow:ellipsis;}
-input[type=text],input[type=password],select,textarea{max-width:100%;}
-
-@media (max-width:899px){
-  input[type=text],input[type=password],select,textarea{font-size:16px;}
-  .row-actions{display:flex;flex-wrap:wrap;gap:8px;}
-  .row-actions .btn{flex:1 1 auto;min-width:44%;justify-content:center;}
-  .hint,.panel-foot,.sub{overflow-wrap:anywhere;}
-}
-
-/* Uma estatística com rótulo comprido deve quebrar em duas linhas em vez
-   de empurrar o número para fora do painel. */
-.stats .stat{gap:10px;align-items:baseline;}
-.stats .stat span{min-width:0;overflow-wrap:anywhere;}
-.stats .stat b{white-space:nowrap;flex-shrink:0;}
-
-.call-head,.call-meta{min-width:0;overflow-wrap:anywhere;}
-.panel{overflow-wrap:break-word;}
-.file-info b,.item-body b{overflow-wrap:anywhere;}
-
-
-/* ─────────── painel de supervisão da gerente ───────────
-   O grid de 3 colunas fixas nunca tinha sido testado numa tela
-   estreita de verdade: em ~340px de largura de conteúdo, um rótulo
-   como "etapas abertas" embaixo de um número de dois dígitos aperta
-   a coluna até estourar. Em telas realmente pequenas, empilha 1x3
-   em vez de manter 3 colunas artificialmente. */
-.management-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0;}
-.management-summary>div{padding:10px;background:var(--bg-2);border:1px solid var(--line);border-radius:10px;min-width:0;}
-.management-summary b{display:block;font-size:20px;overflow-wrap:anywhere;}
-.management-summary span{font-size:10px;color:var(--ink-3);overflow-wrap:anywhere;}
-@media (max-width:380px){
-  .management-summary{grid-template-columns:1fr;}
-  .management-summary>div{display:flex;align-items:baseline;justify-content:space-between;gap:8px;}
-}
-.manager-focus{margin:8px 0;line-height:1.5;overflow-wrap:anywhere;}
-.manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0;overflow-wrap:anywhere;}
-.manager-recommendation span{font-size:12px;}
-.manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere;}
-
-
-/* v37 — escritório pixel art e economia */
-.pixel-office { overflow:hidden; }
-.pixel-office canvas { image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 10px; background:#111; }
-.panel-subtitle{display:block;font-size:11px;opacity:.55;margin-top:3px}
-.environment-bar{display:flex;gap:8px;flex-wrap:wrap;padding:9px 2px 1px}
-.env-chip{font-size:11px;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:5px 8px;background:rgba(255,255,255,.025)}
-.economy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
-.economy-card{padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.025)}
-.economy-card b{display:block;font-size:17px}.economy-card span{font-size:10px;opacity:.55}
-@media(max-width:600px){.economy-grid{grid-template-columns:repeat(2,1fr)}}
-
-</style>
+<link rel="stylesheet" href="app.css">
 <script>
 /* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
 (function(){
@@ -846,7 +279,7 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script>
-/* core.js */
+/* ===== core.js ===== */
 /* ============================================================
    CORE — utilidades, estado e persistência.
    Carregado primeiro; todos os módulos penduram-se em window.S.
@@ -955,6 +388,11 @@ window.S = window.S || {};
     e.ambiente.objetos = Array.isArray(e.ambiente.objetos) ? e.ambiente.objetos : [];
     e.ambiente.tema = String(e.ambiente.tema || 'oficina aconchegante');
     e.ambiente.ultimaConstrucao = Number(e.ambiente.ultimaConstrucao) || 0;
+    e.ambiente.planta = e.ambiente.planta && typeof e.ambiente.planta === 'object' ? e.ambiente.planta : {};
+    e.ambiente.planta.versao = Number(e.ambiente.planta.versao) || 1;
+    e.ambiente.planta.zonas = Array.isArray(e.ambiente.planta.zonas) ? e.ambiente.planta.zonas : [];
+    e.ambiente.planta.eventos = Array.isArray(e.ambiente.planta.eventos) ? e.ambiente.planta.eventos.slice(-80) : [];
+    e.ambiente.construtores = Array.isArray(e.ambiente.construtores) ? e.ambiente.construtores.slice(-80) : [];
     e.gerencia = e.gerencia && typeof e.gerencia === 'object' ? e.gerencia : {};
     e.gerencia.ultimaAvaliacao = Number(e.gerencia.ultimaAvaliacao) || 0;
     e.gerencia.recomendacao = String(e.gerencia.recomendacao || 'A gerente está observando a carga, qualidade e dependências da equipe.');
@@ -996,6 +434,10 @@ window.S = window.S || {};
       f.cuidados.ultimo = f.cuidados.ultimo || 0;
       f.cuidados.agua = Number.isFinite(f.cuidados.agua) ? f.cuidados.agua : 0;
       f.cuidados.pausa = Number.isFinite(f.cuidados.pausa) ? f.cuidados.pausa : 0;
+      f.comissaoHistorico = Array.isArray(f.comissaoHistorico) ? f.comissaoHistorico.slice(-60) : [];
+      f.ambiente = f.ambiente && typeof f.ambiente === 'object' ? f.ambiente : {};
+      f.ambiente.preferencias = Array.isArray(f.ambiente.preferencias) ? f.ambiente.preferencias.slice(0,8) : [];
+      f.ambiente.ultimaAcao = Number(f.ambiente.ultimaAcao) || 0;
     });
     e.projetos = Array.isArray(e.projetos) ? e.projetos : [];
     if (!e.projetos.length) {
@@ -1224,9 +666,9 @@ window.S = window.S || {};
 
 </script>
 <script>
-/* ai.js */
+/* ===== ai.js ===== */
 /* ============================================================
-   IA — única porta de saída para a Groq.
+   IA — porta única para o provedor configurado.
    Princípio do projeto: economia de tokens. Toda chamada tem teto,
    contexto enxuto e formato de resposta fixo em linhas CHAVE: valor,
    que modelos pequenos acertam muito mais que JSON.
@@ -1266,7 +708,7 @@ window.S = window.S || {};
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
   const K_CHAVE_OR = 'openrouter-api-key';
   const K_CFG = 'estudio-ia-cfg';
-  const K_USO = 'groq-usage-v1';
+  const K_USO = 'estudio-ia-usage-v2';
 
   const MODELOS_GROQ = [
     { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
@@ -1480,7 +922,7 @@ window.S = window.S || {};
   /* Quanto falta até a Groq aceitar de novo, lido da própria resposta.
      Esperar o tempo certo é o que diferencia "a equipe retoma sozinha"
      de "a equipe fica batendo na porta e tomando 429". */
-  function esperaDaGroq(resp, dados) {
+  function esperaDoProvedor(resp, dados) {
     const h = n => { try { return resp.headers.get(n); } catch (e) { return null; } };
     const cands = [h('retry-after'), h('x-ratelimit-reset-tokens'), h('x-ratelimit-reset-requests')]
       .map(v => msDeHeader(v)).filter(v => Number.isFinite(v) && v > 0);
@@ -1538,14 +980,17 @@ window.S = window.S || {};
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low')
+          stream: false,
+          ...(cfg.provedor === 'openrouter'
+            ? { reasoning: { effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low'), exclude: true } }
+            : { reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low') })
         })
       });
       let dados = null;
       try { dados = await resp.json(); } catch (e) {}
       lerHeaders(resp);
       const ms = Date.now() - inicio;
-      // Só contabiliza o que a Groq realmente processou e devolveu como uso —
+      // Só contabiliza o que o provedor realmente processou e devolveu como uso —
       // uma resposta de erro não deve inflar o total gasto.
       if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
 
@@ -1555,7 +1000,7 @@ window.S = window.S || {};
         if (resp.status === 429) {
           // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
           // do estúdio volta sozinho quando a janela reabre.
-          const espera = esperaDaGroq(resp, dados);
+          const espera = esperaDoProvedor(resp, dados);
           estado.bloqueadaAte = Date.now() + espera;
           estado.ultimo429 = Date.now();
           estado.esperaAtual = espera;
@@ -1571,8 +1016,20 @@ window.S = window.S || {};
         throw new Error(msg);
       }
       const escolha = (dados.choices || [])[0] || {};
-      const texto = String((escolha.message && escolha.message.content) || escolha.text || '').trim();
-      if (!texto) throw new Error(`A Groq não devolveu texto (finish_reason=${escolha.finish_reason || '?'}).`);
+      const mensagem = escolha.message || {};
+      const texto = String(mensagem.content || escolha.text || '').trim();
+      if (!texto && escolha.finish_reason === 'length' && !op._recuperacao && tipo !== 'conteudo') {
+        return chamar(Object.assign({}, op, {
+          _recuperacao: true,
+          reasoning_effort: 'low',
+          tokens: Math.max(Number(op.tokens || 0) + 260, tipo === 'maestro' ? 900 : 760),
+          forcar: false
+        }));
+      }
+      if (!texto) {
+        const motivoVazio = escolha.finish_reason ? `finish_reason=${escolha.finish_reason}` : 'resposta vazia';
+        throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
+      }
 
       estado.falhas = 0; estado.bloqueadaAte = 0;
       registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms, ok: true, tokens: (dados.usage || {}).total_tokens || 0, em: Date.now() });
@@ -1697,7 +1154,7 @@ window.S = window.S || {};
     const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
     const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
     // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
-    // sabemos a janela real da organização; depois dela, usamos os headers da Groq.
+    // sabemos a janela real da organização; depois dela, usamos os headers do provedor ativo.
     const pctTokens = temTok ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100) : null;
     const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
     return {
@@ -1745,7 +1202,7 @@ window.S = window.S || {};
 
 </script>
 <script>
-/* market.js */
+/* ===== market.js ===== */
 /* ============================================================
    MERCADO — economia causal.
    Nenhuma venda, visita ou seguidor é sorteado nem inventado pela IA.
@@ -1977,7 +1434,7 @@ window.S = window.S || {};
 
 </script>
 <script>
-/* factory.js */
+/* ===== factory.js ===== */
 /* ============================================================
    FÁBRICA — onde nasce o produto de verdade.
 
@@ -2813,7 +2270,7 @@ Sem numeração, sem markdown.`;
 
 </script>
 <script>
-/* agency.js */
+/* ===== agency.js ===== */
 /* ============================================================
    AGENCY — camada de autonomia organizacional.
    O funcionário não recebe uma sequência de produção. Ele observa o estado
@@ -2865,7 +2322,8 @@ Sem numeração, sem markdown.`;
         `EQUIPE: ${equipeContexto(e)}`,
         `MEMÓRIA DE ${p.nome}: ${memorias.slice(-8).map(m => typeof m === 'string' ? m : (m.texto || '')).filter(Boolean).join(' | ') || 'nenhuma'}`,
         `DECISÕES RECENTES: ${decisoes || 'nenhuma'}`,
-        `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`
+        `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`,
+        `AMBIENTE: ${((e.ambiente&&e.ambiente.objetos)||[]).slice(-12).map(o => `${o.id}:${o.nome}@${Math.round(o.x)},${Math.round(o.y)} uso=${o.uso||0} por=${o.por||'equipe'}`).join('; ') || 'vazio'} | orçamento=${e.ambiente&&e.ambiente.moedas!=null?e.ambiente.moedas:'indisponível'}`
       ].join('\n'),
       arquivos: arqs,
       tarefas,
@@ -2875,7 +2333,7 @@ Sem numeração, sem markdown.`;
 
   function normalizar(c, ctx) {
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','esperar'];
+    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','reorganizar','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
@@ -2923,6 +2381,7 @@ Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, 
 - colaborar: procure outro membro porque existe uma dependência ou decisão que se beneficia de colaboração.
 - planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
 - construir: só quando uma mudança física no ambiente tiver valor para trabalho, bem-estar ou identidade da equipe; escolha um tipo simples de mobiliário.
+- reorganizar: só quando mover um objeto existente resolver um problema concreto de fluxo, colaboração ou uso do espaço.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
@@ -2944,7 +2403,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
       const r = await S.ai.chamar({
         sistema,
         pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta. Retorne SOMENTE os campos solicitados.',
-        tipo: 'decisao', tokens: 520, reasoning_effort: 'high', agente: p.nome,
+        tipo: 'decisao', tokens: 620, reasoning_effort: 'low', agente: p.nome,
         motivo: 'deliberação autônoma organizacional'
       });
       const d = normalizar(S.ai.campos(r && r.texto || ''), ctx);
@@ -3011,7 +2470,7 @@ Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. I
 
 </script>
 <script>
-/* studio.js */
+/* ===== studio.js ===== */
 /* ============================================================
    ESTÚDIO — o simulador propriamente dito.
    Um único motor assíncrono decide, no máximo, UMA ação de IA por
@@ -3045,15 +2504,15 @@ Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. I
     const col = i % porLinha, lin = Math.floor(i / porLinha);
     const largura = 640, margem = 76;
     const passo = (largura - margem * 2) / Math.max(1, porLinha - 1);
-    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 96 };
+    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 72 };
   }
   const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
 
   const ESTACOES = {
-    cafe: { x: 90, y: 300, rotulo: 'café' },
-    reuniao: { x: 320, y: 300, rotulo: 'sala de reunião' },
-    quadro: { x: 550, y: 300, rotulo: 'quadro' },
-    descanso: { x: 320, y: 346, rotulo: 'descanso' }
+    cafe: { x: 120, y: 350, rotulo: 'café' },
+    reuniao: { x: 345, y: 276, rotulo: 'reunião' },
+    quadro: { x: 525, y: 276, rotulo: 'quadro' },
+    descanso: { x: 350, y: 350, rotulo: 'descanso' }
   };
 
   function montar() {
@@ -3409,23 +2868,65 @@ Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. I
 
   /* ---------- ambiente construível ---------- */
   const OBJETOS_AMBIENTE = {
-    mesa: {nome:'Mesa', custo:180, w:54,h:28}, planta:{nome:'Planta',custo:70,w:24,h:34}, estante:{nome:'Estante',custo:260,w:38,h:54},
-    luminaria:{nome:'Luminária',custo:110,w:18,h:32}, sofa:{nome:'Sofá',custo:320,w:72,h:30}, quadro:{nome:'Quadro',custo:140,w:62,h:12}, bancada:{nome:'Bancada',custo:240,w:76,h:28}
+    mesa: {nome:'Mesa', custo:180, w:54,h:28, zona:'trabalho'},
+    planta:{nome:'Planta',custo:70,w:24,h:34, zona:'bemestar'},
+    estante:{nome:'Estante',custo:260,w:38,h:54, zona:'arquivo'},
+    luminaria:{nome:'Luminária',custo:110,w:18,h:32, zona:'trabalho'},
+    sofa:{nome:'Sofá',custo:320,w:72,h:30, zona:'convivio'},
+    quadro:{nome:'Quadro',custo:140,w:62,h:12, zona:'planejamento'},
+    bancada:{nome:'Bancada',custo:240,w:76,h:28, zona:'prototipo'}
   };
-  function construirAmbiente(p, tipo, motivo) {
+  const AMB_ZONAS = {
+    trabalho:{x:82,y:78,w:500,h:132}, arquivo:{x:82,y:214,w:150,h:108}, planejamento:{x:246,y:214,w:198,h:108}, convivio:{x:456,y:214,w:128,h:108}, bemestar:{x:82,y:330,w:150,h:40}, prototipo:{x:246,y:330,w:338,h:40}
+  };
+  function distObj(a,b){ return Math.hypot((a.x||0)-(b.x||0),(a.y||0)-(b.y||0)); }
+  function livreParaObjeto(x,y,spec,objs){
+    if(x-spec.w/2<34 || x+spec.w/2>606 || y-spec.h/2<36 || y+spec.h/2>355) return false;
+    return objs.every(o => {
+      const q=OBJETOS_AMBIENTE[o.tipo]||{};
+      return Math.abs(x-(o.x||0)) > ((spec.w||30)+(q.w||30))/2+7 || Math.abs(y-(o.y||0)) > ((spec.h||20)+(q.h||20))/2+7;
+    });
+  }
+  function pontoConstrucao(p,tipo,objs){
+    const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
+    const z=AMB_ZONAS[spec.zona]||AMB_ZONAS.bemestar;
+    const candidatos=[];
+    // Primeiro tenta perto da mesa do próprio agente: o espaço passa a ter identidade.
+    if(p && p.mesa) candidatos.push({x:p.mesa.x,y:p.mesa.y-36});
+    for(let row=0;row<5;row++) for(let col=0;col<7;col++) candidatos.push({x:z.x+22+col*48,y:z.y+22+row*32});
+    return candidatos.find(pt=>livreParaObjeto(pt.x,pt.y,spec,objs)) || {x:z.x+z.w/2,y:z.y+z.h/2};
+  }
+  async function construirAmbiente(p, tipo, motivo) {
     const e=S.state.atual(); if(!e) return false;
     const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
     e.ambiente=e.ambiente||{moedas:1200,objetos:[]}; e.ambiente.objetos=Array.isArray(e.ambiente.objetos)?e.ambiente.objetos:[];
-    if((e.ambiente.moedas||0)<spec.custo) return false;
-    if(e.ambiente.objetos.length>=40) return false;
-    const cols=5, idx=e.ambiente.objetos.length, col=idx%cols, row=Math.floor(idx/cols);
-    const x=72+col*118+(idx%2)*12, y=54+row*74;
+    if((e.ambiente.moedas||0)<spec.custo || e.ambiente.objetos.length>=50) return false;
+    const alvo={x:Math.min(560,Math.max(80,(p&&p.mesa?p.mesa.x:320))),y:250};
+    if(p && !p.ocupado){ p.ocupado=true; p.estado='andando'; p.ref.foco=`construindo ${spec.nome}`; await irPara(p,alvo); }
+    const agora=Date.now(), pos=pontoConstrucao(p,tipo,e.ambiente.objetos);
     e.ambiente.moedas-=spec.custo;
-    e.ambiente.objetos.push({id:uid('obj'),tipo,x,y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:Date.now()});
-    e.ambiente.ultimaConstrucao=Date.now();
-    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
+    const obj={id:uid('obj'),tipo,x:pos.x,y:pos.y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:agora,uso:0,ultimaInteracao:agora};
+    e.ambiente.objetos.push(obj); e.ambiente.ultimaConstrucao=agora;
+    e.ambiente.construtores=e.ambiente.construtores||[]; e.ambiente.construtores.unshift({t:agora,agente:p&&p.id,objeto:obj.id,tipo,motivo:String(motivo||'').slice(0,220)}); e.ambiente.construtores=e.ambiente.construtores.slice(0,80);
+    e.ambiente.planta=e.ambiente.planta||{versao:1,zonas:[],eventos:[]}; e.ambiente.planta.versao=Number(e.ambiente.planta.versao||1)+1;
+    e.ambiente.planta.eventos=e.ambiente.planta.eventos||[]; e.ambiente.planta.eventos.unshift({t:agora,tipo:'construcao',objeto:obj.id,agente:p&&p.id}); e.ambiente.planta.eventos=e.ambiente.planta.eventos.slice(0,80);
+    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); p.ref.ambiente=p.ref.ambiente||{}; p.ref.ambiente.ultimaAcao=agora; p.ref.ambiente.preferencias=p.ref.ambiente.preferencias||[]; if(!p.ref.ambiente.preferencias.includes(tipo)) p.ref.ambiente.preferencias.unshift(tipo); p.ref.ambiente.preferencias=p.ref.ambiente.preferencias.slice(0,8); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
     S.state.registrar(`${p?p.nome:'A equipe'} construiu ${spec.nome} no ambiente por ${S.fmt.brl(spec.custo)}.`,'ambiente',p&&p.id);
+    if(p){ p.ocupado=false; p.tarefa=null; p.estado='andando'; await irPara(p,assento(p)); p.estado='sentado'; }
     S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('negocio'); S.bus.emit('equipe'); return true;
+  }
+  function reorganizarAmbiente(p, objId, motivo){
+    const e=S.state.atual(); if(!e||!e.ambiente) return false;
+    const o=(e.ambiente.objetos||[]).find(x=>x.id===objId); if(!o) return false;
+    const spec=OBJETOS_AMBIENTE[o.tipo]||OBJETOS_AMBIENTE.planta, alvo=pontoConstrucao(p,o.tipo,(e.ambiente.objetos||[]).filter(x=>x.id!==o.id));
+    o.x=alvo.x; o.y=alvo.y; o.ultimaInteracao=Date.now(); o.movidoPor=p&&p.id; o.movidoMotivo=String(motivo||'').slice(0,180);
+    e.ambiente.planta=e.ambiente.planta||{versao:1,zonas:[],eventos:[]}; e.ambiente.planta.versao=Number(e.ambiente.planta.versao||1)+1;
+    if(p){ p.ref.pensamento=`Reorganizei ${spec.nome}: ${motivo||'melhor fluxo do espaço'}`.slice(0,240); logPessoa(p,`reorganizou ${spec.nome} no escritório. ${motivo||''}`,'ambiente'); }
+    S.state.registrar(`${p?p.nome:'A equipe'} reorganizou ${spec.nome} no ambiente.`,'ambiente',p&&p.id); S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('equipe'); return true;
+  }
+  function interagirAmbiente(p,objId){
+    const e=S.state.atual(); if(!e||!e.ambiente) return false; const o=(e.ambiente.objetos||[]).find(x=>x.id===objId); if(!o||!p) return false;
+    o.uso=Number(o.uso||0)+1; o.ultimaInteracao=Date.now(); p.ref.pensamento=`Interagi com ${o.nome}; isso faz parte do espaço de trabalho compartilhado.`; logPessoa(p,`usou ${o.nome} no ambiente.`,'ambiente'); S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('equipe'); return true;
   }
   function ambienteObjetos(){ const e=S.state.atual(); return e&&e.ambiente&&e.ambiente.objetos||[]; }
   const tiposAmbiente=()=>Object.keys(OBJETOS_AMBIENTE);
@@ -4315,7 +3816,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
               return;
             }
           } else if (d.acao === 'construir') {
-            construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            await construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            return;
+          } else if (d.acao === 'reorganizar') {
+            if (d.objeto) reorganizarAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            else { p.ref.pensamento='Não encontrei um objeto concreto para reorganizar; preservei o ambiente.'; S.state.gravar(); }
             return;
           } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
             // Essas ações têm valor organizacional mesmo sem gerar arquivo.
@@ -4368,6 +3873,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
           }
           return;
         }
+        if (d && d.acao === 'construir') { await construirAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
+        if (d && d.acao === 'reorganizar') { if (d.objeto) reorganizarAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
         if (d && d.acao !== 'esperar') {
           g.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão organizacional'}`.slice(0,500);
           logPessoa(g, `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada a partir do estado da empresa.'}`, 'autonomia');
@@ -4405,7 +3912,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     cx = cv.getContext('2d');
     if (cx) cx.imageSmoothingEnabled = false;
     const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
-    alturaLog = 74 + linhas * 96 + 96;
+    alturaLog = Math.max(410, 74 + linhas * 72 + 120);
     const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
     if (larguraCSS < 40) return;            // painel oculto: nada a redimensionar
     const escala = larguraCSS / larguraLog;
@@ -4432,6 +3939,12 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     cx.fillStyle = '#181E22'; cx.fillRect(14, 14, larguraLog-28, alturaLog-28);
     cx.fillStyle = '#20272B';
     for (let x = 24; x < larguraLog-20; x += 32) for (let y = 24; y < alturaLog-20; y += 32) cx.fillRect(x, y, 30, 30);
+    // Ilhas de uso: o escritório deixa de ser um fundo decorativo e passa a ter geografia.
+    Object.entries(AMB_ZONAS).forEach(([nome,z])=>{
+      cx.fillStyle = nome==='convivio' ? '#202B2B' : nome==='bemestar' ? '#202C27' : nome==='planejamento' ? '#29282B' : '#20272B';
+      cx.fillRect(z.x,z.y,z.w,z.h); cx.strokeStyle='#30393D'; cx.lineWidth=1; cx.strokeRect(z.x,z.y,z.w,z.h);
+      cx.fillStyle='#667075'; cx.font='600 8px monospace'; cx.textAlign='left'; cx.fillText(nome.toUpperCase(),z.x+7,z.y+12);
+    });
     cx.fillStyle = '#2A3237'; cx.fillRect(18,18,larguraLog-36,5); cx.fillRect(18,18,5,alturaLog-36); cx.fillRect(larguraLog-23,18,5,alturaLog-36);
     // janela
     cx.fillStyle='#25353A'; cx.fillRect(470,22,140,48); cx.fillStyle='#77A6A8'; cx.fillRect(478,30,124,32); cx.fillStyle='#B8D6C7'; cx.fillRect(482,34,116,24);
@@ -4439,6 +3952,10 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     // tapete
     cx.fillStyle='#1D2930'; cx.fillRect(262,246,188,72); cx.fillStyle='#283840'; cx.fillRect(270,254,172,56);
 
+    // Pequenos detalhes fixos dão escala de mundo sem imagens externas.
+    cx.fillStyle='#39464A'; cx.fillRect(42,42,18,8); cx.fillRect(46,50,10,3);
+    cx.fillStyle='#5B5140'; cx.fillRect(612,74,8,90); cx.fillRect(620,78,4,86);
+    cx.fillStyle='#26353A'; cx.fillRect(34,206,34,3); cx.fillRect(602,206,22,3);
     // Objetos persistentes construídos pelos agentes.
     const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
     objs.forEach(o=>{
@@ -4554,6 +4071,15 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         mexeu = true;
       }
       if (p.ocupado) mexeu = true;
+      // Objetos passam a fazer parte da rotina física: ao trabalhar perto de
+      // uma bancada/quadro/estante, registra-se uso real do espaço sem chamar IA.
+      if (!p.ocupado && p.estado === 'sentado') {
+        const e=S.state.atual(), objs=e&&e.ambiente&&e.ambiente.objetos||[];
+        const perto=objs.find(o=>Math.hypot((o.x||0)-p.pos.x,(o.y||0)-p.pos.y)<28);
+        if(perto && Date.now()-(p._ultimoUsoObjeto||0)>90000){
+          p._ultimoUsoObjeto=Date.now(); interagirAmbiente(p,perto.id);
+        }
+      }
     });
     return mexeu;
   }
@@ -4574,8 +4100,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const escala = larguraLog / r.width;
     const x = (ev.clientX - r.left) * escala, y = (ev.clientY - r.top) * escala;
     const alvo = rt.find(p => Math.hypot(p.pos.x - x, p.pos.y - y) < 24);
-    selecionado = alvo ? alvo.id : null;
-    return alvo;
+    if (alvo) { selecionado = alvo.id; return alvo; }
+    const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
+    const objeto=objs.find(o=>Math.hypot((o.x||0)-x,(o.y||0)-y)<Math.max(22,((OBJETOS_AMBIENTE[o.tipo]||{}).w||24)/2));
+    selecionado = null;
+    return objeto ? { objeto } : null;
   }
 
   S.studio = {
@@ -4585,7 +4114,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     pessoas: () => rt, pessoa, gerente,
     novaTarefa, tarefasAbertas, executar, avaliarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
-    contratar, demitir, custoContratacao, fundar, construirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
+    contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };
@@ -4593,7 +4122,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
 </script>
 <script>
-/* ui.js */
+/* ===== ui.js ===== */
 /* ============================================================
    UI — desenho dos painéis e ligações de evento.
    Cada painel se redesenha sozinho quando o escopo dele muda.
@@ -5266,8 +4795,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
     $('#contratarBtn').onclick = dialogoContratar;
     $('#floor').onclick = ev => {
-      const p = S.studio.cliqueNoChao(ev);
-      if (p) painelPessoa(p.id);
+      const alvo = S.studio.cliqueNoChao(ev);
+      if (alvo && alvo.objeto) {
+        const o=alvo.objeto;
+        toast(`${o.nome || o.tipo} · usado ${Number(o.uso||0)} vez(es)${o.por ? ' · criado pela equipe' : ''}.`, 'info');
+      } else if (alvo) painelPessoa(alvo.id);
     };
 
     $('#limparLogBtn').onclick = () => { const e = S.state.atual(); if (e) { e.log = []; S.state.gravarJa(); pintarLog(); } };

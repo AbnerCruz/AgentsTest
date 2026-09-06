@@ -1,5 +1,5 @@
 /* ============================================================
-   IA — única porta de saída para a Groq.
+   IA — porta única para o provedor configurado.
    Princípio do projeto: economia de tokens. Toda chamada tem teto,
    contexto enxuto e formato de resposta fixo em linhas CHAVE: valor,
    que modelos pequenos acertam muito mais que JSON.
@@ -39,7 +39,7 @@
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
   const K_CHAVE_OR = 'openrouter-api-key';
   const K_CFG = 'estudio-ia-cfg';
-  const K_USO = 'groq-usage-v1';
+  const K_USO = 'estudio-ia-usage-v2';
 
   const MODELOS_GROQ = [
     { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
@@ -250,10 +250,10 @@
     S.bus.emit('ia');
   }
 
-  /* Quanto falta até a Groq aceitar de novo, lido da própria resposta.
+  /* Quanto falta até o provedor aceitar de novo, lido da própria resposta.
      Esperar o tempo certo é o que diferencia "a equipe retoma sozinha"
      de "a equipe fica batendo na porta e tomando 429". */
-  function esperaDaGroq(resp, dados) {
+  function esperaDoProvedor(resp, dados) {
     const h = n => { try { return resp.headers.get(n); } catch (e) { return null; } };
     const cands = [h('retry-after'), h('x-ratelimit-reset-tokens'), h('x-ratelimit-reset-requests')]
       .map(v => msDeHeader(v)).filter(v => Number.isFinite(v) && v > 0);
@@ -311,14 +311,17 @@
         body: JSON.stringify({
           model: modelo, messages: mensagens,
           max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false, reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low')
+          stream: false,
+          ...(cfg.provedor === 'openrouter'
+            ? { reasoning: { effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low'), exclude: true } }
+            : { reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low') })
         })
       });
       let dados = null;
       try { dados = await resp.json(); } catch (e) {}
       lerHeaders(resp);
       const ms = Date.now() - inicio;
-      // Só contabiliza o que a Groq realmente processou e devolveu como uso —
+      // Só contabiliza o que o provedor realmente processou e devolveu como uso —
       // uma resposta de erro não deve inflar o total gasto.
       if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
 
@@ -328,7 +331,7 @@
         if (resp.status === 429) {
           // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
           // do estúdio volta sozinho quando a janela reabre.
-          const espera = esperaDaGroq(resp, dados);
+          const espera = esperaDoProvedor(resp, dados);
           estado.bloqueadaAte = Date.now() + espera;
           estado.ultimo429 = Date.now();
           estado.esperaAtual = espera;
@@ -344,8 +347,26 @@
         throw new Error(msg);
       }
       const escolha = (dados.choices || [])[0] || {};
-      const texto = String((escolha.message && escolha.message.content) || escolha.text || '').trim();
-      if (!texto) throw new Error(`A Groq não devolveu texto (finish_reason=${escolha.finish_reason || '?'}).`);
+      const mensagem = escolha.message || {};
+      const texto = String(mensagem.content || escolha.text || '').trim();
+
+      /* GPT-OSS pode gastar todo o limite de completion em raciocínio e
+         terminar com finish_reason=length antes de emitir a resposta final.
+         Isso não é uma falha de conexão. Para decisões curtas, recuperamos
+         uma única vez com raciocínio baixo e um teto maior. O retry é limitado
+         para não transformar uma falha em uma espiral de consumo. */
+      if (!texto && escolha.finish_reason === 'length' && !op._recuperacao && tipo !== 'conteudo') {
+        return chamar(Object.assign({}, op, {
+          _recuperacao: true,
+          reasoning_effort: 'low',
+          tokens: Math.max(Number(op.tokens || 0) + 260, tipo === 'maestro' ? 900 : 760),
+          forcar: false
+        }));
+      }
+      if (!texto) {
+        const motivoVazio = escolha.finish_reason ? `finish_reason=${escolha.finish_reason}` : 'resposta vazia';
+        throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
+      }
 
       estado.falhas = 0; estado.bloqueadaAte = 0;
       registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms, ok: true, tokens: (dados.usage || {}).total_tokens || 0, em: Date.now() });

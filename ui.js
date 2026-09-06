@@ -670,8 +670,11 @@
 
     $('#contratarBtn').onclick = dialogoContratar;
     $('#floor').onclick = ev => {
-      const p = S.studio.cliqueNoChao(ev);
-      if (p) painelPessoa(p.id);
+      const alvo = S.studio.cliqueNoChao(ev);
+      if (alvo && alvo.objeto) {
+        const o=alvo.objeto;
+        toast(`${o.nome || o.tipo} · usado ${Number(o.uso||0)} vez(es)${o.por ? ' · criado pela equipe' : ''}.`, 'info');
+      } else if (alvo) painelPessoa(alvo.id);
     };
 
     $('#limparLogBtn').onclick = () => { const e = S.state.atual(); if (e) { e.log = []; S.state.gravarJa(); pintarLog(); } };

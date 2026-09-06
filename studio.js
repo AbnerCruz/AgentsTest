@@ -31,15 +31,15 @@
     const col = i % porLinha, lin = Math.floor(i / porLinha);
     const largura = 640, margem = 76;
     const passo = (largura - margem * 2) / Math.max(1, porLinha - 1);
-    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 96 };
+    return { x: margem + col * (porLinha === 1 ? 0 : passo), y: 74 + lin * 72 };
   }
   const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
 
   const ESTACOES = {
-    cafe: { x: 90, y: 300, rotulo: 'café' },
-    reuniao: { x: 320, y: 300, rotulo: 'sala de reunião' },
-    quadro: { x: 550, y: 300, rotulo: 'quadro' },
-    descanso: { x: 320, y: 346, rotulo: 'descanso' }
+    cafe: { x: 120, y: 350, rotulo: 'café' },
+    reuniao: { x: 345, y: 276, rotulo: 'reunião' },
+    quadro: { x: 525, y: 276, rotulo: 'quadro' },
+    descanso: { x: 350, y: 350, rotulo: 'descanso' }
   };
 
   function montar() {
@@ -395,23 +395,65 @@
 
   /* ---------- ambiente construível ---------- */
   const OBJETOS_AMBIENTE = {
-    mesa: {nome:'Mesa', custo:180, w:54,h:28}, planta:{nome:'Planta',custo:70,w:24,h:34}, estante:{nome:'Estante',custo:260,w:38,h:54},
-    luminaria:{nome:'Luminária',custo:110,w:18,h:32}, sofa:{nome:'Sofá',custo:320,w:72,h:30}, quadro:{nome:'Quadro',custo:140,w:62,h:12}, bancada:{nome:'Bancada',custo:240,w:76,h:28}
+    mesa: {nome:'Mesa', custo:180, w:54,h:28, zona:'trabalho'},
+    planta:{nome:'Planta',custo:70,w:24,h:34, zona:'bemestar'},
+    estante:{nome:'Estante',custo:260,w:38,h:54, zona:'arquivo'},
+    luminaria:{nome:'Luminária',custo:110,w:18,h:32, zona:'trabalho'},
+    sofa:{nome:'Sofá',custo:320,w:72,h:30, zona:'convivio'},
+    quadro:{nome:'Quadro',custo:140,w:62,h:12, zona:'planejamento'},
+    bancada:{nome:'Bancada',custo:240,w:76,h:28, zona:'prototipo'}
   };
-  function construirAmbiente(p, tipo, motivo) {
+  const AMB_ZONAS = {
+    trabalho:{x:82,y:78,w:500,h:132}, arquivo:{x:82,y:214,w:150,h:108}, planejamento:{x:246,y:214,w:198,h:108}, convivio:{x:456,y:214,w:128,h:108}, bemestar:{x:82,y:330,w:150,h:40}, prototipo:{x:246,y:330,w:338,h:40}
+  };
+  function distObj(a,b){ return Math.hypot((a.x||0)-(b.x||0),(a.y||0)-(b.y||0)); }
+  function livreParaObjeto(x,y,spec,objs){
+    if(x-spec.w/2<34 || x+spec.w/2>606 || y-spec.h/2<36 || y+spec.h/2>355) return false;
+    return objs.every(o => {
+      const q=OBJETOS_AMBIENTE[o.tipo]||{};
+      return Math.abs(x-(o.x||0)) > ((spec.w||30)+(q.w||30))/2+7 || Math.abs(y-(o.y||0)) > ((spec.h||20)+(q.h||20))/2+7;
+    });
+  }
+  function pontoConstrucao(p,tipo,objs){
+    const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
+    const z=AMB_ZONAS[spec.zona]||AMB_ZONAS.bemestar;
+    const candidatos=[];
+    // Primeiro tenta perto da mesa do próprio agente: o espaço passa a ter identidade.
+    if(p && p.mesa) candidatos.push({x:p.mesa.x,y:p.mesa.y-36});
+    for(let row=0;row<5;row++) for(let col=0;col<7;col++) candidatos.push({x:z.x+22+col*48,y:z.y+22+row*32});
+    return candidatos.find(pt=>livreParaObjeto(pt.x,pt.y,spec,objs)) || {x:z.x+z.w/2,y:z.y+z.h/2};
+  }
+  async function construirAmbiente(p, tipo, motivo) {
     const e=S.state.atual(); if(!e) return false;
     const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
     e.ambiente=e.ambiente||{moedas:1200,objetos:[]}; e.ambiente.objetos=Array.isArray(e.ambiente.objetos)?e.ambiente.objetos:[];
-    if((e.ambiente.moedas||0)<spec.custo) return false;
-    if(e.ambiente.objetos.length>=40) return false;
-    const cols=5, idx=e.ambiente.objetos.length, col=idx%cols, row=Math.floor(idx/cols);
-    const x=72+col*118+(idx%2)*12, y=54+row*74;
+    if((e.ambiente.moedas||0)<spec.custo || e.ambiente.objetos.length>=50) return false;
+    const alvo={x:Math.min(560,Math.max(80,(p&&p.mesa?p.mesa.x:320))),y:250};
+    if(p && !p.ocupado){ p.ocupado=true; p.estado='andando'; p.ref.foco=`construindo ${spec.nome}`; await irPara(p,alvo); }
+    const agora=Date.now(), pos=pontoConstrucao(p,tipo,e.ambiente.objetos);
     e.ambiente.moedas-=spec.custo;
-    e.ambiente.objetos.push({id:uid('obj'),tipo,x,y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:Date.now()});
-    e.ambiente.ultimaConstrucao=Date.now();
-    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
+    const obj={id:uid('obj'),tipo,x:pos.x,y:pos.y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:agora,uso:0,ultimaInteracao:agora};
+    e.ambiente.objetos.push(obj); e.ambiente.ultimaConstrucao=agora;
+    e.ambiente.construtores=e.ambiente.construtores||[]; e.ambiente.construtores.unshift({t:agora,agente:p&&p.id,objeto:obj.id,tipo,motivo:String(motivo||'').slice(0,220)}); e.ambiente.construtores=e.ambiente.construtores.slice(0,80);
+    e.ambiente.planta=e.ambiente.planta||{versao:1,zonas:[],eventos:[]}; e.ambiente.planta.versao=Number(e.ambiente.planta.versao||1)+1;
+    e.ambiente.planta.eventos=e.ambiente.planta.eventos||[]; e.ambiente.planta.eventos.unshift({t:agora,tipo:'construcao',objeto:obj.id,agente:p&&p.id}); e.ambiente.planta.eventos=e.ambiente.planta.eventos.slice(0,80);
+    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); p.ref.ambiente=p.ref.ambiente||{}; p.ref.ambiente.ultimaAcao=agora; p.ref.ambiente.preferencias=p.ref.ambiente.preferencias||[]; if(!p.ref.ambiente.preferencias.includes(tipo)) p.ref.ambiente.preferencias.unshift(tipo); p.ref.ambiente.preferencias=p.ref.ambiente.preferencias.slice(0,8); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
     S.state.registrar(`${p?p.nome:'A equipe'} construiu ${spec.nome} no ambiente por ${S.fmt.brl(spec.custo)}.`,'ambiente',p&&p.id);
+    if(p){ p.ocupado=false; p.tarefa=null; p.estado='andando'; await irPara(p,assento(p)); p.estado='sentado'; }
     S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('negocio'); S.bus.emit('equipe'); return true;
+  }
+  function reorganizarAmbiente(p, objId, motivo){
+    const e=S.state.atual(); if(!e||!e.ambiente) return false;
+    const o=(e.ambiente.objetos||[]).find(x=>x.id===objId); if(!o) return false;
+    const spec=OBJETOS_AMBIENTE[o.tipo]||OBJETOS_AMBIENTE.planta, alvo=pontoConstrucao(p,o.tipo,(e.ambiente.objetos||[]).filter(x=>x.id!==o.id));
+    o.x=alvo.x; o.y=alvo.y; o.ultimaInteracao=Date.now(); o.movidoPor=p&&p.id; o.movidoMotivo=String(motivo||'').slice(0,180);
+    e.ambiente.planta=e.ambiente.planta||{versao:1,zonas:[],eventos:[]}; e.ambiente.planta.versao=Number(e.ambiente.planta.versao||1)+1;
+    if(p){ p.ref.pensamento=`Reorganizei ${spec.nome}: ${motivo||'melhor fluxo do espaço'}`.slice(0,240); logPessoa(p,`reorganizou ${spec.nome} no escritório. ${motivo||''}`,'ambiente'); }
+    S.state.registrar(`${p?p.nome:'A equipe'} reorganizou ${spec.nome} no ambiente.`,'ambiente',p&&p.id); S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('equipe'); return true;
+  }
+  function interagirAmbiente(p,objId){
+    const e=S.state.atual(); if(!e||!e.ambiente) return false; const o=(e.ambiente.objetos||[]).find(x=>x.id===objId); if(!o||!p) return false;
+    o.uso=Number(o.uso||0)+1; o.ultimaInteracao=Date.now(); p.ref.pensamento=`Interagi com ${o.nome}; isso faz parte do espaço de trabalho compartilhado.`; logPessoa(p,`usou ${o.nome} no ambiente.`,'ambiente'); S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('equipe'); return true;
   }
   function ambienteObjetos(){ const e=S.state.atual(); return e&&e.ambiente&&e.ambiente.objetos||[]; }
   const tiposAmbiente=()=>Object.keys(OBJETOS_AMBIENTE);
@@ -1301,7 +1343,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
               return;
             }
           } else if (d.acao === 'construir') {
-            construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            await construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            return;
+          } else if (d.acao === 'reorganizar') {
+            if (d.objeto) reorganizarAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            else { p.ref.pensamento='Não encontrei um objeto concreto para reorganizar; preservei o ambiente.'; S.state.gravar(); }
             return;
           } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
             // Essas ações têm valor organizacional mesmo sem gerar arquivo.
@@ -1354,6 +1400,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
           }
           return;
         }
+        if (d && d.acao === 'construir') { await construirAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
+        if (d && d.acao === 'reorganizar') { if (d.objeto) reorganizarAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
         if (d && d.acao !== 'esperar') {
           g.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão organizacional'}`.slice(0,500);
           logPessoa(g, `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada a partir do estado da empresa.'}`, 'autonomia');
@@ -1391,7 +1439,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     cx = cv.getContext('2d');
     if (cx) cx.imageSmoothingEnabled = false;
     const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
-    alturaLog = 74 + linhas * 96 + 96;
+    alturaLog = Math.max(410, 74 + linhas * 72 + 120);
     const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
     if (larguraCSS < 40) return;            // painel oculto: nada a redimensionar
     const escala = larguraCSS / larguraLog;
@@ -1418,6 +1466,12 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     cx.fillStyle = '#181E22'; cx.fillRect(14, 14, larguraLog-28, alturaLog-28);
     cx.fillStyle = '#20272B';
     for (let x = 24; x < larguraLog-20; x += 32) for (let y = 24; y < alturaLog-20; y += 32) cx.fillRect(x, y, 30, 30);
+    // Ilhas de uso: o escritório deixa de ser um fundo decorativo e passa a ter geografia.
+    Object.entries(AMB_ZONAS).forEach(([nome,z])=>{
+      cx.fillStyle = nome==='convivio' ? '#202B2B' : nome==='bemestar' ? '#202C27' : nome==='planejamento' ? '#29282B' : '#20272B';
+      cx.fillRect(z.x,z.y,z.w,z.h); cx.strokeStyle='#30393D'; cx.lineWidth=1; cx.strokeRect(z.x,z.y,z.w,z.h);
+      cx.fillStyle='#667075'; cx.font='600 8px monospace'; cx.textAlign='left'; cx.fillText(nome.toUpperCase(),z.x+7,z.y+12);
+    });
     cx.fillStyle = '#2A3237'; cx.fillRect(18,18,larguraLog-36,5); cx.fillRect(18,18,5,alturaLog-36); cx.fillRect(larguraLog-23,18,5,alturaLog-36);
     // janela
     cx.fillStyle='#25353A'; cx.fillRect(470,22,140,48); cx.fillStyle='#77A6A8'; cx.fillRect(478,30,124,32); cx.fillStyle='#B8D6C7'; cx.fillRect(482,34,116,24);
@@ -1425,6 +1479,10 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     // tapete
     cx.fillStyle='#1D2930'; cx.fillRect(262,246,188,72); cx.fillStyle='#283840'; cx.fillRect(270,254,172,56);
 
+    // Pequenos detalhes fixos dão escala de mundo sem imagens externas.
+    cx.fillStyle='#39464A'; cx.fillRect(42,42,18,8); cx.fillRect(46,50,10,3);
+    cx.fillStyle='#5B5140'; cx.fillRect(612,74,8,90); cx.fillRect(620,78,4,86);
+    cx.fillStyle='#26353A'; cx.fillRect(34,206,34,3); cx.fillRect(602,206,22,3);
     // Objetos persistentes construídos pelos agentes.
     const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
     objs.forEach(o=>{
@@ -1540,6 +1598,15 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
         mexeu = true;
       }
       if (p.ocupado) mexeu = true;
+      // Objetos passam a fazer parte da rotina física: ao trabalhar perto de
+      // uma bancada/quadro/estante, registra-se uso real do espaço sem chamar IA.
+      if (!p.ocupado && p.estado === 'sentado') {
+        const e=S.state.atual(), objs=e&&e.ambiente&&e.ambiente.objetos||[];
+        const perto=objs.find(o=>Math.hypot((o.x||0)-p.pos.x,(o.y||0)-p.pos.y)<28);
+        if(perto && Date.now()-(p._ultimoUsoObjeto||0)>90000){
+          p._ultimoUsoObjeto=Date.now(); interagirAmbiente(p,perto.id);
+        }
+      }
     });
     return mexeu;
   }
@@ -1560,8 +1627,11 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     const escala = larguraLog / r.width;
     const x = (ev.clientX - r.left) * escala, y = (ev.clientY - r.top) * escala;
     const alvo = rt.find(p => Math.hypot(p.pos.x - x, p.pos.y - y) < 24);
-    selecionado = alvo ? alvo.id : null;
-    return alvo;
+    if (alvo) { selecionado = alvo.id; return alvo; }
+    const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
+    const objeto=objs.find(o=>Math.hypot((o.x||0)-x,(o.y||0)-y)<Math.max(22,((OBJETOS_AMBIENTE[o.tipo]||{}).w||24)/2));
+    selecionado = null;
+    return objeto ? { objeto } : null;
   }
 
   S.studio = {
@@ -1571,7 +1641,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     pessoas: () => rt, pessoa, gerente,
     novaTarefa, tarefasAbertas, executar, avaliarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
-    contratar, demitir, custoContratacao, fundar, construirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
+    contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };

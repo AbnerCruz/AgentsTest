@@ -1,3 +1,12 @@
+## Correção v39 — OpenRouter + GPT-OSS
+
+- Corrigido o diagnóstico incorreto que dizia “A Groq não devolveu texto” mesmo quando o provedor ativo era o OpenRouter.
+- O GPT-OSS pode terminar uma resposta com `finish_reason=length` quando o orçamento de completion é consumido pelo raciocínio antes da resposta final. O motor agora faz **uma única recuperação automática**, reduzindo o esforço de raciocínio e aumentando o teto apenas para decisões/coordenação.
+- Para OpenRouter, o request usa o parâmetro atual `reasoning: { effort, exclude }`; para Groq, mantém `reasoning_effort`. Isso evita depender de um campo de outro provedor.
+- Funcionários usam raciocínio baixo para decisões rotineiras, priorizando custo e velocidade. O maestro continua podendo usar raciocínio alto.
+- O contador local de uso foi versionado para evitar misturar métricas antigas de uma implementação diferente.
+- Service worker atualizado para forçar a entrada da correção no cache do navegador.
+
 # Estúdio — simulação de equipe com projetos persistentes
 
 Um ambiente virtual em que agentes de IA trabalham autonomamente dentro de projetos contínuos. O usuário observa a equipe, os processos e os artefatos; não precisa aceitar contratos, encomendar entregas ou ficar jogando.
@@ -186,3 +195,14 @@ A versão estática inclui `agency.js` no Service Worker e usa o cache `estudio-
 - Ambiente persistente em pixel art: agentes podem construir mesas, plantas, estantes, luminárias, sofás, quadros e bancadas quando houver valor real e orçamento.
 - O ambiente, as construções, comissões e recompensas ficam persistidos junto da empresa.
 - Prioridade de custo: decisões individuais são compactas e espaçadas; a produção continua usando o modelo configurado para qualidade, enquanto o maestro usa o modelo robusto.
+
+
+## v38 — Mundo vivo
+
+- Escritório pixel-art com zonas funcionais, mobiliário persistente e pequenas interações físicas.
+- Funcionários podem construir e reorganizar o espaço como consequência de decisões próprias.
+- Objetos guardam uso, autor e histórico básico; o ambiente também tem versão/planta persistente.
+- A construção inclui deslocamento do agente até a área de trabalho e retorno à mesa.
+- Cliques no cenário identificam pessoas e objetos.
+- Modelo econômico: agentes usam o modelo de decisão econômico; o maestro estratégico usa o modelo robusto configurado.
+- A prioridade continua sendo baixo custo, baixa frequência de chamadas e nenhum trabalho fictício quando a IA está indisponível.
