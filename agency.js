@@ -46,6 +46,7 @@
         `PROJETO: ${pr ? pr.nome : 'nenhum'} | objetivo: ${pr ? pr.objetivo : e.missao} | status: ${pr ? pr.status : 'sem projeto'}`,
         `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}, q${a.qualidade||0}]`).join('; ') : 'nenhum'}`,
         `TRABALHO ABERTO: ${tarefas.length ? tarefas.map(t => `${t.id}:${t.titulo}[${t.status}, responsável=${t.para||'livre'}, base=${t.baseArquivoId||'nenhuma'}]`).join('; ') : 'nenhum'}`,
+        `CAPACIDADES DE PRODUÇÃO: ${(() => { try { const n = S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99; return (S.factory.disponiveis(n)||[]).map(k => `${k.id}:${k.nome}[${k.especialidade}]`).join('; ') || 'nenhuma'; } catch (_) { return 'indisponíveis'; } })()}`,
         `EQUIPE: ${equipeContexto(e)}`,
         `MEMÓRIA DE ${p.nome}: ${memorias.slice(-8).map(m => typeof m === 'string' ? m : (m.texto || '')).filter(Boolean).join(' | ') || 'nenhuma'}`,
         `DECISÕES RECENTES: ${decisoes || 'nenhuma'}`,
@@ -74,6 +75,7 @@
       abordagem: max(c.abordagem, 320),
       risco: max(c.risco, 240),
       objeto: max(c.objeto, 40),
+      especialidade: max(c.especialidade, 40),
       projetoId: ctx.projeto ? ctx.projeto.id : '',
       em: agora()
     };
@@ -111,7 +113,10 @@ Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, 
 - reorganizar: só quando mover um objeto existente resolver um problema concreto de fluxo, colaboração ou uso do espaço.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
-Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
+Se criar_tarefa, escolha obrigatoriamente uma capacidade de produção listada em CAPACIDADES DE PRODUÇÃO e use o id exato dela. O kit é uma ferramenta, não um roteiro. Prefira evoluir um artefato existente quando isso trouxer valor.
+REGRA DE FLUXO: se existe projeto ativo e TRABALHO ABERTO está 'nenhum', a empresa precisa avançar: escolha criar_tarefa e defina uma entrega concreta. Não escolha estudar, revisar ou esperar apenas porque o contexto ainda é pequeno.
+REGRA DE CONCRETUDE: revisar só é válido quando BASE aponta para um artefato real; estudar só é válido quando existe uma lacuna de conhecimento concreta que bloqueia uma ação posterior; esperar só é válido quando há uma dependência real ou quando outra pessoa precisa agir primeiro.
+Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
 
 Retorne SOMENTE:
 ACAO: <uma das ações>

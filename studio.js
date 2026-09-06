@@ -1055,6 +1055,70 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.state.gravar(); S.bus.emit('equipe'); S.bus.emit('gerencia');
   }
 
+  /* ---------- ponte decisão -> execução ----------
+     Pensar não é produzir. Toda decisão gerencial que tenha uma consequência
+     operacional deve atravessar esta ponte: decisão -> tarefa -> responsável ->
+     execução real. A gerente não pode terminar um ciclo apenas com uma frase.
+  */
+  function kitParaPessoa(p, kits) {
+    if (!p) return kits[0] || null;
+    return kits.find(k => k.especialidade === p.especialidade)
+      || kits.find(k => k.especialidade === 'geral')
+      || kits[0] || null;
+  }
+
+  function pessoaDisponivelPara(papel, especialidade) {
+    const candidatos = rt.filter(x => x.papel === papel && !x.ocupado && x.estado !== 'pausa' && Number(x.ref.energia) > 20);
+    return candidatos.find(x => x.especialidade === especialidade) || candidatos.find(x => x.especialidade === 'geral') || candidatos[0] || null;
+  }
+
+  async function despacharTarefa(tarefa, preferido) {
+    if (!tarefa) return false;
+    const e = S.state.atual();
+    if (!e || !S.ai.disponivel()) return false;
+    const alvo = (preferido && preferido.papel === 'func' && !preferido.ocupado && Number(preferido.ref.energia) > 20)
+      ? preferido
+      : (tarefa.para ? rtById(tarefa.para) : null) || pessoaDisponivelPara('func', (S.factory.porId(tarefa.kit)||{}).especialidade);
+    if (!alvo || alvo.ocupado) return false;
+    tarefa.para = alvo.id;
+    tarefa.status = 'aberta';
+    S.state.gravar();
+    logPessoa(alvo, `recebeu uma decisão da gerência e vai transformá-la em produção: "${tarefa.titulo}".`, 'handoff');
+    S.state.registrar(`${alvo.nome} recebeu a execução de ${tarefa.titulo}.`, 'info', alvo.id);
+    S.bus.emit('trabalho'); S.bus.emit('equipe');
+    await executar(alvo, tarefa);
+    return true;
+  }
+
+  async function materializarDecisaoGerencia(g, d) {
+    const e = S.state.atual();
+    if (!e || !g || !d) return false;
+    const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+    if (!projeto) return false;
+    const nivel = S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99;
+    const kits = S.factory.disponiveis(nivel) || [];
+    if (!kits.length) return false;
+    const alvo = d.para ? e.equipe.find(f => f.id === d.para && f.papel === 'func') : null;
+    const pessoa = alvo || pessoaDisponivelPara('func', d.especialidade);
+    const base = d.base ? e.arquivos.find(a => a.id === d.base) : null;
+    const kit = S.factory.porId(d.kit) || (base && base.kit && S.factory.porId(base.kit)) || kitParaPessoa(pessoa, kits);
+    if (!kit) return false;
+    const titulo = String(d.titulo || `${kit.nome}: próximo avanço de ${projeto.nome}`).trim().slice(0,180);
+    const briefing = String(d.briefing || d.abordagem || d.motivo || `Avançar concretamente o objetivo do projeto: ${projeto.objetivo}`).trim().slice(0,500);
+    const t = novaTarefa({ titulo, kit: kit.id, briefing, para: pessoa ? pessoa.id : null, projectId: projeto.id, baseArquivoId: base ? base.id : (d.base || null), origem: 'decisão executiva da gerência' });
+    if (!t) return false;
+    g.ref.foco = `Delegando: ${t.titulo}`;
+    g.ref.pensamento = `Decisão convertida em execução: ${t.titulo}`.slice(0,500);
+    S.state.registrar(`${g.nome} converteu sua decisão em execução: ${t.titulo}.`, 'execução', g.id);
+    S.state.gravar();
+    const executou = await despacharTarefa(t, pessoa);
+    if (!executou) {
+      logPessoa(g, `registrou "${t.titulo}" para execução assim que houver um funcionário disponível.`, 'handoff');
+      S.state.gravar();
+    }
+    return true;
+  }
+
   /* ---------- reuniões internas presenciais ---------- */
   async function reuniaoInterna(motivo, opcoes) {
     const e=S.state.atual(); if(!e) return null;
@@ -1202,13 +1266,52 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       if (r) {
         const c=r.campos||{}; const resposta=String(c.resposta||'').trim();
         if(resposta){ registrarReuniao(gerenteAtual.nome,resposta,'resposta'); gerenteAtual.pensamento=resposta.slice(0,220); gerenteAtual.memoria=(gerenteAtual.memoria||[]).concat({texto:`Reunião: ${msg.slice(0,110)} → ${resposta.slice(0,120)}`,t:Date.now()}).slice(-12); falas++; }
-        ['1','2'].forEach(n=>{
+        let ordensCriadas = 0;
+        for (const n of ['1','2']) {
           const kit=S.factory.porId(String(c[`ordem${n}_kit`]||'').trim());
           const para=e.equipe.find(x=>x.id===String(c[`ordem${n}_para`]||'').trim());
           const brief=String(c[`ordem${n}_brief`]||'').trim();
           const projetoId=String(c[`ordem${n}_projeto`]||'').trim() || ((e.projetos.find(x=>x.status==='ativo')||e.projetos[0]||{}).id);
-          if(kit&&brief){ const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'}); if(t) registrarReuniao('Sistema',`Ordem registrada: ${t.titulo}${para?' → '+para.nome:' → distribuição automática'}.`,'ordem'); }
-        });
+          if(kit&&brief){
+            const t=novaTarefa({titulo:`${kit.nome}: ${brief}`,kit:kit.id,briefing:brief,para:para?para.id:null,projectId:projetoId,origem:'reunião'});
+            if(t){
+              ordensCriadas++;
+              registrarReuniao('Sistema',`Ordem registrada e encaminhada: ${t.titulo}${para?' → '+para.nome:' → distribuição automática'}.`,'ordem');
+              await despacharTarefa(t, para);
+            }
+          }
+        }
+        // Se a gerente respondeu à ordem mas o modelo não preencheu os campos
+        // estruturados, fazemos uma segunda passagem curta para não deixar a
+        // decisão morrer na ata. A resposta continua sendo conversa; esta chamada
+        // existe exclusivamente para converter intenção em execução verificável.
+        if (ordem && ordensCriadas === 0 && S.ai.disponivel()) {
+          const projetoAtivo = e.projetos.find(x=>x.status==='ativo') || e.projetos[0];
+          const nivel = S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99;
+          const kits = S.factory.disponiveis(nivel) || [];
+          const r2 = await S.ai.perguntar({
+            sistema:`Você é o braço operacional da gerente de ${e.nome}. Converta a ordem do dono em UMA primeira entrega executável. Use apenas o projeto e kits fornecidos. Não explique.
+PROJETO=${projetoAtivo?projetoAtivo.nome:'principal'} | OBJETIVO=${projetoAtivo?projetoAtivo.objetivo:e.missao}
+KITS=${kits.map(k=>`${k.id}:${k.nome}[${k.especialidade}]`).join('; ')}`,
+            pedido:`ORDEM DO DONO: ${msg}
+RETORNE SOMENTE:
+KIT: <id exato de um kit>
+PARA: <id exato de um funcionário ou vazio>
+BRIEF: <entrega concreta em até 45 palavras>`,
+            tokens:220, agente:gerenteAtual.nome, motivo:'conversão de ordem em execução'
+          });
+          const c2=r2&&r2.campos||{};
+          const kit2=S.factory.porId(String(c2.KIT||c2.kit||'').trim()) || kitParaPessoa(null,kits);
+          const para2=e.equipe.find(x=>x.id===String(c2.PARA||c2.para||'').trim() && x.papel==='func') || pessoaDisponivelPara('func',kit2&&kit2.especialidade);
+          const brief2=String(c2.BRIEF||c2.brief||'').trim();
+          if(kit2&&brief2&&projetoAtivo){
+            const t2=novaTarefa({titulo:`${kit2.nome}: ${brief2}`,kit:kit2.id,briefing:brief2,para:para2?para2.id:null,projectId:projetoAtivo.id,origem:'ordem direta do dono'});
+            if(t2){
+              registrarReuniao('Sistema',`A gerente converteu a ordem em execução: ${t2.titulo}${para2?' → '+para2.nome:''}.`,'ordem');
+              await despacharTarefa(t2, para2);
+            }
+          }
+        }
       }
     }
 
@@ -1329,9 +1432,14 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
           if (d.acao === 'executar_tarefa' && d.tarefa) {
             const t = e.tarefas.find(x => x.id === d.tarefa && x.status === 'aberta' && dependenciasOK(x));
             if (t) { S.agency.marcarAcao(p, d); await executar(p, t); return; }
-          } else if (d.acao === 'criar_tarefa' && projeto && d.kit && S.factory.porId(d.kit) && d.titulo && d.briefing) {
+          } else if (d.acao === 'criar_tarefa' && projeto) {
+            const kits = S.factory.disponiveis(S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99) || [];
+            const kit = S.factory.porId(d.kit) || kits.find(k => k.especialidade === p.especialidade) || kits[0];
+            const titulo = String(d.titulo || '').trim() || `Desenvolver próximo avanço de ${projeto.nome}`;
+            const briefing = String(d.briefing || d.abordagem || d.motivo || `Avançar o objetivo do projeto: ${projeto.objetivo}`).trim();
+            if (kit && briefing) {
             const t = novaTarefa({
-              titulo: d.titulo, kit: d.kit, briefing: d.briefing,
+              titulo, kit: kit.id, briefing,
               para: p.id, projectId: projeto.id, baseArquivoId: d.base || null, origem: 'decisão autônoma'
             });
             if (t) {
@@ -1342,6 +1450,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
               await executar(p, t);
               return;
             }
+            }
           } else if (d.acao === 'construir') {
             await construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
             return;
@@ -1350,19 +1459,40 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
             else { p.ref.pensamento='Não encontrei um objeto concreto para reorganizar; preservei o ambiente.'; S.state.gravar(); }
             return;
           } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
-            // Essas ações têm valor organizacional mesmo sem gerar arquivo.
-            // O modo sem IA não simula esse tipo de decisão.
+            // Não transformar uma decisão da IA em um falso 'modo sem IA'.
+            // Se a IA está disponível e a pessoa escolheu uma ação sem entrega,
+            // a ação precisa ou gerar trabalho concreto, ou ser uma exceção curta.
+            // Revisão de artefato vira uma tarefa de evolução; estudo só permanece
+            // estudo quando existe uma lacuna concreta; colaborar/planejar apenas
+            // aguardam quando há dependência real.
+            if (S.ai.disponivel() && (d.acao === 'revisar' || d.acao === 'estudar')) {
+              const base = d.base ? e.arquivos.find(a => a.id === d.base) : null;
+              const kits = projeto ? (S.factory.disponiveis(S.state.nivelDe ? S.state.nivelDe(e.xp || 0) : 99) || []) : [];
+              const kitBase = base && base.kit ? S.factory.porId(base.kit) : null;
+              const kit = S.factory.porId(d.kit) || kitBase || kits.find(k => k.especialidade === p.especialidade) || kits[0];
+              if (projeto && kit && (base || d.titulo || d.acao === 'estudar')) {
+                const titulo = String(d.titulo || (base ? `Evoluir ${base.nome}` : `Desenvolver avanço para ${projeto.nome}`)).trim().slice(0,180);
+                const briefing = String(d.briefing || d.abordagem || d.motivo || `Desenvolver uma melhoria concreta para ${projeto.objetivo}, preservando o que já existe.`).trim().slice(0,500);
+                const t = novaTarefa({ titulo, kit: kit.id, briefing, para: p.id, projectId: projeto.id, baseArquivoId: base ? base.id : null, origem: `decisão autônoma: ${d.acao}` });
+                if (t) {
+                  S.agency.marcarAcao(p, d); p.ref.foco = t.titulo;
+                  logPessoa(p, `transformou ${d.acao} em trabalho concreto: "${t.titulo}".`, 'autonomia');
+                  await executar(p, t);
+                  return;
+                }
+              }
+            }
             const frase = {
-              revisar: 'revisando o acervo e procurando melhorias concretas',
-              estudar: 'estudando o contexto do projeto para preparar uma ação futura',
+              revisar: 'revisando uma entrega existente e procurando uma melhoria concreta',
+              estudar: 'estudando uma lacuna concreta que pode destravar o próximo trabalho',
               colaborar: d.para ? `alinhando uma dependência com ${d.para}` : 'observando onde uma colaboração seria útil',
               planejar: 'organizando uma decisão de escopo antes de agir',
-              esperar: 'aguardando porque uma ação agora teria pouco valor'
+              esperar: 'aguardando porque existe uma dependência real'
             }[d.acao];
             p.ref.foco = frase;
             p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão consciente'}`.slice(0, 500);
             logPessoa(p, frase + (d.motivo ? ` — ${d.motivo}` : '.'), 'autonomia');
-            if (d.acao === 'estudar' || d.acao === 'revisar') await atividadeSemIA(p, { titulo: d.base ? `Contextualizar ${d.base}` : 'Estudo do projeto', projectId: projeto && projeto.id });
+            if (!S.ai.disponivel()) await atividadeSemIA(p, { titulo: d.base ? `Contextualizar ${d.base}` : 'Preparar próximo passo', projectId: projeto && projeto.id });
             else { S.state.gravar(); S.bus.emit('equipe'); }
             return;
           }
@@ -1388,24 +1518,18 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
 
       if (S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
         const d = await S.agency.decidir(g);
-        if (d && d.acao === 'criar_tarefa' && d.kit && d.titulo && d.briefing) {
-          const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
-          const alvo = d.para ? e.equipe.find(f => f.id === d.para && f.papel === 'func') : null;
-          const t = novaTarefa({ titulo:d.titulo, kit:d.kit, briefing:d.briefing, para:alvo ? alvo.id : null, projectId:projeto && projeto.id, baseArquivoId:d.base || null, origem:'decisão autônoma da gerência' });
-          if (t) {
-            g.ref.foco = t.titulo;
-            g.ref.pensamento = `${d.motivo || d.abordagem || 'A equipe precisa de uma próxima contribuição concreta.'}`.slice(0,500);
-            S.state.registrar(`${g.nome} decidiu autonomamente a próxima frente: ${t.titulo}.`, 'info', g.id);
-            S.state.gravar();
-          }
-          return;
-        }
         if (d && d.acao === 'construir') { await construirAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
         if (d && d.acao === 'reorganizar') { if (d.objeto) reorganizarAmbiente(g, d.objeto, d.motivo || d.abordagem); return; }
-        if (d && d.acao !== 'esperar') {
-          g.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão organizacional'}`.slice(0,500);
-          logPessoa(g, `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada a partir do estado da empresa.'}`, 'autonomia');
+        if (d && d.acao === 'esperar') {
+          g.ref.pensamento = `Aguardando uma dependência real antes de mover a equipe: ${d.motivo || d.abordagem || 'nenhuma ação segura agora.'}`.slice(0,500);
+          logPessoa(g, `aguardou por uma dependência real; não fabricou trabalho.`, 'autonomia');
           S.state.gravar(); S.bus.emit('equipe');
+          return;
+        }
+        if (d && ['criar_tarefa','revisar','estudar','colaborar','planejar'].includes(d.acao)) {
+          // A gerente é o elo executivo: sua deliberação nunca termina apenas
+          // como texto. Ela delega uma consequência operacional e dispara a execução.
+          await materializarDecisaoGerencia(g, d);
           return;
         }
       }
