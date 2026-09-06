@@ -227,7 +227,10 @@
           <input id="groqKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
           <label for="openrouterKeyInput" style="margin-top:10px">Chave OpenRouter · fallback pago</label>
           <input id="openrouterKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
-          <p class="hint">O Estúdio tenta a Groq primeiro. Quando a cota real da Groq acabar, muda sozinho para o OpenRouter. A chave do OpenRouter é consultada para sincronizar o limite restante.</p>
+          <label for="openrouterManagementKeyInput" style="margin-top:10px">Management Key OpenRouter · sincronização do saldo</label>
+          <input id="openrouterManagementKeyInput" type="password" placeholder="sk-or-... (Management Key)" autocomplete="off" spellcheck="false">
+          <p class="hint">A API key faz as chamadas. A <strong>Management Key</strong> consulta o crédito real da conta pelo endpoint de créditos. Assim o Estúdio sabe quanto há de verdade na conta, mesmo que você gaste no OpenRouter por outro aplicativo.</p>
+          <p class="hint" style="color:#E4A03E">Segurança: esta é uma aplicação estática no navegador. A Management Key fica somente no armazenamento local deste aparelho; nunca coloque uma chave de gerenciamento em um site público que você não controla.</p>
         </div>
         <div class="field" id="tierField">
           <label for="tierSel">Plano da sua conta Groq</label>
@@ -773,6 +776,7 @@ window.S = window.S || {};
   };
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
   const K_CHAVE_OR = 'openrouter-api-key';
+  const K_OR_MGMT = 'openrouter-management-key';
   const K_CFG = 'estudio-ia-cfg';
   const K_USO = 'estudio-ia-usage-v3';
   const K_ORCAMENTO = 'estudio-ia-budget-v1';
@@ -867,6 +871,8 @@ window.S = window.S || {};
     groq: S.local.get(K_CHAVE, '') || '',
     openrouter: S.local.get(K_CHAVE_OR, '') || ''
   };
+  let openRouterManagementKey = S.local.get(K_OR_MGMT, '') || '';
+  let openRouterCreditsTimer = null;
   const prov = () => PROVEDORES[cfg.provedor];
 
 
@@ -950,7 +956,7 @@ window.S = window.S || {};
     ultimaAutonoma: 0,
     chamadas: [],
     agentes: Object.create(null),
-    provedores: { groq: { bloqueadaAte: 0, ultimo429: 0, headers: null, status: 'aguardando' }, openrouter: { bloqueadaAte: 0, ultimoSync: 0, status: 'aguardando', limiteRestante: null, uso: null, usoDiario: null, usoMensal: null } }
+    provedores: { groq: { bloqueadaAte: 0, ultimo429: 0, headers: null, status: 'aguardando' }, openrouter: { bloqueadaAte: 0, ultimoSync: 0, ultimoSyncCreditos: 0, status: 'aguardando', limiteRestante: null, uso: null, usoDiario: null, usoMensal: null, saldoConta: null, totalCreditos: null, totalUsoConta: null, erroCreditos: null } }
   };
   function lane(id) {
     const k = String(id || 'estudio');
@@ -1032,6 +1038,29 @@ window.S = window.S || {};
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   }
+  async function sincronizarOpenRouterCreditos() {
+    const o=stateProvedor('openrouter');
+    if(!openRouterManagementKey) return null;
+    try {
+      const r=await fetch('https://openrouter.ai/api/v1/credits',{headers:{Authorization:'Bearer '+openRouterManagementKey}});
+      const d=await r.json().catch(()=>null);
+      if(!r.ok) throw new Error((d&&d.error&&d.error.message)||('HTTP '+r.status));
+      const x=d&&d.data||d||{};
+      const total=numeroOpcional(x.total_credits);
+      const usado=numeroOpcional(x.total_usage);
+      o.totalCreditos=total;
+      o.totalUsoConta=usado;
+      o.saldoConta=(total!==null && usado!==null) ? Math.max(0,total-usado) : null;
+      o.ultimoSyncCreditos=Date.now();
+      o.erroCreditos=null;
+      if(o.saldoConta!==null && o.saldoConta<=0) o.status='esgotado';
+      else if(o.status!=='esgotado' || o.saldoConta>0) o.status='disponivel';
+      return x;
+    } catch(e) {
+      o.erroCreditos=String(e.message||e);
+      return null;
+    }
+  }
   async function sincronizarOpenRouter() {
     if(!chaves.openrouter) return null;
     const o=stateProvedor('openrouter');
@@ -1050,9 +1079,8 @@ window.S = window.S || {};
       o.uso=numeroOpcional(x.usage);
       o.usoDiario=numeroOpcional(x.usage_daily);
       o.usoMensal=numeroOpcional(x.usage_monthly);
-      /* Só bloqueia por limite de chave quando o próprio OpenRouter
-         informou que existe um limite. Null = ilimitado. */
       if(limite !== null && restante !== null && restante <= 0) o.status='esgotado';
+      await sincronizarOpenRouterCreditos();
       return x;
     } catch(e) {
       o.status='indisponivel';
@@ -1060,13 +1088,23 @@ window.S = window.S || {};
       return null;
     }
   }
+  function saldoOpenRouterDisponivel() {
+    const o=stateProvedor('openrouter');
+    const a=numeroOpcional(o.saldoConta);
+    const k=o.temLimiteChave===true ? numeroOpcional(o.limiteRestante) : null;
+    if(a===null && k===null) return null;
+    if(a===null) return k;
+    if(k===null) return a;
+    return Math.min(a,k);
+  }
 
   function contabilizar(modelo, dados, ms, provedorUsado) {
     const q = usoHoje();
     const u = (dados && dados.usage) || {};
     const pin=Number(u.prompt_tokens || 0), pout=Number(u.completion_tokens || 0), total=Number(u.total_tokens || pin+pout);
     const pvr=provedorUsado || cfg.provedor;
-    const custo=estimarCusto(pvr,modelo,pin,pout);
+    const custoInformado = (pvr==='openrouter') ? numeroOpcional(u.cost) : null;
+    const custo=(custoInformado!==null) ? custoInformado : estimarCusto(pvr,modelo,pin,pout);
     q.requisicoes += 1; q.entrada += pin; q.saida += pout; q.tokens += total;
     const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0, entrada:0, saida:0, custo:0 };
     m.requisicoes += 1; m.tokens += total; m.entrada += pin; m.saida += pout; m.custo += custo;
@@ -1181,6 +1219,15 @@ window.S = window.S || {};
     if (provedorUsado === 'openrouter' && orStatus.temLimiteChave === true && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) < custoEstimado) {
       const er=new Error(`Saldo/limite real do OpenRouter insuficiente para esta chamada (restante ~US$ ${Number(orStatus.limiteRestante).toFixed(4)}).`); er.cota=true; throw er;
     }
+    if (provedorUsado === 'openrouter') {
+      const saldoConta=numeroOpcional(orStatus.saldoConta);
+      if (saldoConta !== null && saldoConta <= 0) {
+        const er=new Error('Créditos da conta OpenRouter esgotados. Recarregue a conta para continuar.'); er.cota=true; throw er;
+      }
+      if (saldoConta !== null && custoEstimado > saldoConta) {
+        const er=new Error(`Crédito real da conta OpenRouter insuficiente para esta chamada (saldo ~US$ ${saldoConta.toFixed(4)}).`); er.cota=true; throw er;
+      }
+    }
     if (custoEstimado > 0 && (custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
       estado.orcamentoPreventivo=true;
       const er = new Error(`Orçamento de IA do período de 30 dias quase esgotado; chamada não iniciada para preservar o limite.`);
@@ -1210,7 +1257,10 @@ window.S = window.S || {};
       let dados=null; try{dados=await resp.json();}catch(_){}
       lerHeaders(resp, provedorUsado);
       const ms=Date.now()-inicio;
-      if(resp.ok && dados && dados.usage) contabilizar(modelo,dados,ms,provedorUsado);
+      if(resp.ok && dados && dados.usage) {
+        contabilizar(modelo,dados,ms,provedorUsado);
+        if(provedorUsado==='openrouter') void sincronizarOpenRouterCreditos();
+      }
 
       if(!resp.ok){
         const msg=(dados&&dados.error&&dados.error.message)||`${provInfo.nome} respondeu HTTP ${resp.status}.`;
@@ -1342,6 +1392,18 @@ window.S = window.S || {};
     situar(pronta()?'pronta':'off', pronta()?'IA pronta':'IA desligada', pronta()?'roteamento automático · Groq grátis → OpenRouter':'configure Groq e/ou OpenRouter');
   }
 
+  function salvarChaveGerenciamentoOpenRouter(chaveMgmt) {
+    const k=String(chaveMgmt||'').trim();
+    if(k && k.length < 20) throw new Error('A Management Key parece curta demais. Cole a chave completa do OpenRouter.');
+    openRouterManagementKey=k;
+    if(k) S.local.set(K_OR_MGMT,k); else S.local.del(K_OR_MGMT);
+    if(openRouterCreditsTimer) { clearInterval(openRouterCreditsTimer); openRouterCreditsTimer=null; }
+    if(k) openRouterCreditsTimer=setInterval(() => { if(document.visibilityState === 'visible') void sincronizarOpenRouterCreditos(); }, 60000);
+    const o=stateProvedor('openrouter');
+    o.saldoConta=null; o.totalCreditos=null; o.totalUsoConta=null; o.erroCreditos=null;
+    return sincronizarOpenRouterCreditos();
+  }
+
   function salvarCfg(novaChave, pensamento, producao, limiteTokensDia, orcamentoUSD, limiteDiarioUSD, diarioAutomatico, modoOrcamento, roteamento) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
@@ -1382,7 +1444,7 @@ window.S = window.S || {};
     const ritmo=diasRestantes>0?restante/diasRestantes:0;
     const diario=Number(q.limiteUSD||limiteDiarioCalculado());
     const gastoDia=custoDoDia();
-    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:gastoDia,custoDiaUSD:gastoDia,limiteDiarioUSD:diario,restanteDiaUSD:Math.max(0,diario-gastoDia),diarioAutomatico:cfg.diarioAutomatico,modoOrcamento:cfg.modoOrcamento,custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:0,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),esgotadoDia:(cfg.modoOrcamento !== 'intensivo' && orcamentoDiarioEsgotado()),tier:cfg.tier,roteamento:cfg.roteamento,limiteTokensDia:cfg.limiteTokensDia};
+    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:gastoDia,custoDiaUSD:gastoDia,limiteDiarioUSD:diario,restanteDiaUSD:Math.max(0,diario-gastoDia),diarioAutomatico:cfg.diarioAutomatico,modoOrcamento:cfg.modoOrcamento,custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:0,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),esgotadoDia:(cfg.modoOrcamento !== 'intensivo' && orcamentoDiarioEsgotado()),tier:cfg.tier,roteamento:cfg.roteamento,limiteTokensDia:cfg.limiteTokensDia,openrouterSaldo:stateProvedor('openrouter').saldoConta,openrouterLimiteChave:stateProvedor('openrouter').limiteRestante,openrouterSaldoEfetivo:saldoOpenRouterDisponivel(),openrouterManagementConfigured:Boolean(openRouterManagementKey),openrouterSync:stateProvedor('openrouter').ultimoSyncCreditos};
   }
 
   S.ai = {
@@ -1404,10 +1466,10 @@ window.S = window.S || {};
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
-    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, salvarChaves, limiteTokensDia,
+    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, salvarChaves, salvarChaveGerenciamentoOpenRouter, limiteTokensDia,
     orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoDiarioEsgotado, orcamentoIndisponivel, restanteUSD, restanteDiaUSD, custoPeriodo, custoDoDia,
-    sincronizarFornecedor: sincronizarOpenRouter,
-    statusFornecedores: () => ({ groq: stateProvedor('groq'), openrouter: stateProvedor('openrouter'), roteamento: cfg.roteamento }),
+    sincronizarFornecedor: sincronizarOpenRouter, sincronizarCreditosOpenRouter: sincronizarOpenRouterCreditos,
+    statusFornecedores: () => ({ groq: stateProvedor('groq'), openrouter: stateProvedor('openrouter'), roteamento: cfg.roteamento, openrouterSaldo: saldoOpenRouterDisponivel(), openrouterManagementConfigured: Boolean(openRouterManagementKey) }),
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
       S.local.setJson(K_CFG, cfg);
@@ -1416,7 +1478,16 @@ window.S = window.S || {};
     temChave: () => Boolean(chave()),
     chaveMascarada: () => (chave() ? chave().slice(0, 7) + '••••••' + chave().slice(-4) : ''),
     pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave() ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave() ? 'IA pronta' : 'IA desligada')); },
-    iniciar() { if (chave()) situar('pronta', 'IA pronta', `chave ${prov().rotulo} carregada deste aparelho`); }
+    iniciar() {
+      if (chave()) situar('pronta', 'IA pronta', `chave ${prov().rotulo} carregada deste aparelho`);
+      if (openRouterManagementKey) void sincronizarOpenRouterCreditos();
+      if (openRouterManagementKey) {
+        void sincronizarOpenRouterCreditos();
+        openRouterCreditsTimer = setInterval(() => {
+          if (document.visibilityState === 'visible') void sincronizarOpenRouterCreditos();
+        }, 60000);
+      }
+    }
   };
   void sleep;
 })(window.S);
@@ -3443,9 +3514,11 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
     const tierField = $('#tierField');
     if (tierField) tierField.hidden = !auto && pv !== 'groq';
-    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput');
-    if(gki) gki.placeholder=S.ai.statusFornecedores().groq.status==='disponivel'?'gsk_••••••':'gsk_...';
-    if(ori) ori.placeholder=S.ai.statusFornecedores().openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
+    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput');
+    const ps=S.ai.statusFornecedores();
+    if(gki) gki.placeholder=ps.groq.status==='disponivel'?'gsk_••••••':'gsk_...';
+    if(ori) ori.placeholder=ps.openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
+    if(mgmt) mgmt.placeholder=ps.openrouterManagementConfigured?'Management Key · ••••••':'sk-or-... (Management Key)';
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -3493,7 +3566,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Modo de provedor</span><b>${o.roteamento === 'automatico' ? 'Groq grátis → OpenRouter' : o.provedor}</b></div>
-        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter sincronizado</span><b>${r.status}${r.temLimiteChave && r.limiteRestante!=null?' · US$ '+Number(r.limiteRestante).toFixed(4)+' no limite da chave':(r.status==='disponivel'?' · sem limite de chave':'')}</b></div>`; })()}
+        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; const saldo=r.saldoConta; const efetivo=ps.openrouterSaldo; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter · saldo real da conta</span><b>${saldo!=null?'US$ '+Number(saldo).toFixed(4):'não sincronizado'}</b></div><div class="stat"><span>OpenRouter · disponível para este estúdio</span><b>${efetivo!=null?'US$ '+Number(Math.min(Number(o.restanteUSD||0),efetivo)).toFixed(4):'US$ '+Number(o.restanteUSD||0).toFixed(4)+' · limite local'}</b></div><div class="stat"><span>OpenRouter · limite da chave</span><b>${r.temLimiteChave && r.limiteRestante!=null?'US$ '+Number(r.limiteRestante).toFixed(4):'sem limite de chave'}</b></div>`; })()}
         <div class="stat"><span>Modo de trabalho</span><b>${o.modoOrcamento === 'intensivo' ? 'Trabalho intensivo' : 'Normal'}</b></div>
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
         ${(o.esgotado || o.esgotadoDia || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? `<p class="panel-foot" style="color:#E08573"><strong>${o.esgotado ? 'Orçamento do ciclo esgotado.' : 'Limite diário esgotado.'}</strong> A equipe não fará novas chamadas e entra em rotina Sims-like até ${o.esgotado ? 'o próximo ciclo de 30 dias' : 'o próximo dia'}. ${(!o.esgotado && o.modoOrcamento !== 'intensivo') ? 'Ative Trabalho intensivo se quiser usar o saldo mensal restante hoje.' : ''}</p>` : ''}
@@ -3503,7 +3576,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
       ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
         ? 'Os limites de janela vêm dos cabeçalhos do provedor. O limite local acima é um freio de segurança escolhido no aparelho.'
-        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão após a primeira chamada.'}</p>`;
+        : 'O saldo real do OpenRouter é consultado pela Management Key diretamente do navegador e sincronizado periodicamente.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -3692,7 +3765,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
     $('#exportarTudoBtn').onclick = exportarZip;
 
     const salvarIABtn = $('#salvarIABtn');
-    if (salvarIABtn) salvarIABtn.onclick = () => {
+    if (salvarIABtn) salvarIABtn.onclick = async () => {
       try {
         const key = $('#apiKeyInput');
         const pensamento = $('#modeloPensamentoSel');
@@ -3704,9 +3777,10 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         const modoOrcamento = $('#modoOrcamentoSel');
         const digitada = key ? key.value.trim() : '';
         if (S.ai.cfg.roteamento === 'automatico') {
-          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
+          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput');
           S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
-          if(g) g.value=''; if(r) r.value='';
+          if(mgmt && mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value);
+          if(g) g.value=''; if(r) r.value=''; if(mgmt) mgmt.value='';
         } else {
           S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
           if (key) key.value = '';
@@ -3728,7 +3802,7 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         const diario = $('#limiteDiarioUSDInput');
         const autoDia = $('#diarioAutoInput');
         const modoOrcamento = $('#modoOrcamentoSel');
-        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(g) g.value=''; if(r) r.value=''; }
+        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(mgmt&&mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); if(g) g.value=''; if(r) r.value=''; if(mgmt) mgmt.value=''; }
         else if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');

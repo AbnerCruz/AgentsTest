@@ -495,7 +495,7 @@
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Modo de provedor</span><b>${o.roteamento === 'automatico' ? 'Groq grátis → OpenRouter' : o.provedor}</b></div>
-        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter sincronizado</span><b>${r.status}${r.limiteRestante!=null?' · US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':''}</b></div>`; })()}
+        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; const saldo=r.saldoConta; const efetivo=ps.openrouterSaldo; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>Saldo real OpenRouter</span><b>${saldo!=null?'US$ '+Number(saldo).toFixed(4):'não sincronizado'}</b></div><div class="stat"><span>Disponível para o Estúdio</span><b>${efetivo!=null?'US$ '+Number(efetivo).toFixed(4):'—'}</b></div><div class="stat"><span>Limite da chave</span><b>${r.temLimiteChave===true && r.limiteRestante!=null?'US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':'sem limite específico'}</b></div>`; })()}
         <div class="stat"><span>Modo de trabalho</span><b>${o.modoOrcamento === 'intensivo' ? 'Trabalho intensivo' : 'Normal'}</b></div>
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
         ${(o.esgotado || o.esgotadoDia || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? `<p class="panel-foot" style="color:#E08573"><strong>${o.esgotado ? 'Orçamento do ciclo esgotado.' : 'Limite diário esgotado.'}</strong> A equipe não fará novas chamadas e entra em rotina Sims-like até ${o.esgotado ? 'o próximo ciclo de 30 dias' : 'o próximo dia'}. ${(!o.esgotado && o.modoOrcamento !== 'intensivo') ? 'Ative Trabalho intensivo se quiser usar o saldo mensal restante hoje.' : ''}</p>` : ''}
@@ -505,7 +505,7 @@
       ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
         ? 'Os limites de janela vêm dos cabeçalhos do provedor. O limite local acima é um freio de segurança escolhido no aparelho.'
-        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão após a primeira chamada.'}</p>`;
+        : 'O saldo real do OpenRouter é consultado pela Management Key diretamente do navegador e sincronizado periodicamente.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
