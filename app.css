@@ -551,3 +551,15 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
 .manager-recommendation{display:flex;gap:8px;flex-direction:column;padding:10px;border-left:3px solid var(--ember);background:var(--bg-2);border-radius:0 8px 8px 0;overflow-wrap:anywhere;}
 .manager-recommendation span{font-size:12px;}
 .manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere;}
+
+
+/* v37 — escritório pixel art e economia */
+.pixel-office { overflow:hidden; }
+.pixel-office canvas { image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 10px; background:#111; }
+.panel-subtitle{display:block;font-size:11px;opacity:.55;margin-top:3px}
+.environment-bar{display:flex;gap:8px;flex-wrap:wrap;padding:9px 2px 1px}
+.env-chip{font-size:11px;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:5px 8px;background:rgba(255,255,255,.025)}
+.economy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.economy-card{padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.025)}
+.economy-card b{display:block;font-size:17px}.economy-card span{font-size:10px;opacity:.55}
+@media(max-width:600px){.economy-grid{grid-template-columns:repeat(2,1fr)}}

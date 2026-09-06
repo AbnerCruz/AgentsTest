@@ -368,12 +368,53 @@
         }
       }
     }
-    S.state.registrar(`${produto.publicadoPor} publicou ${produto.nome}${motivo ? ' — ' + motivo : ''}.`, 'ok');
+    // Economia produtiva: cada produto final gera uma recompensa verificável.
+    // Não é uma venda aleatória; é o valor de conclusão do produto dentro da simulação.
+    const qualidade = clamp(Number(produto.qualidade)||0, 0, 100);
+    const recompensa = Math.round(140 + qualidade * 8.5);
+    const poolComissao = Math.round(recompensa * 0.25);
+    const task = produto.taskId ? e.tarefas.find(t => t.id === produto.taskId) : null;
+    const ids = [];
+    [produto.autor && e.equipe.find(f=>f.nome===produto.autor)?.id, task && task.para, ...(task && task.contributors || [])].forEach(id=>{ if(id && !ids.includes(id)){ const f=e.equipe.find(x=>x.id===id); if(f && f.papel!=='gerente') ids.push(id); }});
+    const contribs = ids.length ? ids : (produto.autor ? [e.equipe.find(f=>f.nome===produto.autor)?.id].filter(Boolean) : []);
+    const cada = contribs.length ? Math.round(poolComissao/contribs.length*100)/100 : 0;
+    e.negocio = S.market.normalizar(e);
+    e.negocio.receitaProdutos = Number(e.negocio.receitaProdutos||0) + recompensa;
+    e.negocio.caixa += recompensa - poolComissao;
+    e.recompensas.unshift({t:Date.now(),produtoId:produto.id,produto:produto.nome,valor:recompensa,qualidade,comissao:poolComissao});
+    if(e.recompensas.length>80)e.recompensas=e.recompensas.slice(0,80);
+    contribs.forEach(id=>{ const f=e.equipe.find(x=>x.id===id); if(!f)return; f.comissaoTotal=Number(f.comissaoTotal||0)+cada; f.comissoes=(f.comissoes||0)+cada; e.comissoes.unshift({t:Date.now(),agente:id,nome:f.nome,produtoId:produto.id,valor:cada}); });
+    e.negocio.historico=e.negocio.historico||[];
+    S.state.registrar(`Produto final ${produto.nome}: +${S.fmt.brl(recompensa)} para a empresa e ${S.fmt.brl(poolComissao)} distribuídos como comissão entre quem contribuiu.`, 'receita');
+    S.bus.emit('negocio'); S.bus.emit('equipe');
     S.state.ganharXP(25);
     S.state.gravar();
     S.bus.emit('arquivos'); S.bus.emit('negocio');
     return produto;
   }
+
+  /* ---------- ambiente construível ---------- */
+  const OBJETOS_AMBIENTE = {
+    mesa: {nome:'Mesa', custo:180, w:54,h:28}, planta:{nome:'Planta',custo:70,w:24,h:34}, estante:{nome:'Estante',custo:260,w:38,h:54},
+    luminaria:{nome:'Luminária',custo:110,w:18,h:32}, sofa:{nome:'Sofá',custo:320,w:72,h:30}, quadro:{nome:'Quadro',custo:140,w:62,h:12}, bancada:{nome:'Bancada',custo:240,w:76,h:28}
+  };
+  function construirAmbiente(p, tipo, motivo) {
+    const e=S.state.atual(); if(!e) return false;
+    const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
+    e.ambiente=e.ambiente||{moedas:1200,objetos:[]}; e.ambiente.objetos=Array.isArray(e.ambiente.objetos)?e.ambiente.objetos:[];
+    if((e.ambiente.moedas||0)<spec.custo) return false;
+    if(e.ambiente.objetos.length>=40) return false;
+    const cols=5, idx=e.ambiente.objetos.length, col=idx%cols, row=Math.floor(idx/cols);
+    const x=72+col*118+(idx%2)*12, y=54+row*74;
+    e.ambiente.moedas-=spec.custo;
+    e.ambiente.objetos.push({id:uid('obj'),tipo,x,y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:Date.now()});
+    e.ambiente.ultimaConstrucao=Date.now();
+    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
+    S.state.registrar(`${p?p.nome:'A equipe'} construiu ${spec.nome} no ambiente por ${S.fmt.brl(spec.custo)}.`,'ambiente',p&&p.id);
+    S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('negocio'); S.bus.emit('equipe'); return true;
+  }
+  function ambienteObjetos(){ const e=S.state.atual(); return e&&e.ambiente&&e.ambiente.objetos||[]; }
+  const tiposAmbiente=()=>Object.keys(OBJETOS_AMBIENTE);
 
   /* ---------- tarefas ---------- */
   /* Texto vindo do modelo nunca entra cru na interface nem em título de
@@ -523,6 +564,8 @@
           briefing: tarefa.briefing || ''
         }), p);
         tarefa.contribuicaoAcervo = avaliarContribuicaoAcervo(p, tarefa, salvos);
+        tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : [];
+        if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
         logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
         p.ref.pensamento = `Concluí ${tarefa.titulo}. Confiro se a entrega aumentou o acervo e se outra pessoa consegue reutilizá-la.`;
@@ -1217,6 +1260,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       S.bus.emit('equipe');
       return;
     }
+    // Maestro robusto: uma revisão global a cada ~3 min. Funcionários continuam no modelo econômico.
+    if (S.ai.disponivel() && S.agency && S.agency.maestro) S.agency.maestro().catch(()=>{});
 
     const g = gerente();
     if (g) monitorarEquipe(g);
@@ -1255,6 +1300,9 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
               await executar(p, t);
               return;
             }
+          } else if (d.acao === 'construir') {
+            construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            return;
           } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
             // Essas ações têm valor organizacional mesmo sem gerar arquivo.
             // O modo sem IA não simula esse tipo de decisão.
@@ -1341,6 +1389,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   function ajustarCanvas() {
     cv = document.getElementById('floor'); if (!cv) return;
     cx = cv.getContext('2d');
+    if (cx) cx.imageSmoothingEnabled = false;
     const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
     alturaLog = 74 + linhas * 96 + 96;
     const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
@@ -1364,10 +1413,31 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
   function desenhar(agora) {
     if (!cx) return;
     cx.clearRect(0, 0, larguraLog, alturaLog);
-    // piso
-    cx.fillStyle = '#13171A'; cx.fillRect(0, 0, larguraLog, alturaLog);
-    cx.fillStyle = 'rgba(255,255,255,.035)';
-    for (let x = 24; x < larguraLog; x += 40) for (let y = 24; y < alturaLog; y += 40) cx.fillRect(x, y, 1.5, 1.5);
+    // Piso em pixel art: blocos discretos, paredes, janelas e pequenas áreas de uso.
+    cx.fillStyle = '#101418'; cx.fillRect(0, 0, larguraLog, alturaLog);
+    cx.fillStyle = '#181E22'; cx.fillRect(14, 14, larguraLog-28, alturaLog-28);
+    cx.fillStyle = '#20272B';
+    for (let x = 24; x < larguraLog-20; x += 32) for (let y = 24; y < alturaLog-20; y += 32) cx.fillRect(x, y, 30, 30);
+    cx.fillStyle = '#2A3237'; cx.fillRect(18,18,larguraLog-36,5); cx.fillRect(18,18,5,alturaLog-36); cx.fillRect(larguraLog-23,18,5,alturaLog-36);
+    // janela
+    cx.fillStyle='#25353A'; cx.fillRect(470,22,140,48); cx.fillStyle='#77A6A8'; cx.fillRect(478,30,124,32); cx.fillStyle='#B8D6C7'; cx.fillRect(482,34,116,24);
+    cx.fillStyle='#31454A'; cx.fillRect(536,30,4,32); cx.fillRect(478,44,124,4);
+    // tapete
+    cx.fillStyle='#1D2930'; cx.fillRect(262,246,188,72); cx.fillStyle='#283840'; cx.fillRect(270,254,172,56);
+
+    // Objetos persistentes construídos pelos agentes.
+    const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
+    objs.forEach(o=>{
+      const x=Number(o.x)||80,y=Number(o.y)||80;
+      cx.fillStyle='rgba(0,0,0,.3)'; cx.fillRect(x-8,y+20,Math.max(18,(o.tipo==='sofa'?70:40)),5);
+      cx.fillStyle='#3A4448';
+      if(o.tipo==='planta'){ cx.fillStyle='#4F7A60'; cx.fillRect(x-5,y+2,10,18); cx.fillRect(x-12,y-5,8,12); cx.fillRect(x+4,y-8,8,14); cx.fillStyle='#705A43'; cx.fillRect(x-7,y+18,14,8); }
+      else if(o.tipo==='estante'){ cx.fillStyle='#6A5040'; cx.fillRect(x-18,y-24,36,48); cx.fillStyle='#9A7556'; cx.fillRect(x-14,y-14,28,4); cx.fillRect(x-14,y+2,28,4); cx.fillRect(x-14,y+18,28,4); }
+      else if(o.tipo==='sofa'){ cx.fillStyle='#4B5961'; cx.fillRect(x-36,y-8,72,24); cx.fillRect(x-30,y-17,60,12); }
+      else if(o.tipo==='quadro'){ cx.fillStyle='#6B4E3D'; cx.fillRect(x-31,y-6,62,12); cx.fillStyle='#B4C7B4'; cx.fillRect(x-25,y-2,50,4); }
+      else if(o.tipo==='luminaria'){ cx.fillStyle='#B69B61'; cx.fillRect(x-2,y-18,4,30); cx.fillRect(x-9,y-21,18,5); }
+      else { cx.fillStyle='#6A5040'; cx.fillRect(x-(o.tipo==='bancada'?38:27),y-10,o.tipo==='bancada'?76:54,20); cx.fillStyle='#303A3E'; cx.fillRect(x-18,y-6,36,10); }
+    });
 
     // estações
     Object.keys(ESTACOES).forEach(k => {
@@ -1501,7 +1571,7 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     pessoas: () => rt, pessoa, gerente,
     novaTarefa, tarefasAbertas, executar, avaliarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
-    contratar, demitir, custoContratacao, fundar,
+    contratar, demitir, custoContratacao, fundar, construirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };

@@ -177,3 +177,12 @@ A escolha é deliberativa e usa esforço de raciocínio alto quando a IA está d
 A equipe também respeita uma pausa operacional real: enquanto pausada, nenhum funcionário assume tarefa, produz ou publica. Quando a IA está indisponível, os funcionários podem estudar o acervo e preparar a retomada, sem criar artefatos fictícios.
 
 A versão estática inclui `agency.js` no Service Worker e usa o cache `estudio-v36-organico`.
+
+
+## v37 — empresa viva
+
+- Modelo econômico produtivo: cada produto final publicado gera receita de conclusão; 25% da recompensa é distribuída como comissão entre os agentes que contribuíram de forma rastreável.
+- Maestro estratégico: uma chamada robusta e de baixa frequência supervisiona a empresa; funcionários usam o modelo econômico para decisões individuais.
+- Ambiente persistente em pixel art: agentes podem construir mesas, plantas, estantes, luminárias, sofás, quadros e bancadas quando houver valor real e orçamento.
+- O ambiente, as construções, comissões e recompensas ficam persistidos junto da empresa.
+- Prioridade de custo: decisões individuais são compactas e espaçadas; a produção continua usando o modelo configurado para qualidade, enquanto o maestro usa o modelo robusto.

@@ -100,7 +100,7 @@
      configuração precisam existir antes de qualquer chamada a
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', maestro: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
   if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
@@ -118,6 +118,7 @@
 
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
+  cfg.maestro = migrarModelo(cfg.maestro || cfg.producao);
   cfg.revisao = migrarModelo(cfg.revisao);
   S.local.setJson(K_CFG, cfg);
 
@@ -277,6 +278,7 @@
     const lista = MODELOS_DE(p);
     cfg.decisao = lista.some(m => m.id === cfg.decisao) ? cfg.decisao : lista[0].id;
     cfg.producao = lista.some(m => m.id === cfg.producao) ? cfg.producao : (lista[1] || lista[0]).id;
+    cfg.maestro = lista.some(m => m.id === cfg.maestro) ? cfg.maestro : (lista[1] || lista[0]).id;
     cfg.revisao = lista.some(m => m.id === cfg.revisao) ? cfg.revisao : lista[0].id;
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0; estado.esperaAtual = 0;
@@ -287,15 +289,15 @@
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
     const permitirFailover = op._failover !== false;
-    const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
+    const tipo = op.tipo === 'conteudo' ? 'conteudo' : (op.tipo === 'maestro' ? 'maestro' : (op.tipo === 'revisao' ? 'revisao' : 'decisao'));
     if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
     }
     const q = usoHoje();
-    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'revisao' ? cfg.revisao : cfg.decisao);
-    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1000);
+    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'maestro' ? cfg.maestro : (tipo === 'revisao' ? cfg.revisao : cfg.decisao));
+    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'maestro' ? 700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1200);
     // GPT-OSS na Groq responde melhor com tudo no papel "user".
     const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
 
@@ -401,6 +403,10 @@
     return { texto: r.texto, campos: c, resumo: [c.decisao,c.abordagem,c.riscos,c.usar].filter(Boolean).join(' ') };
   }
 
+  async function maestro(op) {
+    return chamar(Object.assign({}, op, { tipo: 'maestro', reasoning_effort: 'high', tokens: op.tokens || 650 }));
+  }
+
   async function perguntar(op) {
     try {
       const r = await chamar(op);
@@ -487,7 +493,9 @@
       const lista = MODELOS_DE(p);
       cfg.decisao = lista[0].id;
       cfg.producao = (lista[1] || lista[0]).id;
+      cfg.maestro = (lista[1] || lista[0]).id;
       cfg.revisao = lista[0].id;
+      cfg.maestro = (lista[1] || lista[0]).id;
       S.local.setJson(K_CFG, cfg);
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',

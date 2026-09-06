@@ -59,7 +59,7 @@
 
   function normalizar(c, ctx) {
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','esperar'];
+    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
@@ -72,6 +72,7 @@
       motivo: max(c.motivo, 280),
       abordagem: max(c.abordagem, 320),
       risco: max(c.risco, 240),
+      objeto: max(c.objeto, 40),
       projetoId: ctx.projeto ? ctx.projeto.id : '',
       em: agora()
     };
@@ -98,13 +99,14 @@ Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados a
 
 Pense profundamente antes de decidir. Compare o valor das alternativas, observe dependências, procure oportunidades de melhorar o que já existe e considere se outra pessoa precisa ser envolvida. O resultado persistido deve ser apenas a decisão operacional, nunca seu raciocínio privado passo a passo.
 
-Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, esperar.
+Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, construir, esperar.
 - executar_tarefa: escolha uma tarefa aberta que realmente combine com você.
 - criar_tarefa: crie trabalho concreto que seja consequência do estado atual, preferindo evolução ou integração de algo existente.
 - revisar: examine uma entrega ou problema existente; só use se houver algo concreto para revisar.
 - estudar: adquira contexto do próprio acervo/objetivo para preparar uma ação futura; não finja que isso é produção.
 - colaborar: procure outro membro porque existe uma dependência ou decisão que se beneficia de colaboração.
 - planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
+- construir: só quando uma mudança física no ambiente tiver valor para trabalho, bem-estar ou identidade da equipe; escolha um tipo simples de mobiliário.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
@@ -119,17 +121,17 @@ BASE: <id do artefato existente que deve ser evoluído/revisado ou vazio>
 PARA: <id de colega que deve receber colaboração/handoff ou vazio>
 MOTIVO: <por que esta é a melhor ação agora, até 35 palavras>
 ABORDAGEM: <como pretende agir, até 45 palavras>
-RISCO: <principal risco ou incerteza, até 30 palavras>`;
+RISCO: <principal risco ou incerteza, até 30 palavras>
+OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, bancada; senão vazio>`;
 
     try {
-      const r = await S.ai.deliberar({
+      const r = await S.ai.chamar({
         sistema,
-        pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta.',
-        tokens: 900,
-        agente: p.nome,
+        pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta. Retorne SOMENTE os campos solicitados.',
+        tipo: 'decisao', tokens: 520, reasoning_effort: 'high', agente: p.nome,
         motivo: 'deliberação autônoma organizacional'
       });
-      const d = normalizar(r.campos || {}, ctx);
+      const d = normalizar(S.ai.campos(r && r.texto || ''), ctx);
       p._agencia.ultimaAcao = d;
       p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada'}`.slice(0, 500);
       if (d.motivo) {
@@ -147,6 +149,40 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     }
   }
 
+  async function maestro() {
+    const e = S.state.atual();
+    if (!e || !S.ai.disponivel()) return null;
+    const agoraMs = agora();
+    e.gerencia = e.gerencia || {};
+    if (agoraMs - Number(e.gerencia.ultimoMaestro || 0) < 180000) return null;
+    e.gerencia.ultimoMaestro = agoraMs;
+    const pr = projetoAtual(e, null);
+    const abertas = (e.tarefas||[]).filter(t=>t.status!=='feita').slice(0,10);
+    const produtos = (e.arquivos||[]).filter(a=>a.classe==='produto').slice(0,10);
+    const pessoas = (e.equipe||[]).map(f=>`${f.nome}:${f.especialidade}, energia=${Math.round(f.energia||0)}, foco=${max(f.foco,70)}`).join('; ');
+    const sistema = `Você é o maestro estratégico da empresa ${e.nome}. Missão: ${e.missao}. Público: ${e.publico}. Ramo: ${e.ramo}.
+Projeto: ${pr?pr.nome:'nenhum'} — ${pr?pr.objetivo:e.missao}
+Tarefas abertas: ${abertas.map(t=>t.titulo).join(' | ')||'nenhuma'}
+Produtos finais: ${produtos.map(a=>`${a.nome} q${a.qualidade}`).join(' | ')||'nenhum'}
+Equipe: ${pessoas}
+Caixa: ${(e.negocio&&e.negocio.caixa!=null)?e.negocio.caixa:'indisponível'}.
+
+Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. Identifique apenas a prioridade organizacional que realmente merece atenção agora, ou diga que nada precisa ser mudado. Não invente fatos.`;
+    try {
+      const r=await S.ai.maestro({sistema,pedido:'Produza uma diretriz operacional curta para a gerente e a equipe. Retorne somente: PRIORIDADE, ACAO, MOTIVO.',tokens:620,agente:'Maestro',motivo:'revisão estratégica da empresa'});
+      const c=S.ai.campos(r.texto||'');
+      const resumo=[c.prioridade,c.acao,c.motivo].filter(Boolean).join(' ').slice(0,500);
+      e.gerencia.maestro = resumo || 'Nenhuma mudança estratégica necessária neste momento.';
+      e.gerencia.ultimaAvaliacao = agoraMs;
+      e.decisoes = Array.isArray(e.decisoes)?e.decisoes:[];
+      e.decisoes.unshift({t:agoraMs,texto:`Maestro: ${e.gerencia.maestro}`.slice(0,600),origem:'maestro'});
+      e.decisoes=e.decisoes.slice(0,40);
+      S.state.registrar(`Maestro: ${e.gerencia.maestro}`,'estrategia');
+      S.state.gravar(); S.bus.emit('gerencia'); S.bus.emit('trabalho');
+      return e.gerencia.maestro;
+    } catch(err){ e.gerencia.ultimoMaestro=agoraMs-150000; return null; }
+  }
+
   function marcarAcao(p, d) {
     if (!p) return;
     p._agencia = p._agencia || {};
@@ -154,5 +190,5 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     p._agencia.ultima = agora();
   }
 
-  S.agency = { decidir, contexto, marcarAcao, DECISAO_MIN_MS };
+  S.agency = { decidir, contexto, maestro, marcarAcao, DECISAO_MIN_MS };
 })(window.S);

@@ -37,7 +37,7 @@
     $$('.view').forEach(v => v.classList.toggle('is-on', v.id === 'v-' + view));
     $$('.nav-item').forEach(b => b.classList.toggle('is-on', b.dataset.view === view));
     $('#nav').style.visibility = e ? 'visible' : 'hidden';
-    if (view === 'estudio') { S.studio.ajustarCanvas(); }
+    if (view === 'estudio') { S.studio.ajustarCanvas(); pintarEconomia(); pintarAmbienteBar(); }
     if (view === 'motor') pintarMotor();
     if (view === 'entregas') { pintarArquivos(); }
     if (view === 'trabalho') pintarTrabalho();
@@ -94,7 +94,7 @@
           <span class="member-name">${esc(p.nome)} ${p.ocupado ? '<i class="thinking">trabalhando</i>' : ''}</span>
           <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · coordena e remove bloqueios' : ''}</span>
           <span class="member-personality">${esc((((f.personalidade&&f.personalidade.tracos)||[]).slice(0,2).join(' · ')) || 'perfil em formação')}</span>
-          <span class="member-status">${esc(estado)}</span>
+          <span class="member-status">${esc(estado)} · comissão ${esc(F.brl(f.comissaoTotal||0))}</span>
         </span>
         <span class="bars">
           ${barra('energia', f.energia)}
@@ -104,6 +104,26 @@
     }).join('') || '<div class="empty">Sem equipe.</div>';
     $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
     pintarGerencia();
+  }
+
+  function pintarEconomia() {
+    const e=S.state.atual(); const box=$('#economiaPanel'); if(!e||!box) return;
+    const n=S.market.normalizar(e), i=S.market.indicadores(e), objs=(e.ambiente&&e.ambiente.objetos)||[];
+    const com=(e.comissoes||[]).reduce((a,x)=>a+Number(x.valor||0),0);
+    box.innerHTML=`<div class="panel-head"><div><span class="panel-label">Economia real da simulação</span><span class="panel-subtitle">produto final gera receita; comissão só existe quando há contribuição registrada</span></div><span class="chip">${esc(F.brl(n.caixa))} em caixa</span></div>
+      <div class="economy-grid">
+        <div class="economy-card"><b>${esc(F.brl(n.caixa))}</b><span>caixa atual</span></div>
+        <div class="economy-card"><b>${esc(F.brl(n.receitaMercado))}</b><span>receita acumulada</span></div>
+        <div class="economy-card"><b>${esc(F.brl(com))}</b><span>comissões pagas</span></div>
+        <div class="economy-card"><b>${esc(F.num((e.recompensas||[]).length))}</b><span>produtos recompensados</span></div>
+      </div>
+      <p class="panel-foot">Qualidade média ${F.pct(n.qualidade)} · ${F.num(objs.length)} objetos no escritório · lucro operacional ${F.brl(i.lucroOperacional)}.</p>`;
+  }
+
+  function pintarAmbienteBar(){
+    const e=S.state.atual(), box=$('#environmentBar'); if(!e||!box) return;
+    const a=e.ambiente||{}, objs=a.objetos||[];
+    box.innerHTML=`<span class="env-chip">🧱 ${objs.length} construções</span><span class="env-chip">🪙 ${F.brl(a.moedas||0)} orçamento do ambiente</span><span class="env-chip">${esc(a.tema||'oficina')}</span>`;
   }
 
   function pintarGerencia() {
@@ -727,12 +747,13 @@
     S.bus.on('gerencia', () => pintarGerencia());
     S.bus.on('equipe', () => pintarGerencia());
     S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
-    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); S.studio.ajustarCanvas(); } });
+    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); pintarEconomia(); pintarAmbienteBar(); S.studio.ajustarCanvas(); } });
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
     S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
     S.bus.on('reuniao', () => { if (viewAtual === 'reuniao') pintarReuniao(); });
-    S.bus.on('negocio', () => { });
+    S.bus.on('negocio', () => { if (viewAtual === 'estudio') pintarEconomia(); });
+    S.bus.on('ambiente', () => { if (viewAtual === 'estudio') pintarAmbienteBar(); });
   S.bus.on('ideias', () => { if (viewAtual === 'trabalho') pintarIdeias(); });
     S.bus.on('relogio', () => { pintarRelogio(); });
     S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
@@ -743,7 +764,7 @@
   function pintarTudo() {
     pintarTopo(); pintarRelogio();
     if (!S.state.atual()) return;
-    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
+    pintarEquipe(); pintarEconomia(); pintarAmbienteBar(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
   }
 
   /* ---------- início ---------- */

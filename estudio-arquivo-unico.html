@@ -563,6 +563,18 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
 .manager-recommendation span{font-size:12px;}
 .manager-alerts{display:flex;flex-direction:column;gap:5px;margin-top:9px;font-size:11px;color:var(--ink-2);overflow-wrap:anywhere;}
 
+
+/* v37 — escritório pixel art e economia */
+.pixel-office { overflow:hidden; }
+.pixel-office canvas { image-rendering: pixelated; image-rendering: crisp-edges; border-radius: 10px; background:#111; }
+.panel-subtitle{display:block;font-size:11px;opacity:.55;margin-top:3px}
+.environment-bar{display:flex;gap:8px;flex-wrap:wrap;padding:9px 2px 1px}
+.env-chip{font-size:11px;border:1px solid rgba(255,255,255,.08);border-radius:999px;padding:5px 8px;background:rgba(255,255,255,.025)}
+.economy-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.economy-card{padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.025)}
+.economy-card b{display:block;font-size:17px}.economy-card span{font-size:10px;opacity:.55}
+@media(max-width:600px){.economy-grid{grid-template-columns:repeat(2,1fr)}}
+
 </style>
 <script>
 /* diagnóstico: mostra na tela qualquer erro de carregamento ou execução */
@@ -668,14 +680,16 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
 
     <!-- ESTÚDIO -->
     <section class="view" id="v-estudio">
-      <div class="floor-wrap panel">
+      <div class="floor-wrap panel pixel-office">
         <div class="panel-head">
-          <span class="panel-label">Chão do estúdio</span>
+          <div><span class="panel-label">Ambiente vivo</span><span class="panel-subtitle">a equipe também constrói o próprio local de trabalho</span></div>
           <span class="chip" id="floorStatus">parado</span>
         </div>
-        <canvas id="floor" aria-label="Planta do estúdio com a equipe"></canvas>
-        <p class="panel-foot" id="floorFoot">Toque em alguém para ver o que está fazendo, seu log individual e sua rotina de bem-estar.</p>
+        <canvas id="floor" aria-label="Ambiente pixel art com a equipe e objetos construídos"></canvas>
+        <div class="environment-bar" id="environmentBar"></div>
+        <p class="panel-foot" id="floorFoot">Os agentes podem reorganizar o espaço quando uma mudança tiver utilidade real. Móveis e decoração permanecem salvos.</p>
       </div>
+      <div class="panel" id="economiaPanel"></div>
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
         <div class="team" id="teamList"></div>
@@ -936,6 +950,11 @@ window.S = window.S || {};
     e.publico = String(e.publico || 'pequenos negócios');
     e.criadoEm = e.criadoEm || Date.now();
     e.xp = Number(e.xp) || 0;
+    e.ambiente = e.ambiente && typeof e.ambiente === 'object' ? e.ambiente : {};
+    e.ambiente.moedas = Number.isFinite(e.ambiente.moedas) ? e.ambiente.moedas : 1200;
+    e.ambiente.objetos = Array.isArray(e.ambiente.objetos) ? e.ambiente.objetos : [];
+    e.ambiente.tema = String(e.ambiente.tema || 'oficina aconchegante');
+    e.ambiente.ultimaConstrucao = Number(e.ambiente.ultimaConstrucao) || 0;
     e.gerencia = e.gerencia && typeof e.gerencia === 'object' ? e.gerencia : {};
     e.gerencia.ultimaAvaliacao = Number(e.gerencia.ultimaAvaliacao) || 0;
     e.gerencia.recomendacao = String(e.gerencia.recomendacao || 'A gerente está observando a carga, qualidade e dependências da equipe.');
@@ -952,6 +971,8 @@ window.S = window.S || {};
       f.energia = Number.isFinite(f.energia) ? f.energia : 80;
       f.humor = Number.isFinite(f.humor) ? f.humor : 68;
       f.entregas = Number(f.entregas) || 0;
+      f.comissaoTotal = Number(f.comissaoTotal) || 0;
+      f.comissoes = Number(f.comissoes) || 0;
       f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-24) : [];
       f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
       f.foco = String(f.foco || '').slice(0, 180);
@@ -1019,6 +1040,8 @@ window.S = window.S || {};
     e.reuniao.reunioes = Array.isArray(e.reuniao.reunioes) ? e.reuniao.reunioes.slice(-30) : [];
     e.log = Array.isArray(e.log) ? e.log.slice(-160) : [];
     e.uso = e.uso || { chamadas: 0, tokens: 0, entrada: 0, saida: 0, ms: 0 };
+    e.comissoes = Array.isArray(e.comissoes) ? e.comissoes.slice(-120) : [];
+    e.recompensas = Array.isArray(e.recompensas) ? e.recompensas.slice(-80) : [];
     return e;
   }
 
@@ -1304,7 +1327,7 @@ window.S = window.S || {};
      configuração precisam existir antes de qualquer chamada a
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', maestro: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
   if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
@@ -1322,6 +1345,7 @@ window.S = window.S || {};
 
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
+  cfg.maestro = migrarModelo(cfg.maestro || cfg.producao);
   cfg.revisao = migrarModelo(cfg.revisao);
   S.local.setJson(K_CFG, cfg);
 
@@ -1481,6 +1505,7 @@ window.S = window.S || {};
     const lista = MODELOS_DE(p);
     cfg.decisao = lista.some(m => m.id === cfg.decisao) ? cfg.decisao : lista[0].id;
     cfg.producao = lista.some(m => m.id === cfg.producao) ? cfg.producao : (lista[1] || lista[0]).id;
+    cfg.maestro = lista.some(m => m.id === cfg.maestro) ? cfg.maestro : (lista[1] || lista[0]).id;
     cfg.revisao = lista.some(m => m.id === cfg.revisao) ? cfg.revisao : lista[0].id;
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0; estado.esperaAtual = 0;
@@ -1491,15 +1516,15 @@ window.S = window.S || {};
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
     const permitirFailover = op._failover !== false;
-    const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
+    const tipo = op.tipo === 'conteudo' ? 'conteudo' : (op.tipo === 'maestro' ? 'maestro' : (op.tipo === 'revisao' ? 'revisao' : 'decisao'));
     if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
     }
     const q = usoHoje();
-    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'revisao' ? cfg.revisao : cfg.decisao);
-    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1000);
+    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'maestro' ? cfg.maestro : (tipo === 'revisao' ? cfg.revisao : cfg.decisao));
+    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'maestro' ? 700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1200);
     // GPT-OSS na Groq responde melhor com tudo no papel "user".
     const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
 
@@ -1605,6 +1630,10 @@ window.S = window.S || {};
     return { texto: r.texto, campos: c, resumo: [c.decisao,c.abordagem,c.riscos,c.usar].filter(Boolean).join(' ') };
   }
 
+  async function maestro(op) {
+    return chamar(Object.assign({}, op, { tipo: 'maestro', reasoning_effort: 'high', tokens: op.tokens || 650 }));
+  }
+
   async function perguntar(op) {
     try {
       const r = await chamar(op);
@@ -1691,7 +1720,9 @@ window.S = window.S || {};
       const lista = MODELOS_DE(p);
       cfg.decisao = lista[0].id;
       cfg.producao = (lista[1] || lista[0]).id;
+      cfg.maestro = (lista[1] || lista[0]).id;
       cfg.revisao = lista[0].id;
+      cfg.maestro = (lista[1] || lista[0]).id;
       S.local.setJson(K_CFG, cfg);
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
@@ -1774,7 +1805,7 @@ window.S = window.S || {};
       e.negocio = {
         inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
         capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
-        receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+        receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
         pedidos: 0, clientes: 0, visitas: 0, leads: 0,
         preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
         reputacao: 46, qualidade: 0, historico: []
@@ -1784,7 +1815,7 @@ window.S = window.S || {};
     const padroes = {
       inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
       capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
-      receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+      receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
       pedidos: 0, clientes: 0, visitas: 0, leads: 0,
       preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
       reputacao: 46, qualidade: 0
@@ -2844,7 +2875,7 @@ Sem numeração, sem markdown.`;
 
   function normalizar(c, ctx) {
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','esperar'];
+    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','construir','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
@@ -2857,6 +2888,7 @@ Sem numeração, sem markdown.`;
       motivo: max(c.motivo, 280),
       abordagem: max(c.abordagem, 320),
       risco: max(c.risco, 240),
+      objeto: max(c.objeto, 40),
       projetoId: ctx.projeto ? ctx.projeto.id : '',
       em: agora()
     };
@@ -2883,13 +2915,14 @@ Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados a
 
 Pense profundamente antes de decidir. Compare o valor das alternativas, observe dependências, procure oportunidades de melhorar o que já existe e considere se outra pessoa precisa ser envolvida. O resultado persistido deve ser apenas a decisão operacional, nunca seu raciocínio privado passo a passo.
 
-Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, esperar.
+Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, construir, esperar.
 - executar_tarefa: escolha uma tarefa aberta que realmente combine com você.
 - criar_tarefa: crie trabalho concreto que seja consequência do estado atual, preferindo evolução ou integração de algo existente.
 - revisar: examine uma entrega ou problema existente; só use se houver algo concreto para revisar.
 - estudar: adquira contexto do próprio acervo/objetivo para preparar uma ação futura; não finja que isso é produção.
 - colaborar: procure outro membro porque existe uma dependência ou decisão que se beneficia de colaboração.
 - planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
+- construir: só quando uma mudança física no ambiente tiver valor para trabalho, bem-estar ou identidade da equipe; escolha um tipo simples de mobiliário.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
@@ -2904,17 +2937,17 @@ BASE: <id do artefato existente que deve ser evoluído/revisado ou vazio>
 PARA: <id de colega que deve receber colaboração/handoff ou vazio>
 MOTIVO: <por que esta é a melhor ação agora, até 35 palavras>
 ABORDAGEM: <como pretende agir, até 45 palavras>
-RISCO: <principal risco ou incerteza, até 30 palavras>`;
+RISCO: <principal risco ou incerteza, até 30 palavras>
+OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, bancada; senão vazio>`;
 
     try {
-      const r = await S.ai.deliberar({
+      const r = await S.ai.chamar({
         sistema,
-        pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta.',
-        tokens: 900,
-        agente: p.nome,
+        pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta. Retorne SOMENTE os campos solicitados.',
+        tipo: 'decisao', tokens: 520, reasoning_effort: 'high', agente: p.nome,
         motivo: 'deliberação autônoma organizacional'
       });
-      const d = normalizar(r.campos || {}, ctx);
+      const d = normalizar(S.ai.campos(r && r.texto || ''), ctx);
       p._agencia.ultimaAcao = d;
       p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada'}`.slice(0, 500);
       if (d.motivo) {
@@ -2932,6 +2965,40 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     }
   }
 
+  async function maestro() {
+    const e = S.state.atual();
+    if (!e || !S.ai.disponivel()) return null;
+    const agoraMs = agora();
+    e.gerencia = e.gerencia || {};
+    if (agoraMs - Number(e.gerencia.ultimoMaestro || 0) < 180000) return null;
+    e.gerencia.ultimoMaestro = agoraMs;
+    const pr = projetoAtual(e, null);
+    const abertas = (e.tarefas||[]).filter(t=>t.status!=='feita').slice(0,10);
+    const produtos = (e.arquivos||[]).filter(a=>a.classe==='produto').slice(0,10);
+    const pessoas = (e.equipe||[]).map(f=>`${f.nome}:${f.especialidade}, energia=${Math.round(f.energia||0)}, foco=${max(f.foco,70)}`).join('; ');
+    const sistema = `Você é o maestro estratégico da empresa ${e.nome}. Missão: ${e.missao}. Público: ${e.publico}. Ramo: ${e.ramo}.
+Projeto: ${pr?pr.nome:'nenhum'} — ${pr?pr.objetivo:e.missao}
+Tarefas abertas: ${abertas.map(t=>t.titulo).join(' | ')||'nenhuma'}
+Produtos finais: ${produtos.map(a=>`${a.nome} q${a.qualidade}`).join(' | ')||'nenhum'}
+Equipe: ${pessoas}
+Caixa: ${(e.negocio&&e.negocio.caixa!=null)?e.negocio.caixa:'indisponível'}.
+
+Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. Identifique apenas a prioridade organizacional que realmente merece atenção agora, ou diga que nada precisa ser mudado. Não invente fatos.`;
+    try {
+      const r=await S.ai.maestro({sistema,pedido:'Produza uma diretriz operacional curta para a gerente e a equipe. Retorne somente: PRIORIDADE, ACAO, MOTIVO.',tokens:620,agente:'Maestro',motivo:'revisão estratégica da empresa'});
+      const c=S.ai.campos(r.texto||'');
+      const resumo=[c.prioridade,c.acao,c.motivo].filter(Boolean).join(' ').slice(0,500);
+      e.gerencia.maestro = resumo || 'Nenhuma mudança estratégica necessária neste momento.';
+      e.gerencia.ultimaAvaliacao = agoraMs;
+      e.decisoes = Array.isArray(e.decisoes)?e.decisoes:[];
+      e.decisoes.unshift({t:agoraMs,texto:`Maestro: ${e.gerencia.maestro}`.slice(0,600),origem:'maestro'});
+      e.decisoes=e.decisoes.slice(0,40);
+      S.state.registrar(`Maestro: ${e.gerencia.maestro}`,'estrategia');
+      S.state.gravar(); S.bus.emit('gerencia'); S.bus.emit('trabalho');
+      return e.gerencia.maestro;
+    } catch(err){ e.gerencia.ultimoMaestro=agoraMs-150000; return null; }
+  }
+
   function marcarAcao(p, d) {
     if (!p) return;
     p._agencia = p._agencia || {};
@@ -2939,7 +3006,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     p._agencia.ultima = agora();
   }
 
-  S.agency = { decidir, contexto, marcarAcao, DECISAO_MIN_MS };
+  S.agency = { decidir, contexto, maestro, marcarAcao, DECISAO_MIN_MS };
 })(window.S);
 
 </script>
@@ -3315,12 +3382,53 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
         }
       }
     }
-    S.state.registrar(`${produto.publicadoPor} publicou ${produto.nome}${motivo ? ' — ' + motivo : ''}.`, 'ok');
+    // Economia produtiva: cada produto final gera uma recompensa verificável.
+    // Não é uma venda aleatória; é o valor de conclusão do produto dentro da simulação.
+    const qualidade = clamp(Number(produto.qualidade)||0, 0, 100);
+    const recompensa = Math.round(140 + qualidade * 8.5);
+    const poolComissao = Math.round(recompensa * 0.25);
+    const task = produto.taskId ? e.tarefas.find(t => t.id === produto.taskId) : null;
+    const ids = [];
+    [produto.autor && e.equipe.find(f=>f.nome===produto.autor)?.id, task && task.para, ...(task && task.contributors || [])].forEach(id=>{ if(id && !ids.includes(id)){ const f=e.equipe.find(x=>x.id===id); if(f && f.papel!=='gerente') ids.push(id); }});
+    const contribs = ids.length ? ids : (produto.autor ? [e.equipe.find(f=>f.nome===produto.autor)?.id].filter(Boolean) : []);
+    const cada = contribs.length ? Math.round(poolComissao/contribs.length*100)/100 : 0;
+    e.negocio = S.market.normalizar(e);
+    e.negocio.receitaProdutos = Number(e.negocio.receitaProdutos||0) + recompensa;
+    e.negocio.caixa += recompensa - poolComissao;
+    e.recompensas.unshift({t:Date.now(),produtoId:produto.id,produto:produto.nome,valor:recompensa,qualidade,comissao:poolComissao});
+    if(e.recompensas.length>80)e.recompensas=e.recompensas.slice(0,80);
+    contribs.forEach(id=>{ const f=e.equipe.find(x=>x.id===id); if(!f)return; f.comissaoTotal=Number(f.comissaoTotal||0)+cada; f.comissoes=(f.comissoes||0)+cada; e.comissoes.unshift({t:Date.now(),agente:id,nome:f.nome,produtoId:produto.id,valor:cada}); });
+    e.negocio.historico=e.negocio.historico||[];
+    S.state.registrar(`Produto final ${produto.nome}: +${S.fmt.brl(recompensa)} para a empresa e ${S.fmt.brl(poolComissao)} distribuídos como comissão entre quem contribuiu.`, 'receita');
+    S.bus.emit('negocio'); S.bus.emit('equipe');
     S.state.ganharXP(25);
     S.state.gravar();
     S.bus.emit('arquivos'); S.bus.emit('negocio');
     return produto;
   }
+
+  /* ---------- ambiente construível ---------- */
+  const OBJETOS_AMBIENTE = {
+    mesa: {nome:'Mesa', custo:180, w:54,h:28}, planta:{nome:'Planta',custo:70,w:24,h:34}, estante:{nome:'Estante',custo:260,w:38,h:54},
+    luminaria:{nome:'Luminária',custo:110,w:18,h:32}, sofa:{nome:'Sofá',custo:320,w:72,h:30}, quadro:{nome:'Quadro',custo:140,w:62,h:12}, bancada:{nome:'Bancada',custo:240,w:76,h:28}
+  };
+  function construirAmbiente(p, tipo, motivo) {
+    const e=S.state.atual(); if(!e) return false;
+    const spec=OBJETOS_AMBIENTE[tipo]||OBJETOS_AMBIENTE.planta;
+    e.ambiente=e.ambiente||{moedas:1200,objetos:[]}; e.ambiente.objetos=Array.isArray(e.ambiente.objetos)?e.ambiente.objetos:[];
+    if((e.ambiente.moedas||0)<spec.custo) return false;
+    if(e.ambiente.objetos.length>=40) return false;
+    const cols=5, idx=e.ambiente.objetos.length, col=idx%cols, row=Math.floor(idx/cols);
+    const x=72+col*118+(idx%2)*12, y=54+row*74;
+    e.ambiente.moedas-=spec.custo;
+    e.ambiente.objetos.push({id:uid('obj'),tipo,x,y,custo:spec.custo,por:p?p.id:null,nome:spec.nome,criadoEm:Date.now()});
+    e.ambiente.ultimaConstrucao=Date.now();
+    if(p){ p.ref.pensamento=`Construí ${spec.nome} para melhorar o ambiente: ${motivo||'uso da equipe'}`.slice(0,240); logPessoa(p,`adicionou ${spec.nome} ao ambiente de trabalho. ${motivo||''}`,'ambiente'); }
+    S.state.registrar(`${p?p.nome:'A equipe'} construiu ${spec.nome} no ambiente por ${S.fmt.brl(spec.custo)}.`,'ambiente',p&&p.id);
+    S.state.gravar(); S.bus.emit('ambiente'); S.bus.emit('negocio'); S.bus.emit('equipe'); return true;
+  }
+  function ambienteObjetos(){ const e=S.state.atual(); return e&&e.ambiente&&e.ambiente.objetos||[]; }
+  const tiposAmbiente=()=>Object.keys(OBJETOS_AMBIENTE);
 
   /* ---------- tarefas ---------- */
   /* Texto vindo do modelo nunca entra cru na interface nem em título de
@@ -3470,6 +3578,8 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
           briefing: tarefa.briefing || ''
         }), p);
         tarefa.contribuicaoAcervo = avaliarContribuicaoAcervo(p, tarefa, salvos);
+        tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : [];
+        if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
         tarefa.status = 'feita'; tarefa.concluidaEm = Date.now();
         logPessoa(p, `concluiu "${tarefa.titulo}"; o resultado foi registrado e entregue à próxima etapa.`, 'entrega');
         p.ref.pensamento = `Concluí ${tarefa.titulo}. Confiro se a entrega aumentou o acervo e se outra pessoa consegue reutilizá-la.`;
@@ -4137,180 +4247,18 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.market.normalizar(e);
     S.DB.estudios.unshift(e);
     S.DB.atual = e.id;
-    // O estúdio nasce com uma fila produtiva real; não começa por uma reunião de ideias.
+    // A empresa nasce sem uma fila artificial. O primeiro passo será escolhido
+    // pela própria organização quando houver capacidade de IA; sem IA, a equipe
+    // permanece em estado de preparação, sem fabricar trabalho.
     const projetoInicial = e.projetos[0];
-    const criadorInicial = e.equipe.find(f => f.papel === 'func' && f.especialidade === 'criacao') || e.equipe.find(f => f.papel === 'func');
-    if (projetoInicial && criadorInicial) {
-      const kitInicial = S.factory.porId('landing');
-      const tInicial = novaTarefa({titulo:'Construir a primeira entrega pública', kit:kitInicial.id, briefing:'Criar uma página completa e publicável a partir exclusivamente dos dados registrados no projeto. Não inventar clientes, números, preços ou prazos.', para:criadorInicial.id, projectId:projetoInicial.id, origem:'fundação'});
-      if (tInicial) projetoInicial.atividade.unshift({t:Date.now(),tipo:'tarefa',texto:'Fila produtiva iniciada com a primeira entrega pública.'});
-    }
+    if (projetoInicial) projetoInicial.atividade.unshift({t:Date.now(),tipo:'fundacao',texto:'Empresa fundada; aguardando a primeira decisão organizacional.'});
     S.state.gravarJa();
     S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
     S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
     return e;
   }
 
-/* ============================================================
-   AGENCY — camada de autonomia organizacional.
-   O funcionário não recebe uma sequência de produção. Ele observa o estado
-   da empresa, delibera sobre o que seria útil agora e escolhe uma ação.
-   Regras locais existem apenas como segurança operacional, nunca como roteiro
-   obrigatório de produção.
-   ============================================================ */
-(function (S) {
-  'use strict';
-
-  const DECISAO_MIN_MS = 45000;
-  const max = (v, n) => String(v || '').slice(0, n);
-
-  function agora() { return Date.now(); }
-  function projetoAtual(e, p) {
-    if (!e) return null;
-    const pid = p && p.ref && p.ref.projetoId;
-    return e.projetos.find(x => x.id === pid && x.status === 'ativo')
-      || e.projetos.find(x => x.status === 'ativo') || e.projetos[0] || null;
-  }
-  function arquivosDoProjeto(e, pr) {
-    if (!e || !pr) return [];
-    const ids = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
-    return ids.map(id => e.arquivos.find(a => a.id === id)).filter(Boolean).slice(0, 12);
-  }
-  function tarefasDoProjeto(e, pr) {
-    if (!e || !pr) return [];
-    return e.tarefas.filter(t => t.projectId === pr.id && t.status !== 'feita').slice(0, 12);
-  }
-  function equipeContexto(e) {
-    return (e.equipe || []).map(f => {
-      const estado = f.papel === 'gerente' ? 'gerente' : (f.estado || 'disponível');
-      return `${f.id}=${f.nome} (${f.cargo}, ${f.especialidade}, ${estado}, energia ${Math.round(Number(f.energia)||0)}, foco: ${max(f.foco,90)})`;
-    }).join('; ');
-  }
-  function contexto(e, p) {
-    const pr = projetoAtual(e, p);
-    const arqs = arquivosDoProjeto(e, pr);
-    const tarefas = tarefasDoProjeto(e, pr);
-    const memorias = Array.isArray(p.ref && p.ref.memoria) ? p.ref.memoria : (Array.isArray(p.memoria) ? p.memoria : []);
-    const decisoes = (e.decisoes || []).slice(0, 8).map(d => max(d.texto,180)).join(' | ');
-    return {
-      projeto: pr,
-      texto: [
-        `EMPRESA: ${e.nome} | ramo: ${e.ramo} | missão: ${e.missao} | público: ${e.publico} | tom: ${e.tom}`,
-        `PROJETO: ${pr ? pr.nome : 'nenhum'} | objetivo: ${pr ? pr.objetivo : e.missao} | status: ${pr ? pr.status : 'sem projeto'}`,
-        `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}, q${a.qualidade||0}]`).join('; ') : 'nenhum'}`,
-        `TRABALHO ABERTO: ${tarefas.length ? tarefas.map(t => `${t.id}:${t.titulo}[${t.status}, responsável=${t.para||'livre'}, base=${t.baseArquivoId||'nenhuma'}]`).join('; ') : 'nenhum'}`,
-        `EQUIPE: ${equipeContexto(e)}`,
-        `MEMÓRIA DE ${p.nome}: ${memorias.slice(-8).map(m => typeof m === 'string' ? m : (m.texto || '')).filter(Boolean).join(' | ') || 'nenhuma'}`,
-        `DECISÕES RECENTES: ${decisoes || 'nenhuma'}`,
-        `IDEIAS RECENTES: ${(e.ideias||[]).slice(0,5).map(x => typeof x === 'string' ? x : x.texto || '').filter(Boolean).join(' | ') || 'nenhuma'}`
-      ].join('\n'),
-      arquivos: arqs,
-      tarefas,
-      projeto: pr
-    };
-  }
-
-  function normalizar(c, ctx) {
-    const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','planejar','esperar'];
-    let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
-    const kit = String(c.kit || '').trim();
-    const taskId = String(c.tarefa || '').trim();
-    const para = String(c.para || '').trim();
-    return {
-      acao, tarefa: taskId, para, kit,
-      titulo: max(c.titulo, 180),
-      briefing: max(c.brief, 500),
-      base: max(c.base, 120),
-      motivo: max(c.motivo, 280),
-      abordagem: max(c.abordagem, 320),
-      risco: max(c.risco, 240),
-      projetoId: ctx.projeto ? ctx.projeto.id : '',
-      em: agora()
-    };
-  }
-
-  async function decidir(p, forcar) {
-    const e = S.state.atual();
-    if (!e || !p || !p.ref) return null;
-    p._agencia = p._agencia || { ultima: 0, ultimaAcao: null };
-    if (!forcar && agora() - p._agencia.ultima < DECISAO_MIN_MS) return p._agencia.ultimaAcao;
-    if (!S.ai.disponivel()) return null;
-
-    const ctx = contexto(e, p);
-    p._agencia.ultima = agora();
-    p.ref.foco = 'observando a empresa e deliberando';
-    p.ref.pensamento = 'Estou olhando o objetivo, o trabalho existente e o que já foi construído antes de escolher uma ação.';
-    S.bus.emit('equipe');
-
-    const sistema = `Você é ${p.nome}, ${p.cargo}, integrante da empresa ${e.nome}. Você não existe para preencher uma fila nem para manter atividade artificial. Você é um agente responsável por contribuir para uma organização real.
-
-${ctx.texto}
-
-Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados acima e por suas capacidades. Você pode escolher uma ação diferente a cada ciclo. Não há ordem obrigatória de produção. Não crie uma tarefa só para manter o escritório ocupado.
-
-Pense profundamente antes de decidir. Compare o valor das alternativas, observe dependências, procure oportunidades de melhorar o que já existe e considere se outra pessoa precisa ser envolvida. O resultado persistido deve ser apenas a decisão operacional, nunca seu raciocínio privado passo a passo.
-
-Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, planejar, esperar.
-- executar_tarefa: escolha uma tarefa aberta que realmente combine com você.
-- criar_tarefa: crie trabalho concreto que seja consequência do estado atual, preferindo evolução ou integração de algo existente.
-- revisar: examine uma entrega ou problema existente; só use se houver algo concreto para revisar.
-- estudar: adquira contexto do próprio acervo/objetivo para preparar uma ação futura; não finja que isso é produção.
-- colaborar: procure outro membro porque existe uma dependência ou decisão que se beneficia de colaboração.
-- planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
-- esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
-
-Se criar_tarefa, escolha um kit existente apenas se ele for adequado ao trabalho. O kit é uma ferramenta, não um roteiro. Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
-
-Retorne SOMENTE:
-ACAO: <uma das ações>
-TAREFA: <id da tarefa existente ou vazio>
-KIT: <id do kit existente ou vazio>
-TITULO: <se criar tarefa, título concreto; senão vazio>
-BRIEF: <se criar tarefa, briefing verificável; senão vazio>
-BASE: <id do artefato existente que deve ser evoluído/revisado ou vazio>
-PARA: <id de colega que deve receber colaboração/handoff ou vazio>
-MOTIVO: <por que esta é a melhor ação agora, até 35 palavras>
-ABORDAGEM: <como pretende agir, até 45 palavras>
-RISCO: <principal risco ou incerteza, até 30 palavras>`;
-
-    try {
-      const r = await S.ai.deliberar({
-        sistema,
-        pedido: 'Decida agora o próximo passo mais útil para a empresa. Não tente parecer produtivo: seja útil, coerente e capaz de explicar a decisão de forma curta.',
-        tokens: 900,
-        agente: p.nome,
-        motivo: 'deliberação autônoma organizacional'
-      });
-      const d = normalizar(r.campos || {}, ctx);
-      p._agencia.ultimaAcao = d;
-      p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada'}`.slice(0, 500);
-      if (d.motivo) {
-        p.memoria = Array.isArray(p.memoria) ? p.memoria : [];
-        p.memoria.unshift({ t: agora(), texto: `Autonomia: ${d.acao}. ${d.motivo}` });
-        p.memoria = p.memoria.slice(0, 24);
-      }
-      S.bus.emit('equipe');
-      return d;
-    } catch (err) {
-      p._agencia.ultimaAcao = null;
-      p.ref.pensamento = 'Não consegui deliberar agora; vou preservar o contexto e não fabricar trabalho.';
-      S.bus.emit('equipe');
-      return null;
-    }
-  }
-
-  function marcarAcao(p, d) {
-    if (!p) return;
-    p._agencia = p._agencia || {};
-    p._agencia.ultimaAcao = d || null;
-    p._agencia.ultima = agora();
-  }
-
-  S.agency = { decidir, contexto, marcarAcao, DECISAO_MIN_MS };
-})(window.S);
-
-  /* ---------- motor ---------- */
+  /* ---------- motor: autonomia organizacional ---------- */
   async function ciclo(meu) {
     if (meu !== token) return;
     const e = S.state.atual();
@@ -4318,45 +4266,116 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     S.bus.emit('relogio');
     liberarAprovacoesInternas();
 
-    // A supervisão operacional não depende de IA: a gerente sempre acompanha
-    // carga, gargalos e capacidade mesmo quando a produção de conteúdo está parada.
+    // Pausar é uma ordem operacional, não apenas uma pausa de chamadas HTTP.
+    // Nenhum agente assume tarefa, produz ou publica enquanto a equipe estiver
+    // pausada; apenas a simulação visual/vitais continuam.
+    if (S.ai.estado && S.ai.estado.pausado) {
+      rt.forEach(p => { if (!p.ocupado) { p.ref.foco = ''; p.ref.pensamento = 'Equipe pausada; aguardando retomada.'; } });
+      S.bus.emit('equipe');
+      return;
+    }
+    // Maestro robusto: uma revisão global a cada ~3 min. Funcionários continuam no modelo econômico.
+    if (S.ai.disponivel() && S.agency && S.agency.maestro) S.agency.maestro().catch(()=>{});
+
     const g = gerente();
     if (g) monitorarEquipe(g);
-    // A operação básica nunca depende de a API estar disponível.
-    // A IA melhora decisões e entregas, mas não pode fazer o escritório parar.
-    const livre = rt.find(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && (p.ref.energia > 20));
-    if (livre) {
-      const t = proximaPara(livre);
-      if (t) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
-        if (!S.ai.pronta() || !S.ai.disponivel()) { await atividadeSemIA(livre, t); return; }
+
+    // Primeiro, resolvemos trabalho explicitamente atribuído. Isso preserva
+    // dependências e handoffs reais. A escolha entre tarefas livres, porém,
+    // passa pela agência do funcionário em vez de proximaPara()/if-else.
+    const livres = rt.filter(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && Number(p.ref.energia) > 20);
+    for (const p of livres.slice(0, 2)) {
+      const atribuida = tarefasAbertas().find(t => t.para === p.id && dependenciasOK(t));
+      if (atribuida && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        await executar(p, atribuida);
+        return;
+      }
+
+      // A agência só é consultada quando o funcionário está realmente livre e
+      // respeita um intervalo próprio por pessoa. Não há cronômetro que obrigue
+      // uma pessoa a produzir; ela pode escolher estudar, colaborar ou esperar.
+      if (!atribuida && S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        const d = await S.agency.decidir(p);
+        if (d) {
+          const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+          if (d.acao === 'executar_tarefa' && d.tarefa) {
+            const t = e.tarefas.find(x => x.id === d.tarefa && x.status === 'aberta' && dependenciasOK(x));
+            if (t) { S.agency.marcarAcao(p, d); await executar(p, t); return; }
+          } else if (d.acao === 'criar_tarefa' && projeto && d.kit && S.factory.porId(d.kit) && d.titulo && d.briefing) {
+            const t = novaTarefa({
+              titulo: d.titulo, kit: d.kit, briefing: d.briefing,
+              para: p.id, projectId: projeto.id, baseArquivoId: d.base || null, origem: 'decisão autônoma'
+            });
+            if (t) {
+              p.ref.foco = t.titulo;
+              logPessoa(p, `transformou sua decisão em trabalho concreto: "${t.titulo}".`, 'autonomia');
+              S.state.registrar(`${p.nome} criou uma tarefa a partir da própria avaliação do estado da empresa.`, 'info', p.id);
+              S.state.gravar();
+              await executar(p, t);
+              return;
+            }
+          } else if (d.acao === 'construir') {
+            construirAmbiente(p, d.objeto, d.motivo || d.abordagem);
+            return;
+          } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
+            // Essas ações têm valor organizacional mesmo sem gerar arquivo.
+            // O modo sem IA não simula esse tipo de decisão.
+            const frase = {
+              revisar: 'revisando o acervo e procurando melhorias concretas',
+              estudar: 'estudando o contexto do projeto para preparar uma ação futura',
+              colaborar: d.para ? `alinhando uma dependência com ${d.para}` : 'observando onde uma colaboração seria útil',
+              planejar: 'organizando uma decisão de escopo antes de agir',
+              esperar: 'aguardando porque uma ação agora teria pouco valor'
+            }[d.acao];
+            p.ref.foco = frase;
+            p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão consciente'}`.slice(0, 500);
+            logPessoa(p, frase + (d.motivo ? ` — ${d.motivo}` : '.'), 'autonomia');
+            if (d.acao === 'estudar' || d.acao === 'revisar') await atividadeSemIA(p, { titulo: d.base ? `Contextualizar ${d.base}` : 'Estudo do projeto', projectId: projeto && projeto.id });
+            else { S.state.gravar(); S.bus.emit('equipe'); }
+            return;
+          }
+        }
+      }
+
+      // Sem IA, não inventamos uma tarefa nem usamos uma sequência fixa. O
+      // funcionário pode fazer trabalho de preparação sobre uma tarefa já
+      // existente, mas não cria artefatos fictícios.
+      const aberta = tarefasAbertas().find(t => !t.para && dependenciasOK(t));
+      if (!S.ai.disponivel()) {
+        await atividadeSemIA(p, aberta || { titulo: 'Estudar o estado atual da empresa', projectId: (e.projetos.find(x => x.status === 'ativo') || e.projetos[0] || {}).id });
+        return;
       }
     }
-    // Dependências normais não geram reunião. Elas são resolvidas pelo próprio
-    // fluxo de handoff: uma tarefa termina, então a próxima fica executável.
-    // Reuniões ficam reservadas para decisões reais iniciadas pelo dono ou pela gerente.
-    // Gerência: quando há IA, usa análise; sem IA, mantém uma linha operacional local.
+
+    // A gerente também tem agência. Ela não é mais obrigada a manter uma fila
+    // viva. Primeiro cuida de um candidato que exige gate; depois pode decidir
+    // criar/reorientar trabalho com base no estado real.
     if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
-      // Primeiro: nunca deixar a equipe sem trabalho concreto.
-      if (tarefasAbertas().length === 0 && !candidato) {
-        garantirTrabalhoInicial(g);
-        return;
+      if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+
+      if (S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        const d = await S.agency.decidir(g);
+        if (d && d.acao === 'criar_tarefa' && d.kit && d.titulo && d.briefing) {
+          const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+          const alvo = d.para ? e.equipe.find(f => f.id === d.para && f.papel === 'func') : null;
+          const t = novaTarefa({ titulo:d.titulo, kit:d.kit, briefing:d.briefing, para:alvo ? alvo.id : null, projectId:projeto && projeto.id, baseArquivoId:d.base || null, origem:'decisão autônoma da gerência' });
+          if (t) {
+            g.ref.foco = t.titulo;
+            g.ref.pensamento = `${d.motivo || d.abordagem || 'A equipe precisa de uma próxima contribuição concreta.'}`.slice(0,500);
+            S.state.registrar(`${g.nome} decidiu autonomamente a próxima frente: ${t.titulo}.`, 'info', g.id);
+            S.state.gravar();
+          }
+          return;
+        }
+        if (d && d.acao !== 'esperar') {
+          g.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão organizacional'}`.slice(0,500);
+          logPessoa(g, `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada a partir do estado da empresa.'}`, 'autonomia');
+          S.state.gravar(); S.bus.emit('equipe');
+          return;
+        }
       }
-      // Segundo: nenhum artefato vira produto final apenas por nota estrutural.
-      // A gerente faz um único gate de release; se aprovar, congela esta versão.
-      if (candidato) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
-        // Sem IA disponível a gerente não julga o candidato, mas também não
-        // fica de braços cruzados: segue supervisionando a operação.
-        monitorarEquipe(g);
-        return;
-      }
-      // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.
-      if (tarefasAbertas().length < 2) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) await planejar(g);
-        else planejarLocal(g);
-      } else monitorarEquipe(g);
+      monitorarEquipe(g);
     }
   }
 
@@ -4384,6 +4403,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
   function ajustarCanvas() {
     cv = document.getElementById('floor'); if (!cv) return;
     cx = cv.getContext('2d');
+    if (cx) cx.imageSmoothingEnabled = false;
     const linhas = Math.ceil(Math.max(1, rt.length) / (rt.length > 4 ? 3 : 2));
     alturaLog = 74 + linhas * 96 + 96;
     const larguraCSS = (cv.parentElement.clientWidth || 0) - 2;
@@ -4407,10 +4427,31 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
   function desenhar(agora) {
     if (!cx) return;
     cx.clearRect(0, 0, larguraLog, alturaLog);
-    // piso
-    cx.fillStyle = '#13171A'; cx.fillRect(0, 0, larguraLog, alturaLog);
-    cx.fillStyle = 'rgba(255,255,255,.035)';
-    for (let x = 24; x < larguraLog; x += 40) for (let y = 24; y < alturaLog; y += 40) cx.fillRect(x, y, 1.5, 1.5);
+    // Piso em pixel art: blocos discretos, paredes, janelas e pequenas áreas de uso.
+    cx.fillStyle = '#101418'; cx.fillRect(0, 0, larguraLog, alturaLog);
+    cx.fillStyle = '#181E22'; cx.fillRect(14, 14, larguraLog-28, alturaLog-28);
+    cx.fillStyle = '#20272B';
+    for (let x = 24; x < larguraLog-20; x += 32) for (let y = 24; y < alturaLog-20; y += 32) cx.fillRect(x, y, 30, 30);
+    cx.fillStyle = '#2A3237'; cx.fillRect(18,18,larguraLog-36,5); cx.fillRect(18,18,5,alturaLog-36); cx.fillRect(larguraLog-23,18,5,alturaLog-36);
+    // janela
+    cx.fillStyle='#25353A'; cx.fillRect(470,22,140,48); cx.fillStyle='#77A6A8'; cx.fillRect(478,30,124,32); cx.fillStyle='#B8D6C7'; cx.fillRect(482,34,116,24);
+    cx.fillStyle='#31454A'; cx.fillRect(536,30,4,32); cx.fillRect(478,44,124,4);
+    // tapete
+    cx.fillStyle='#1D2930'; cx.fillRect(262,246,188,72); cx.fillStyle='#283840'; cx.fillRect(270,254,172,56);
+
+    // Objetos persistentes construídos pelos agentes.
+    const objs=(S.state.atual()&&S.state.atual().ambiente&&S.state.atual().ambiente.objetos)||[];
+    objs.forEach(o=>{
+      const x=Number(o.x)||80,y=Number(o.y)||80;
+      cx.fillStyle='rgba(0,0,0,.3)'; cx.fillRect(x-8,y+20,Math.max(18,(o.tipo==='sofa'?70:40)),5);
+      cx.fillStyle='#3A4448';
+      if(o.tipo==='planta'){ cx.fillStyle='#4F7A60'; cx.fillRect(x-5,y+2,10,18); cx.fillRect(x-12,y-5,8,12); cx.fillRect(x+4,y-8,8,14); cx.fillStyle='#705A43'; cx.fillRect(x-7,y+18,14,8); }
+      else if(o.tipo==='estante'){ cx.fillStyle='#6A5040'; cx.fillRect(x-18,y-24,36,48); cx.fillStyle='#9A7556'; cx.fillRect(x-14,y-14,28,4); cx.fillRect(x-14,y+2,28,4); cx.fillRect(x-14,y+18,28,4); }
+      else if(o.tipo==='sofa'){ cx.fillStyle='#4B5961'; cx.fillRect(x-36,y-8,72,24); cx.fillRect(x-30,y-17,60,12); }
+      else if(o.tipo==='quadro'){ cx.fillStyle='#6B4E3D'; cx.fillRect(x-31,y-6,62,12); cx.fillStyle='#B4C7B4'; cx.fillRect(x-25,y-2,50,4); }
+      else if(o.tipo==='luminaria'){ cx.fillStyle='#B69B61'; cx.fillRect(x-2,y-18,4,30); cx.fillRect(x-9,y-21,18,5); }
+      else { cx.fillStyle='#6A5040'; cx.fillRect(x-(o.tipo==='bancada'?38:27),y-10,o.tipo==='bancada'?76:54,20); cx.fillStyle='#303A3E'; cx.fillRect(x-18,y-6,36,10); }
+    });
 
     // estações
     Object.keys(ESTACOES).forEach(k => {
@@ -4544,7 +4585,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     pessoas: () => rt, pessoa, gerente,
     novaTarefa, tarefasAbertas, executar, avaliarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
-    contratar, demitir, custoContratacao, fundar,
+    contratar, demitir, custoContratacao, fundar, construirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };
@@ -4592,7 +4633,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     $$('.view').forEach(v => v.classList.toggle('is-on', v.id === 'v-' + view));
     $$('.nav-item').forEach(b => b.classList.toggle('is-on', b.dataset.view === view));
     $('#nav').style.visibility = e ? 'visible' : 'hidden';
-    if (view === 'estudio') { S.studio.ajustarCanvas(); }
+    if (view === 'estudio') { S.studio.ajustarCanvas(); pintarEconomia(); pintarAmbienteBar(); }
     if (view === 'motor') pintarMotor();
     if (view === 'entregas') { pintarArquivos(); }
     if (view === 'trabalho') pintarTrabalho();
@@ -4649,7 +4690,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
           <span class="member-name">${esc(p.nome)} ${p.ocupado ? '<i class="thinking">trabalhando</i>' : ''}</span>
           <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · coordena e remove bloqueios' : ''}</span>
           <span class="member-personality">${esc((((f.personalidade&&f.personalidade.tracos)||[]).slice(0,2).join(' · ')) || 'perfil em formação')}</span>
-          <span class="member-status">${esc(estado)}</span>
+          <span class="member-status">${esc(estado)} · comissão ${esc(F.brl(f.comissaoTotal||0))}</span>
         </span>
         <span class="bars">
           ${barra('energia', f.energia)}
@@ -4659,6 +4700,26 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     }).join('') || '<div class="empty">Sem equipe.</div>';
     $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
     pintarGerencia();
+  }
+
+  function pintarEconomia() {
+    const e=S.state.atual(); const box=$('#economiaPanel'); if(!e||!box) return;
+    const n=S.market.normalizar(e), i=S.market.indicadores(e), objs=(e.ambiente&&e.ambiente.objetos)||[];
+    const com=(e.comissoes||[]).reduce((a,x)=>a+Number(x.valor||0),0);
+    box.innerHTML=`<div class="panel-head"><div><span class="panel-label">Economia real da simulação</span><span class="panel-subtitle">produto final gera receita; comissão só existe quando há contribuição registrada</span></div><span class="chip">${esc(F.brl(n.caixa))} em caixa</span></div>
+      <div class="economy-grid">
+        <div class="economy-card"><b>${esc(F.brl(n.caixa))}</b><span>caixa atual</span></div>
+        <div class="economy-card"><b>${esc(F.brl(n.receitaMercado))}</b><span>receita acumulada</span></div>
+        <div class="economy-card"><b>${esc(F.brl(com))}</b><span>comissões pagas</span></div>
+        <div class="economy-card"><b>${esc(F.num((e.recompensas||[]).length))}</b><span>produtos recompensados</span></div>
+      </div>
+      <p class="panel-foot">Qualidade média ${F.pct(n.qualidade)} · ${F.num(objs.length)} objetos no escritório · lucro operacional ${F.brl(i.lucroOperacional)}.</p>`;
+  }
+
+  function pintarAmbienteBar(){
+    const e=S.state.atual(), box=$('#environmentBar'); if(!e||!box) return;
+    const a=e.ambiente||{}, objs=a.objetos||[];
+    box.innerHTML=`<span class="env-chip">🧱 ${objs.length} construções</span><span class="env-chip">🪙 ${F.brl(a.moedas||0)} orçamento do ambiente</span><span class="env-chip">${esc(a.tema||'oficina')}</span>`;
   }
 
   function pintarGerencia() {
@@ -5282,12 +5343,13 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
     S.bus.on('gerencia', () => pintarGerencia());
     S.bus.on('equipe', () => pintarGerencia());
     S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
-    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); S.studio.ajustarCanvas(); } });
+    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); pintarEconomia(); pintarAmbienteBar(); S.studio.ajustarCanvas(); } });
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
     S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
     S.bus.on('reuniao', () => { if (viewAtual === 'reuniao') pintarReuniao(); });
-    S.bus.on('negocio', () => { });
+    S.bus.on('negocio', () => { if (viewAtual === 'estudio') pintarEconomia(); });
+    S.bus.on('ambiente', () => { if (viewAtual === 'estudio') pintarAmbienteBar(); });
   S.bus.on('ideias', () => { if (viewAtual === 'trabalho') pintarIdeias(); });
     S.bus.on('relogio', () => { pintarRelogio(); });
     S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
@@ -5298,7 +5360,7 @@ RISCO: <principal risco ou incerteza, até 30 palavras>`;
   function pintarTudo() {
     pintarTopo(); pintarRelogio();
     if (!S.state.atual()) return;
-    pintarEquipe(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
+    pintarEquipe(); pintarEconomia(); pintarAmbienteBar(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
   }
 
   /* ---------- início ---------- */

@@ -57,7 +57,7 @@
       e.negocio = {
         inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
         capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
-        receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+        receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
         pedidos: 0, clientes: 0, visitas: 0, leads: 0,
         preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
         reputacao: 46, qualidade: 0, historico: []
@@ -67,7 +67,7 @@
     const padroes = {
       inicio: Date.now(), ultimaApuracao: Date.now(), minutos: 8 * 60,
       capitalInicial: ECON.capitalInicial, caixa: ECON.capitalInicial,
-      receitaMercado: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
+      receitaMercado: 0, receitaProdutos: 0, receitaContratos: 0, custoDireto: 0, despesaOperacional: 0,
       pedidos: 0, clientes: 0, visitas: 0, leads: 0,
       preco: p.preco, custoUnitario: p.custo, capacidadeDia: p.capacidadeDia,
       reputacao: 46, qualidade: 0

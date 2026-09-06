@@ -113,14 +113,16 @@
 
     <!-- ESTÚDIO -->
     <section class="view" id="v-estudio">
-      <div class="floor-wrap panel">
+      <div class="floor-wrap panel pixel-office">
         <div class="panel-head">
-          <span class="panel-label">Chão do estúdio</span>
+          <div><span class="panel-label">Ambiente vivo</span><span class="panel-subtitle">a equipe também constrói o próprio local de trabalho</span></div>
           <span class="chip" id="floorStatus">parado</span>
         </div>
-        <canvas id="floor" aria-label="Planta do estúdio com a equipe"></canvas>
-        <p class="panel-foot" id="floorFoot">Toque em alguém para ver o que está fazendo, seu log individual e sua rotina de bem-estar.</p>
+        <canvas id="floor" aria-label="Ambiente pixel art com a equipe e objetos construídos"></canvas>
+        <div class="environment-bar" id="environmentBar"></div>
+        <p class="panel-foot" id="floorFoot">Os agentes podem reorganizar o espaço quando uma mudança tiver utilidade real. Móveis e decoração permanecem salvos.</p>
       </div>
+      <div class="panel" id="economiaPanel"></div>
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
         <div class="team" id="teamList"></div>
