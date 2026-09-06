@@ -1190,21 +1190,18 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.market.normalizar(e);
     S.DB.estudios.unshift(e);
     S.DB.atual = e.id;
-    // O estúdio nasce com uma fila produtiva real; não começa por uma reunião de ideias.
+    // A empresa nasce sem uma fila artificial. O primeiro passo será escolhido
+    // pela própria organização quando houver capacidade de IA; sem IA, a equipe
+    // permanece em estado de preparação, sem fabricar trabalho.
     const projetoInicial = e.projetos[0];
-    const criadorInicial = e.equipe.find(f => f.papel === 'func' && f.especialidade === 'criacao') || e.equipe.find(f => f.papel === 'func');
-    if (projetoInicial && criadorInicial) {
-      const kitInicial = S.factory.porId('landing');
-      const tInicial = novaTarefa({titulo:'Construir a primeira entrega pública', kit:kitInicial.id, briefing:'Criar uma página completa e publicável a partir exclusivamente dos dados registrados no projeto. Não inventar clientes, números, preços ou prazos.', para:criadorInicial.id, projectId:projetoInicial.id, origem:'fundação'});
-      if (tInicial) projetoInicial.atividade.unshift({t:Date.now(),tipo:'tarefa',texto:'Fila produtiva iniciada com a primeira entrega pública.'});
-    }
+    if (projetoInicial) projetoInicial.atividade.unshift({t:Date.now(),tipo:'fundacao',texto:'Empresa fundada; aguardando a primeira decisão organizacional.'});
     S.state.gravarJa();
     S.state.registrar(`${nome} foi fundado. Caixa inicial de ${S.fmt.brl(S.market.ECON.capitalInicial)}.`, 'ok');
     S.bus.emit('trocou');   // a UI reconstrói o runtime a partir daqui
     return e;
   }
 
-  /* ---------- motor ---------- */
+  /* ---------- motor: autonomia organizacional ---------- */
   async function ciclo(meu) {
     if (meu !== token) return;
     const e = S.state.atual();
@@ -1212,45 +1209,111 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     S.bus.emit('relogio');
     liberarAprovacoesInternas();
 
-    // A supervisão operacional não depende de IA: a gerente sempre acompanha
-    // carga, gargalos e capacidade mesmo quando a produção de conteúdo está parada.
+    // Pausar é uma ordem operacional, não apenas uma pausa de chamadas HTTP.
+    // Nenhum agente assume tarefa, produz ou publica enquanto a equipe estiver
+    // pausada; apenas a simulação visual/vitais continuam.
+    if (S.ai.estado && S.ai.estado.pausado) {
+      rt.forEach(p => { if (!p.ocupado) { p.ref.foco = ''; p.ref.pensamento = 'Equipe pausada; aguardando retomada.'; } });
+      S.bus.emit('equipe');
+      return;
+    }
+
     const g = gerente();
     if (g) monitorarEquipe(g);
-    // A operação básica nunca depende de a API estar disponível.
-    // A IA melhora decisões e entregas, mas não pode fazer o escritório parar.
-    const livre = rt.find(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && (p.ref.energia > 20));
-    if (livre) {
-      const t = proximaPara(livre);
-      if (t) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await executar(livre, t); return; }
-        if (!S.ai.pronta() || !S.ai.disponivel()) { await atividadeSemIA(livre, t); return; }
+
+    // Primeiro, resolvemos trabalho explicitamente atribuído. Isso preserva
+    // dependências e handoffs reais. A escolha entre tarefas livres, porém,
+    // passa pela agência do funcionário em vez de proximaPara()/if-else.
+    const livres = rt.filter(p => p.papel === 'func' && !p.ocupado && p.estado !== 'pausa' && Number(p.ref.energia) > 20);
+    for (const p of livres.slice(0, 2)) {
+      const atribuida = tarefasAbertas().find(t => t.para === p.id && dependenciasOK(t));
+      if (atribuida && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        await executar(p, atribuida);
+        return;
+      }
+
+      // A agência só é consultada quando o funcionário está realmente livre e
+      // respeita um intervalo próprio por pessoa. Não há cronômetro que obrigue
+      // uma pessoa a produzir; ela pode escolher estudar, colaborar ou esperar.
+      if (!atribuida && S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        const d = await S.agency.decidir(p);
+        if (d) {
+          const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+          if (d.acao === 'executar_tarefa' && d.tarefa) {
+            const t = e.tarefas.find(x => x.id === d.tarefa && x.status === 'aberta' && dependenciasOK(x));
+            if (t) { S.agency.marcarAcao(p, d); await executar(p, t); return; }
+          } else if (d.acao === 'criar_tarefa' && projeto && d.kit && S.factory.porId(d.kit) && d.titulo && d.briefing) {
+            const t = novaTarefa({
+              titulo: d.titulo, kit: d.kit, briefing: d.briefing,
+              para: p.id, projectId: projeto.id, baseArquivoId: d.base || null, origem: 'decisão autônoma'
+            });
+            if (t) {
+              p.ref.foco = t.titulo;
+              logPessoa(p, `transformou sua decisão em trabalho concreto: "${t.titulo}".`, 'autonomia');
+              S.state.registrar(`${p.nome} criou uma tarefa a partir da própria avaliação do estado da empresa.`, 'info', p.id);
+              S.state.gravar();
+              await executar(p, t);
+              return;
+            }
+          } else if (d.acao === 'revisar' || d.acao === 'estudar' || d.acao === 'colaborar' || d.acao === 'planejar' || d.acao === 'esperar') {
+            // Essas ações têm valor organizacional mesmo sem gerar arquivo.
+            // O modo sem IA não simula esse tipo de decisão.
+            const frase = {
+              revisar: 'revisando o acervo e procurando melhorias concretas',
+              estudar: 'estudando o contexto do projeto para preparar uma ação futura',
+              colaborar: d.para ? `alinhando uma dependência com ${d.para}` : 'observando onde uma colaboração seria útil',
+              planejar: 'organizando uma decisão de escopo antes de agir',
+              esperar: 'aguardando porque uma ação agora teria pouco valor'
+            }[d.acao];
+            p.ref.foco = frase;
+            p.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão consciente'}`.slice(0, 500);
+            logPessoa(p, frase + (d.motivo ? ` — ${d.motivo}` : '.'), 'autonomia');
+            if (d.acao === 'estudar' || d.acao === 'revisar') await atividadeSemIA(p, { titulo: d.base ? `Contextualizar ${d.base}` : 'Estudo do projeto', projectId: projeto && projeto.id });
+            else { S.state.gravar(); S.bus.emit('equipe'); }
+            return;
+          }
+        }
+      }
+
+      // Sem IA, não inventamos uma tarefa nem usamos uma sequência fixa. O
+      // funcionário pode fazer trabalho de preparação sobre uma tarefa já
+      // existente, mas não cria artefatos fictícios.
+      const aberta = tarefasAbertas().find(t => !t.para && dependenciasOK(t));
+      if (!S.ai.disponivel()) {
+        await atividadeSemIA(p, aberta || { titulo: 'Estudar o estado atual da empresa', projectId: (e.projetos.find(x => x.status === 'ativo') || e.projetos[0] || {}).id });
+        return;
       }
     }
-    // Dependências normais não geram reunião. Elas são resolvidas pelo próprio
-    // fluxo de handoff: uma tarefa termina, então a próxima fica executável.
-    // Reuniões ficam reservadas para decisões reais iniciadas pelo dono ou pela gerente.
-    // Gerência: quando há IA, usa análise; sem IA, mantém uma linha operacional local.
+
+    // A gerente também tem agência. Ela não é mais obrigada a manter uma fila
+    // viva. Primeiro cuida de um candidato que exige gate; depois pode decidir
+    // criar/reorientar trabalho com base no estado real.
     if (g && !g.ocupado) {
       const candidato = e.arquivos.find(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
-      // Primeiro: nunca deixar a equipe sem trabalho concreto.
-      if (tarefasAbertas().length === 0 && !candidato) {
-        garantirTrabalhoInicial(g);
-        return;
+      if (candidato && S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
+
+      if (S.agency && S.ai.disponivel() && S.ai.reservarAutonomia()) {
+        const d = await S.agency.decidir(g);
+        if (d && d.acao === 'criar_tarefa' && d.kit && d.titulo && d.briefing) {
+          const projeto = e.projetos.find(x => x.id === d.projetoId) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
+          const alvo = d.para ? e.equipe.find(f => f.id === d.para && f.papel === 'func') : null;
+          const t = novaTarefa({ titulo:d.titulo, kit:d.kit, briefing:d.briefing, para:alvo ? alvo.id : null, projectId:projeto && projeto.id, baseArquivoId:d.base || null, origem:'decisão autônoma da gerência' });
+          if (t) {
+            g.ref.foco = t.titulo;
+            g.ref.pensamento = `${d.motivo || d.abordagem || 'A equipe precisa de uma próxima contribuição concreta.'}`.slice(0,500);
+            S.state.registrar(`${g.nome} decidiu autonomamente a próxima frente: ${t.titulo}.`, 'info', g.id);
+            S.state.gravar();
+          }
+          return;
+        }
+        if (d && d.acao !== 'esperar') {
+          g.ref.pensamento = `${d.acao}: ${d.motivo || d.abordagem || 'decisão organizacional'}`.slice(0,500);
+          logPessoa(g, `${d.acao}: ${d.motivo || d.abordagem || 'decisão tomada a partir do estado da empresa.'}`, 'autonomia');
+          S.state.gravar(); S.bus.emit('equipe');
+          return;
+        }
       }
-      // Segundo: nenhum artefato vira produto final apenas por nota estrutural.
-      // A gerente faz um único gate de release; se aprovar, congela esta versão.
-      if (candidato) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) { await avaliar(g); return; }
-        // Sem IA disponível a gerente não julga o candidato, mas também não
-        // fica de braços cruzados: segue supervisionando a operação.
-        monitorarEquipe(g);
-        return;
-      }
-      // Terceiro: uma única etapa seguinte, baseada em fatos e artefatos existentes.
-      if (tarefasAbertas().length < 2) {
-        if (S.ai.disponivel() && S.ai.reservarAutonomia()) await planejar(g);
-        else planejarLocal(g);
-      } else monitorarEquipe(g);
+      monitorarEquipe(g);
     }
   }
 

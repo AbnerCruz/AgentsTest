@@ -166,3 +166,14 @@ Diagnóstico: a fábrica tinha 8 kits e **todos eram material de marketing** —
 - Planejamento com IA: o prompt declara a ordem obrigatória, e o código **recusa** qualquer kit de divulgação enquanto não houver obra no projeto, convertendo a etapa em produção da obra.
 
 **Briefings honestos:** o texto "a partir do portfólio existente" aparecia mesmo com o projeto vazio, o que empurrava o modelo a inventar produtos para preencher. Agora o briefing só menciona acervo quando ele existe, e nesse caso lista os arquivos reais.
+
+
+## v36 — agência organizacional
+
+A simulação agora possui uma camada `agency.js` separada do corpo/runtime dos funcionários. Em vez de depender de uma sequência fixa de produção, agentes livres observam missão, projeto, acervo, tarefas, equipe, decisões e memória antes de escolher entre executar, criar trabalho, revisar, estudar, colaborar, planejar ou esperar.
+
+A escolha é deliberativa e usa esforço de raciocínio alto quando a IA está disponível. O sistema persiste a conclusão operacional, não o raciocínio privado. Kits de produção continuam existindo como ferramentas técnicas, mas deixaram de ser o roteiro obrigatório do ciclo autônomo.
+
+A equipe também respeita uma pausa operacional real: enquanto pausada, nenhum funcionário assume tarefa, produz ou publica. Quando a IA está indisponível, os funcionários podem estudar o acervo e preparar a retomada, sem criar artefatos fictícios.
+
+A versão estática inclui `agency.js` no Service Worker e usa o cache `estudio-v36-organico`.

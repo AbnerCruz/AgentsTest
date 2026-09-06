@@ -1,12 +1,12 @@
 /* Service worker do Estúdio.
-   Só o shell é cacheado. A IA é remota (Groq) e nunca passa por aqui:
+   Só o shell é cacheado. A IA é remota (OpenRouter/Groq) e nunca passa por aqui:
    requisições para outras origens são ignoradas de propósito. */
-const CACHE = 'estudio-v35-organico';
+const CACHE = 'estudio-v36-organico';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './app.css',
   './core.js', './ai.js', './market.js',
-  './factory.js', './studio.js', './ui.js'
+  './factory.js', './agency.js', './studio.js', './ui.js'
 ];
 
 self.addEventListener('install', ev => {
