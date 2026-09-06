@@ -433,7 +433,7 @@
     const pHint = $('#provedorHint');
     if (pHint) pHint.textContent = info.nota;
     const kLabel = $('#apiKeyLabel');
-    if (kLabel) kLabel.textContent = `Chave do ${info.nome}`;
+    if (kLabel) kLabel.textContent = `Chave ${info.rotulo}`;
     const kHint = $('#apiKeyHint');
     if (kHint) kHint.textContent = `A chave fica só neste aparelho, no armazenamento do navegador. Pegue a sua em ${info.console}.`;
     if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';

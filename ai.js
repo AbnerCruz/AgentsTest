@@ -19,6 +19,7 @@
   const PROVEDORES = {
     groq: {
       nome: 'Groq',
+      rotulo: 'da Groq',
       url: 'https://api.groq.com/openai/v1/chat/completions',
       prefixo: 'gsk_',
       regex: /^gsk_[A-Za-z0-9_-]{10,}$/,
@@ -27,6 +28,7 @@
     },
     openrouter: {
       nome: 'OpenRouter',
+      rotulo: 'do OpenRouter',
       url: 'https://openrouter.ai/api/v1/chat/completions',
       prefixo: 'sk-or-',
       regex: /^sk-or-[A-Za-z0-9_-]{10,}$/,
@@ -92,22 +94,28 @@
     'mistral-saba-24b': 'qwen/qwen3.6-27b',
     'qwen-qwq-32b': 'qwen/qwen3.6-27b'
   };
+  const MODELOS_DE = p => (p === 'openrouter' ? MODELOS_OPENROUTER : MODELOS_GROQ);
+
+  /* A migração de modelo depende da lista do provedor, então a lista e a
+     configuração precisam existir antes de qualquer chamada a
+     migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
+  const cfg = Object.assign(
+    { provedor: 'groq', tier: 'free', decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    S.local.json(K_CFG, {})
+  );
+  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'groq';
+
   function migrarModelo(id) {
     const lista = MODELOS_DE(cfg.provedor);
     if (lista.some(m => m.id === id)) return id;
     return MODELOS_MIGRADOS[id] || lista[0].id;
   }
 
-
-  const cfg = Object.assign(
-    { provedor: 'groq', tier: 'free', decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
-    S.local.json(K_CFG, {})
-  );
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
   cfg.revisao = migrarModelo(cfg.revisao);
   S.local.setJson(K_CFG, cfg);
-  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'groq';
+
   /* Cada provedor guarda a própria chave: trocar de um para outro e
      voltar não faz o usuário recolar nada. */
   const chaves = {
@@ -115,7 +123,6 @@
     openrouter: S.local.get(K_CHAVE_OR, '') || ''
   };
   const prov = () => PROVEDORES[cfg.provedor];
-  const MODELOS_DE = p => (p === 'openrouter' ? MODELOS_OPENROUTER : MODELOS_GROQ);
 
 
   let uso = Object.assign(
@@ -248,7 +255,7 @@
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
     const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
-    if (!chave()) throw new Error(`Nenhuma chave do ${prov().nome} configurada.`);
+    if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
@@ -281,8 +288,8 @@
       if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
 
       if (!resp.ok) {
-        const msg = (dados && dados.error && dados.error.message) || `O ${prov().nome} respondeu HTTP ${resp.status}.`;
-        if (resp.status === 401) throw new Error(`Chave do ${prov().nome} inválida ou expirada.`);
+        const msg = (dados && dados.error && dados.error.message) || `${prov().nome} respondeu HTTP ${resp.status}.`;
+        if (resp.status === 401) throw new Error(`Chave ${prov().rotulo} inválida ou expirada.`);
         if (resp.status === 429) {
           // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
           // do estúdio volta sozinho quando a janela reabre.
@@ -290,7 +297,7 @@
           estado.bloqueadaAte = Date.now() + espera;
           estado.ultimo429 = Date.now();
           estado.esperaAtual = espera;
-          const e429 = new Error(`Limite do ${prov().nome} atingido. A equipe retoma em ${Math.ceil(espera / 1000)}s.`);
+          const e429 = new Error(`Limite ${prov().rotulo} atingido. A equipe retoma em ${Math.ceil(espera / 1000)}s.`);
           e429.cota = true;
           throw e429;
         }
@@ -367,7 +374,7 @@
   function salvarCfg(novaChave, decisao, producao, ritmo, revisao) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
-      if (k && !prov().regex.test(k)) throw new Error(`A chave do ${prov().nome} começa com ${prov().prefixo} e é bem mais longa. Confira o que foi colado.`);
+      if (k && !prov().regex.test(k)) throw new Error(`A chave ${prov().rotulo} começa com ${prov().prefixo} e é bem mais longa. Confira o que foi colado.`);
       chaves[cfg.provedor] = k;
     }
     const lista = MODELOS_DE(cfg.provedor);
@@ -432,10 +439,10 @@
       S.local.setJson(K_CFG, cfg);
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
-        chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave do ${PROVEDORES[p].nome}`);
+        chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
     },
     provedorAtual: () => cfg.provedor, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
-    orcamento, pronta, disponivel, PRECOS,
+    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
       S.local.setJson(K_CFG, cfg);
@@ -444,7 +451,7 @@
     temChave: () => Boolean(chave()),
     chaveMascarada: () => (chave() ? chave().slice(0, 7) + '••••••' + chave().slice(-4) : ''),
     pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave() ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave() ? 'IA pronta' : 'IA desligada')); },
-    iniciar() { if (chave()) situar('pronta', 'IA pronta', `chave do ${prov().nome} carregada deste aparelho`); }
+    iniciar() { if (chave()) situar('pronta', 'IA pronta', `chave ${prov().rotulo} carregada deste aparelho`); }
   };
   void sleep;
 })(window.S);
