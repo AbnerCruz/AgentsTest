@@ -222,15 +222,17 @@
           <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
           <p class="hint" id="apiKeyHint"></p>
         </div>
+        <div class="field" id="managementKeyField">
+          <label for="openrouterManagementKeyInput">Management Key OpenRouter · sincronização do saldo</label>
+          <input id="openrouterManagementKeyInput" type="password" placeholder="sk-or-... (Management Key)" autocomplete="off" spellcheck="false">
+          <p class="hint">Usada somente para consultar o crédito real da conta. A chave fica no armazenamento local deste navegador.</p>
+        </div>
         <div class="field" id="chavesAutoField" hidden>
           <label for="groqKeyInput">Chave Groq · gratuita primeiro</label>
           <input id="groqKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
           <label for="openrouterKeyInput" style="margin-top:10px">Chave OpenRouter · fallback pago</label>
           <input id="openrouterKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
-          <label for="openrouterManagementKeyInput" style="margin-top:10px">Management Key OpenRouter · sincronização do saldo</label>
-          <input id="openrouterManagementKeyInput" type="password" placeholder="sk-or-... (Management Key)" autocomplete="off" spellcheck="false">
-          <p class="hint">A API key faz as chamadas. A <strong>Management Key</strong> consulta o crédito real da conta pelo endpoint de créditos. Assim o Estúdio sabe quanto há de verdade na conta, mesmo que você gaste no OpenRouter por outro aplicativo.</p>
-          <p class="hint" style="color:#E4A03E">Segurança: esta é uma aplicação estática no navegador. A Management Key fica somente no armazenamento local deste aparelho; nunca coloque uma chave de gerenciamento em um site público que você não controla.</p>
+          <p class="hint">A API key faz as chamadas; a Management Key consulta o crédito real da conta, mesmo que você gaste no OpenRouter por outro aplicativo.</p>
         </div>
         <div class="field" id="tierField">
           <label for="tierSel">Plano da sua conta Groq</label>
@@ -2645,8 +2647,13 @@ MANIFESTO
       const mm=corpo.match(/MANIFESTO\s*\n([\s\S]*)$/i);
       e.fundacao.planoNegocio=(pm?pm[1]:corpo).trim().slice(0,18000);e.fundacao.primeiroProduto=(fm?fm[1]:corpo).trim().slice(0,14000);identidade.manifesto=(mm?mm[1]:'').trim().slice(0,4000);
       e.nome=identidade.nome||e.nome;e.missao=identidade.missao||e.missao;e.tom=identidade.tom||e.tom;e.publico=e.fundacao.perguntas.publico||e.publico;
-      const validos=new Set(ESPECIALIDADES.map(x=>x.id));e.fundacao.equipePlanejada=parseLista(c.equipe).filter(id=>validos.has(id)).map(especialidade=>({especialidade}));
-      for(const item of e.fundacao.equipePlanejada.slice(0,4)){if(!e.equipe.filter(x=>x.papel!=='gerente').some(x=>x.especialidade===item.especialidade))contratar('',item.especialidade);}
+        const mgmt = $('#openrouterManagementKeyInput');
+        if (mgmt && mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value);
+        if (S.ai.cfg.roteamento === 'automatico') {
+          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
+          S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
+          if(g) g.value=''; if(r) r.value='';
+        } else {
       const pr=e.projetos?.find(x=>x.status==='ativo')||e.projetos?.[0],produtoTit=((e.fundacao.primeiroProduto.match(/(?:^|\n)#{1,3}\s*(?:Nome do produto|Produto|Nome)\s*:?\s*(.+)/i)||[])[1]||'Primeiro produto').trim().slice(0,180);
       if(!pr)e.projetos=[{id:uid('proj'),nome:produtoTit,objetivo:e.fundacao.perguntas.objetivo||'Executar o planejamento do primeiro produto.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}];else if(/primeiro produto|principal|planejamento inicial/i.test(pr.nome)){pr.nome=produtoTit||pr.nome;pr.objetivo=e.fundacao.perguntas.objetivo||pr.objetivo;}
       const active=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];e.site=e.site||{};e.site.projetoId=active?.id||e.site.projetoId;
@@ -3776,11 +3783,12 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         const autoDia = $('#diarioAutoInput');
         const modoOrcamento = $('#modoOrcamentoSel');
         const digitada = key ? key.value.trim() : '';
+        const mgmt = $('#openrouterManagementKeyInput');
+        if (mgmt && mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value);
         if (S.ai.cfg.roteamento === 'automatico') {
-          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput');
+          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
           S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
-          if(mgmt && mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value);
-          if(g) g.value=''; if(r) r.value=''; if(mgmt) mgmt.value='';
+          if(g) g.value=''; if(r) r.value='';
         } else {
           S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
           if (key) key.value = '';
@@ -3802,7 +3810,9 @@ ${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empres
         const diario = $('#limiteDiarioUSDInput');
         const autoDia = $('#diarioAutoInput');
         const modoOrcamento = $('#modoOrcamentoSel');
-        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(mgmt&&mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); if(g) g.value=''; if(r) r.value=''; if(mgmt) mgmt.value=''; }
+        const mgmt = $('#openrouterManagementKeyInput');
+        if (mgmt && mgmt.value.trim()) await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value);
+        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(g) g.value=''; if(r) r.value=''; }
         else if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');

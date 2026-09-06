@@ -873,7 +873,19 @@ MANIFESTO
       const mm=corpo.match(/MANIFESTO\s*\n([\s\S]*)$/i);
       e.fundacao.planoNegocio=(pm?pm[1]:corpo).trim().slice(0,18000);e.fundacao.primeiroProduto=(fm?fm[1]:corpo).trim().slice(0,14000);identidade.manifesto=(mm?mm[1]:'').trim().slice(0,4000);
       e.nome=identidade.nome||e.nome;e.ramo=String(c.ramo||e.ramo||e.fundacao.perguntas.tipoProduto||'empresa de produto');e.missao=identidade.missao||e.missao;e.tom=identidade.tom||e.tom;e.publico=e.fundacao.perguntas.publico||e.publico;
-      const validos=new Set(ESPECIALIDADES.map(x=>x.id));e.fundacao.equipePlanejada=parseLista(c.equipe).filter(id=>validos.has(id)).map(especialidade=>({especialidade}));
+      const validos=new Set(ESPECIALIDADES.map(x=>x.id));
+      const aliases={criacao:['criação','criativa','design','produto','criacao'],comercial:['comercial','marketing','vendas','negócios','negocios'],dados:['dados','data','analise','análise','analytics'],producao:['produção','producao','desenvolvimento','engenharia','tech'],geral:['geral','operações','operacoes','multifuncional']};
+      const normalizarEsp=(valor)=>{const v=String(valor||'').trim().toLowerCase(); if(validos.has(v)) return v; for(const [id,arr] of Object.entries(aliases)){if(arr.some(a=>v===a || v.includes(a))) return id;} return null;};
+      let planejadas=parseLista(c.equipe).map(normalizarEsp).filter(Boolean);
+      planejadas=[...new Set(planejadas)].slice(0,4);
+      // A fundação nunca pode terminar com uma gerente isolada: se a resposta da IA não trouxe
+      // especialidades válidas, escolhemos uma equipe mínima coerente com a execução do primeiro produto.
+      if(planejadas.length<2){
+        const tipo=String(e.fundacao?.perguntas?.tipoProduto||'').toLowerCase();
+        const padrao=/software|app|site|web|ia|tecnolog|produto digital/.test(tipo) ? ['producao','criacao','comercial'] : ['producao','comercial','criacao'];
+        for(const id of padrao) if(!planejadas.includes(id) && planejadas.length<3) planejadas.push(id);
+      }
+      e.fundacao.equipePlanejada=planejadas.map(especialidade=>({especialidade}));
       for(const item of e.fundacao.equipePlanejada.slice(0,4)){if(!e.equipe.filter(x=>x.papel!=='gerente').some(x=>x.especialidade===item.especialidade))contratar('',item.especialidade);}
       const pr=e.projetos?.find(x=>x.status==='ativo')||e.projetos?.[0],produtoTit=((e.fundacao.primeiroProduto.match(/(?:^|\n)#{1,3}\s*(?:Nome do produto|Produto|Nome)\s*:?\s*(.+)/i)||[])[1]||'Primeiro produto').trim().slice(0,180);
       if(!pr)e.projetos=[{id:uid('proj'),nome:produtoTit,objetivo:e.fundacao.perguntas.objetivo||'Executar o planejamento do primeiro produto.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}];else if(/primeiro produto|principal|planejamento inicial/i.test(pr.nome)){pr.nome=produtoTit||pr.nome;pr.objetivo=e.fundacao.perguntas.objetivo||pr.objetivo;}
