@@ -39,7 +39,8 @@
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
   const K_CHAVE_OR = 'openrouter-api-key';
   const K_CFG = 'estudio-ia-cfg';
-  const K_USO = 'estudio-ia-usage-v2';
+  const K_USO = 'estudio-ia-usage-v3';
+  const K_ORCAMENTO = 'estudio-ia-budget-v1';
 
   const MODELOS_GROQ = [
     { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
@@ -101,7 +102,8 @@
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
     { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0,
-      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 80000 },
+      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 120000,
+      orcamentoUSD: 3, periodoDias: 30, margemSegurancaUSD: 0.10 },
     S.local.json(K_CFG, {})
   );
   if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
@@ -113,7 +115,8 @@
   }
   cfg.pensamento = migrarModelo(cfg.pensamento || cfg.decisao || cfg.revisao);
   cfg.producao = migrarModelo(cfg.producao);
-  cfg.limiteTokensDia = Math.max(10000, Math.min(500000, Number(cfg.limiteTokensDia) || 80000));
+  cfg.limiteTokensDia = Math.max(30000, Math.min(500000, Number(cfg.limiteTokensDia) || 120000));
+  cfg.orcamentoUSD = 3; cfg.periodoDias = 30; cfg.margemSegurancaUSD = 0.10;
   delete cfg.decisao; delete cfg.revisao; delete cfg.maestro;
   S.local.setJson(K_CFG, cfg);
 
@@ -136,6 +139,33 @@
     { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} },
     S.local.json(K_USO, {})
   );
+  let periodo = Object.assign(
+    { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} },
+    S.local.json(K_ORCAMENTO, {})
+  );
+  function salvarPeriodo(){ S.local.setJson(K_ORCAMENTO, periodo); }
+  function renovarPeriodoSeNecessario(){
+    const inicio = Number(periodo.inicio) || 0;
+    const dias = Number(periodo.dias) || 30;
+    if (!inicio || Date.now() - inicio >= dias * 86400000) {
+      periodo = { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} };
+      salvarPeriodo();
+    }
+    return periodo;
+  }
+  renovarPeriodoSeNecessario();
+  function preco(modelo, provedor){
+    return ((PRECOS_POR_PROVEDOR[provedor || cfg.provedor] || {})[modelo]) || null;
+  }
+  function estimarCusto(provedor, modelo, promptTokens, completionTokens){
+    const p=preco(modelo, provedor); if(!p) return 0;
+    const base=(Number(promptTokens)||0)/1e6*p.entrada + (Number(completionTokens)||0)/1e6*p.saida;
+    return (provedor==='groq' && cfg.tier==='dev') ? base*DESCONTO_DEV : base;
+  }
+  function custoPeriodo(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD)||0; }
+  function restanteUSD(){ renovarPeriodoSeNecessario(); return Math.max(0, Number(periodo.limiteUSD)-Number(periodo.margemUSD||0)-Number(periodo.gastoUSD||0)); }
+  function orcamentoEsgotado(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD||0) >= Number(periodo.limiteUSD||3)-Number(periodo.margemUSD||0); }
+  function orcamentoIndisponivel(){ return orcamentoEsgotado() || estado.orcamentoPreventivo; }
   function usoHoje() {
     const d = new Date().toISOString().slice(0, 10);
     if (uso.dia !== d) {
@@ -148,6 +178,7 @@
 
   /* ---------- estado do motor ---------- */
   const estado = {
+    orcamentoPreventivo: false,
     situacao: 'off',
     mensagem: 'IA desligada',
     detalhe: '',
@@ -218,14 +249,18 @@
   function contabilizar(modelo, dados, ms) {
     const q = usoHoje();
     const u = (dados && dados.usage) || {};
-    q.requisicoes += 1;
-    q.entrada += Number(u.prompt_tokens || 0);
-    q.saida += Number(u.completion_tokens || 0);
-    q.tokens += Number(u.total_tokens || (u.prompt_tokens || 0) + (u.completion_tokens || 0));
-    const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0 };
-    m.requisicoes += 1; m.tokens += Number(u.total_tokens || 0);
-    q.ultimoModelo = modelo;
-    salvarUso();
+    const pin=Number(u.prompt_tokens || 0), pout=Number(u.completion_tokens || 0), total=Number(u.total_tokens || pin+pout);
+    const custo=estimarCusto(cfg.provedor,modelo,pin,pout);
+    q.requisicoes += 1; q.entrada += pin; q.saida += pout; q.tokens += total;
+    const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0, entrada:0, saida:0, custo:0 };
+    m.requisicoes += 1; m.tokens += total; m.entrada += pin; m.saida += pout; m.custo += custo;
+    q.ultimoModelo = modelo; salvarUso();
+    renovarPeriodoSeNecessario();
+    periodo.requisicoes += 1; periodo.tokens += total; periodo.gastoUSD += custo;
+    const pmKey=cfg.provedor+':'+modelo;
+    const pm=periodo.porModelo[pmKey]=periodo.porModelo[pmKey]||{provedor:cfg.provedor,modelo,requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
+    pm.requisicoes += 1; pm.tokens += total; pm.entrada += pin; pm.saida += pout; pm.custo += custo;
+    salvarPeriodo();
 
     const e = S.state.atual();
     if (e) {
@@ -308,10 +343,17 @@
     }
 
     const q = usoHoje();
+    renovarPeriodoSeNecessario();
+    if (orcamentoEsgotado() || estado.orcamentoPreventivo) {
+      const er = new Error('Orçamento de IA do período de 30 dias esgotado. A equipe entra em rotina de descanso até a renovação.');
+      er.orcamento = true; throw er;
+    }
     const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
     const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
-    if (!op.forcar && q.tokens + estimativa >= cfg.limiteTokensDia) {
-      const er = new Error(`Limite local de ${cfg.limiteTokensDia.toLocaleString('pt-BR')} tokens atingido; novas chamadas ficam bloqueadas até amanhã.`);
+    const custoEstimado = estimarCusto(cfg.provedor, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
+    if ((custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
+      estado.orcamentoPreventivo=true;
+      const er = new Error(`Orçamento de IA do período de 30 dias quase esgotado; chamada não iniciada para preservar o limite.`);
       er.limiteLocal = true; throw er;
     }
 
@@ -365,7 +407,7 @@
         throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
       }
 
-      estado.falhas=0; l.falhas=0; l.bloqueadaAte=0;
+      estado.falhas=0; estado.orcamentoPreventivo=false; l.falhas=0; l.bloqueadaAte=0;
       registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms,ok:true,tokens:(dados.usage||{}).total_tokens||0,em:Date.now()});
       situar('pronta','IA pronta',`última resposta em ${(ms/1000).toFixed(1)}s`);
       return {texto,usage:dados.usage||{},ms,modelo};
@@ -374,11 +416,13 @@
       estado.falhas++; l.falhas++;
       if(err&&err.cota){
         // bloqueio global já foi definido pelo cabeçalho do provedor.
+      }else if(err&&err.orcamento){
+        // orçamento local é um freio planejado, não uma falha do modelo.
       }else if(!err.limiteLocal){
         l.bloqueadaAte=Date.now() + (/401|inválida/i.test(msg)?90000:Math.min(30000,5000*l.falhas));
       }
       registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms:Date.now()-inicio,ok:false,erro:msg,em:Date.now()});
-      situar(err.limiteLocal?'pronta':'erro',err.limiteLocal?'Limite local atingido':'Falha na IA',msg);
+      situar((err.limiteLocal||err.orcamento)?'pronta':'erro',(err.orcamento?'Orçamento do período atingido':err.limiteLocal?'Limite local atingido':'Falha na IA'),msg);
       throw err;
     }finally{
       estado.emVoo=Math.max(0,estado.emVoo-1);
@@ -463,37 +507,23 @@
   /* Custo do dia em dólar, calculado sobre o uso que o provedor contabilizou.
      É estimativa de acompanhamento, não fatura. */
   function custoDoDia() {
-    const q = usoHoje();
-    let total = 0, temPreco = false;
-    Object.keys(q.porModelo || {}).forEach(id => {
-      const p = (PRECOS_POR_PROVEDOR[cfg.provedor] || {})[id];
-      if (!p) return;
-      temPreco = true;
-      const m = q.porModelo[id];
-      // Sem separação por modelo de entrada/saída, usa a proporção do dia.
-      const prop = q.tokens > 0 ? q.entrada / q.tokens : 0.7;
-      const ent = (m.tokens || 0) * prop, sai = (m.tokens || 0) * (1 - prop);
-      total += (ent / 1e6) * p.entrada + (sai / 1e6) * p.saida;
-    });
-    if (!temPreco) return null;
-    return (cfg.provedor === 'groq' && cfg.tier === 'dev') ? total * DESCONTO_DEV : total;
+    const q=usoHoje();
+    return Object.values(q.porModelo||{}).reduce((n,m)=>n+Number(m.custo||0),0) || 0;
   }
 
+
   function orcamento() {
-    const q = usoHoje();
-    const h = q.headers;
-    const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
-    const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
-    // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
-    // sabemos a janela real da organização; depois dela, usamos os headers do provedor ativo.
-    const pctTokens = temTok ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100) : null;
-    const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
-    return {
-      requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens, pctReq, fonte: (temTok || temReq) ? cfg.provedor : 'aguardando headers', provedor: cfg.provedor,
-      ref: null, headers: h, porModelo: q.porModelo,
-      custo: custoDoDia(), tier: cfg.tier, limiteTokensDia: cfg.limiteTokensDia
-    };
+    renovarPeriodoSeNecessario();
+    const q=usoHoje(), h=q.headers;
+    const temTok=h && Number.isFinite(h.limiteTok) && h.limiteTok>0;
+    const temReq=h && Number.isFinite(h.limiteReq) && h.limiteReq>0;
+    const pctTokens=temTok?clamp(((h.limiteTok-(Number.isFinite(h.restaTok)?h.restaTok:h.limiteTok))/h.limiteTok)*100,0,100):null;
+    const pctReq=temReq?clamp(((h.limiteReq-(Number.isFinite(h.restaReq)?h.restaReq:h.limiteReq))/h.limiteReq)*100,0,100):null;
+    const diasPassados=Math.max(0,(Date.now()-periodo.inicio)/86400000);
+    const diasRestantes=Math.max(0,periodo.dias-diasPassados);
+    const restante=restanteUSD();
+    const ritmo=diasRestantes>0?restante/diasRestantes:0;
+    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:custoDoDia(),custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:periodo.margemUSD,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),tier:cfg.tier,limiteTokensDia:cfg.limiteTokensDia};
   }
 
   S.ai = {
@@ -513,7 +543,7 @@
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
     },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, limiteTokensDia,
-    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
+    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoIndisponivel, restanteUSD, custoPeriodo,
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
       S.local.setJson(K_CFG, cfg);

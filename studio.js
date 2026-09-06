@@ -36,10 +36,11 @@
   const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
 
   const ESTACOES = {
-    cafe: { x: 120, y: 350, rotulo: 'café' },
+    cafe: { x: 120, y: 350, rotulo: 'café/refeição' },
     reuniao: { x: 345, y: 276, rotulo: 'reunião' },
     quadro: { x: 525, y: 276, rotulo: 'quadro' },
-    descanso: { x: 350, y: 350, rotulo: 'descanso' }
+    descanso: { x: 350, y: 350, rotulo: 'descanso' },
+    dormitorio: { x: 555, y: 350, rotulo: 'dormitório' }
   };
 
   function montar() {
@@ -152,7 +153,7 @@
   function relatorioReuniao(){const e=S.state.atual();if(!e)return '';const texto=gerarRelatorioLocal(e);registrarReuniao('Relatório',texto,'relatorio');return texto;}
 
   async function reuniaoInterna(motivo,opcoes){
-    const e=S.state.atual();if(!e||!S.ai.pronta())return null;
+    const e=S.state.atual();if(!e||!S.ai.pronta()||(S.ai.orcamentoIndisponivel&&S.ai.orcamentoIndisponivel()))return null;
     e.reuniao=e.reuniao||{mensagens:[],relatorios:[],reunioes:[]};if(e.reuniao.reuniaoAtiva)return null;
     const g=gerente();const participantes=rt.filter(p=>p.ref.energia>30&&!p.ocupado&&p.estado==='sentado').slice(0,3);
     if(g&&!participantes.includes(g))participantes.push(g);if(participantes.length<2)return null;
@@ -162,11 +163,11 @@
     await Promise.all(participantes.map((p,i)=>irPara(p,{x:mesa.x+(i-1)*26,y:mesa.y})));
     participantes.forEach(p=>{p.estado='falando';p.balao='ouvindo a equipe';});
     const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
-    const estado=`MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}\nOBJETIVO=${projeto?projeto.objetivo:e.missao}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.id+' '+t.titulo).join(' | ')||'nenhuma'}\nARTEFATOS=${e.arquivos.slice(0,8).map(a=>a.id+' '+a.nome+' ['+a.classe+']').join(' | ')||'nenhum'}\nMOTIVO=${motivo}`;
+    const estado=`MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}\nOBJETIVO=${projeto?projeto.objetivo:e.missao}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.id+' '+t.titulo).join(' | ')||'nenhuma'}\nARTEFATOS=${e.arquivos.slice(0,8).map(a=>a.id+' '+a.nome+' ['+a.classe+']').join(' | ')||'nenhum'}\nSITE CENTRAL=${e.site&&e.site.projetoId?'sim — arquitetura livre, definida pela equipe':'a definir'}\nMOTIVO=${motivo}`;
     const falas=[];
     for(const p of participantes.filter(x=>x!==g)){
       const hist=falas.map(x=>`[${x.nome}] ${x.texto}`).join('\n')||'ninguém falou';
-      const r=await S.ai.perguntar({sistema:`Você é ${p.nome}, ${p.cargo}. Reunião presencial de trabalho. Fale em voz alta, sem revelar raciocínio privado. Traga uma observação ou proposta que possa mudar a decisão.\n${estado}\nRETORNE: FALA: <até 65 palavras>`,pedido:`Histórico:\n${hist}\nDiga o que deve ser feito a seguir.`,tokens:150,agente:p.nome,agenteId:p.id,motivo:'reunião de trabalho'});
+      const r=await S.ai.perguntar({sistema:`Você é ${p.nome}, ${p.cargo}. Reunião presencial de trabalho. Fale em voz alta, sem revelar raciocínio privado. Traga uma observação ou proposta que possa mudar a decisão. O produto e o site central devem nascer do contexto desta empresa; não use modelo ou layout pré-pronto.\n${estado}\nRETORNE: FALA: <até 65 palavras>`,pedido:`Histórico:\n${hist}\nDiga o que deve ser feito a seguir.`,tokens:150,agente:p.nome,agenteId:p.id,motivo:'reunião de trabalho'});
       const texto=r?String(r.campos.fala||'').trim():'';if(texto){falas.push({id:p.id,nome:p.nome,texto});registrarReuniao(p.nome,texto,'reuniao');logPessoa(p,`contribuiu: ${texto}`,'reuniao');p.ref.pensamento=texto.slice(0,220);p.balao=texto.slice(0,70);}
     }
     let decisao=null;
@@ -203,37 +204,58 @@
     const e = S.state.atual(); if (!e) return;
     const hora = new Date().getHours() + new Date().getMinutes()/60;
     const rel = { expediente: hora >= 8 && hora < 18 };
+    const semOrcamento = S.ai && S.ai.orcamentoEsgotado && S.ai.orcamentoEsgotado();
     rt.forEach(p => {
-      const f = p.ref;
-      if (!f) return;
-      // Energia é proporcional ao tempo real, não ao número de ciclos.
-      // Um ciclo de 7 s não pode equivaler a horas de trabalho.
-      if (p.ocupado) f.energia = clamp(f.energia - 0.12, 0, 100);
+      const f = p.ref; if (!f) return;
+      f.cuidados = f.cuidados || {};
+      f.cuidados.fome = clamp(Number(f.cuidados.fome || 0) + (p.ocupado ? 0.16 : 0.07), 0, 100);
+      f.cuidados.sono = clamp(Number(f.cuidados.sono || 0) + (p.ocupado ? 0.12 : 0.05), 0, 100);
+      if (p.estado === 'dormindo') {
+        f.energia = clamp(f.energia + 0.55, 0, 100);
+        f.cuidados.sono = clamp(f.cuidados.sono - 0.85, 0, 100);
+        f.humor = clamp(f.humor + 0.12, 0, 100);
+      } else if (p.estado === 'comendo') {
+        f.cuidados.fome = clamp(f.cuidados.fome - 1.25, 0, 100);
+        f.cuidados.sono = clamp(f.cuidados.sono + 0.01, 0, 100);
+        f.energia = clamp(f.energia + 0.08, 0, 100);
+      } else if (p.ocupado) f.energia = clamp(f.energia - 0.12, 0, 100);
       else if (p.estado === 'pausa' || !rel.expediente) f.energia = clamp(f.energia + 0.25, 0, 100);
       else f.energia = clamp(f.energia - 0.015, 0, 100);
-      // Humor volta devagar para o meio quando nada acontece.
       f.humor = clamp(f.humor + (f.humor < 60 ? 0.35 : -0.12), 0, 100);
       const agora = Date.now();
-      f.cuidados = f.cuidados || {};
-      if (rel.expediente && f.energia < 62 && agora - (f.cuidados.ultimo || 0) > 12 * 60 * 1000 && !p.ocupado) {
+
+      // Quando o orçamento de 30 dias acaba, a equipe não finge trabalhar:
+      // a rotina física continua, mas nenhuma chamada de IA é iniciada.
+      if (semOrcamento && !p.ocupado && p.estado !== 'dormindo' && p.estado !== 'comendo') {
+        if (f.cuidados.fome > 58) {
+          p.estado='comendo'; f.cuidados.rotina='refeicao'; p.balao='comendo';
+          logPessoa(p,'foi comer enquanto o orçamento de IA está esgotado.','rotina');
+          irPara(p,ESTACOES.cafe).then(()=>setTimeout(()=>{ if(p.estado==='comendo'){p.estado='dormindo';f.cuidados.rotina='sono';p.balao='dormindo';irPara(p,ESTACOES.dormitorio);logPessoa(p,'foi descansar no dormitório; aguardando a renovação do orçamento de IA.','rotina');}},7000));
+        } else {
+          p.estado='dormindo'; f.cuidados.rotina='sono'; p.balao='dormindo';
+          logPessoa(p,'encerrou o expediente e foi dormir porque o orçamento de IA do período acabou.','rotina');
+          irPara(p,ESTACOES.dormitorio);
+        }
+        return;
+      }
+      if (!semOrcamento && p.estado === 'dormindo' && f.cuidados.sono < 45) {
+        p.estado='andando'; p.balao='voltando ao trabalho';
+        irPara(p,assento(p)).then(()=>{p.estado='sentado';p.balao=null;f.cuidados.rotina='trabalho';logPessoa(p,'voltou ao posto depois que o orçamento de IA foi renovado.','rotina');});
+      }
+      if (rel.expediente && f.energia < 62 && agora - (f.cuidados.ultimo || 0) > 12 * 60 * 1000 && !p.ocupado && !semOrcamento) {
         f.cuidados.ultimo = agora; f.cuidados.pausa = (f.cuidados.pausa || 0) + 1;
         p.estado = 'pausa';
         const est = f.energia < 42 ? ESTACOES.descanso : ESTACOES.cafe;
         logPessoa(p, f.energia < 42 ? 'fez uma pausa de recuperação antes de retomar o trabalho.' : 'fez uma pausa curta para água/café e reorganização.', 'bem-estar');
         irPara(p, est).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou as atividades após a pausa.', 'bem-estar'); }); }, 9000));
       }
-      if (rel.expediente && agora - (f.cuidados.agua || 0) > 25 * 60 * 1000 && !p.ocupado) {
-        f.cuidados.agua = agora;
-        logPessoa(p, 'fez uma pausa breve para hidratação.', 'bem-estar');
-      }
-      if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado) {
-        p.estado = 'pausa';
-        logPessoa(p, 'interrompeu o trabalho para recuperação: energia baixa.', 'bem-estar');
+      if (rel.expediente && agora - (f.cuidados.agua || 0) > 25 * 60 * 1000 && !p.ocupado && !semOrcamento) { f.cuidados.agua = agora; logPessoa(p, 'fez uma pausa breve para hidratação.', 'bem-estar'); }
+      if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado && !semOrcamento) {
+        p.estado = 'pausa'; logPessoa(p, 'interrompeu o trabalho para recuperação: energia baixa.', 'bem-estar');
         irPara(p, ESTACOES.descanso).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou o trabalho após recuperação.', 'bem-estar'); }); }, 9000));
       }
     });
-    S.bus.emit('equipe');
-    S.state.gravar();
+    S.bus.emit('equipe'); S.state.gravar();
   }
 
   function humor(p, delta, motivo) {
@@ -278,7 +300,8 @@
         linhagem: meta.linhagem || (meta.baseArquivoId && e.arquivos.find(x => x.id === meta.baseArquivoId)?.linhagem) || ('p:' + (meta.projectId || (e.projetos[0] && e.projetos[0].id) || '') + ':' + slug(a.nome)),
         autor: p ? p.nome : 'equipe', autorId: p ? p.id : null, criadoEm: Date.now(), quando: S.fmt.dataHora(),
         taskId: meta.taskId || null, baseArquivoId: meta.baseArquivoId || null,
-        briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false
+        briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false,
+        siteCentral: Boolean(meta.siteCentral), sitePath: meta.sitePath || null, clienteVisivel: Boolean(meta.clienteVisivel)
       };
       e.arquivos.unshift(arq);
       return arq;
@@ -403,21 +426,19 @@
       if (!proj.arquivoIds.includes(produto.id)) proj.arquivoIds.unshift(produto.id);
       proj.atividade.unshift({ t: Date.now(), tipo: 'publicacao', texto: `${produto.nome} entrou no projeto.` });
       proj.atividade = proj.atividade.slice(-40);
-      // Um produto novo só pede integração quando existe um site anterior.
-      // Não cria uma nova versão do próprio site automaticamente.
-      if (base.kit !== 'landing' && base.kit !== 'autonomo') {
-        const site = e.arquivos.find(a => a.classe === 'produto' && a.kit === 'landing');
-        const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && t.kit === 'landing' && /atualiz|catálogo|catalogo/i.test(t.titulo));
-        if (site && !jaExiste) {
-          novaTarefa({ titulo: `Integrar ${produto.nome} ao site`, kit: 'landing',
-            briefing: `Atualizar o site existente para integrar ${produto.nome}. Preserve o conteúdo que já funciona e altere apenas o necessário.`,
-            projectId: proj.id, baseArquivoId: site.id, origem: 'integração de produto' });
+      // Tudo que é cliente-visível pertence ao site central da empresa.
+      // A equipe decide a arquitetura e a linguagem; o código não fornece template.
+      if (!base.siteCentral && base.clienteVisivel) {
+        const siteArquivos = e.arquivos.filter(a => a.siteCentral && a.projectId === proj.id);
+        const siteBase = siteArquivos.find(a => /(^|\/)index\.html$/i.test(a.sitePath || a.nome)) || siteArquivos[0];
+        if (siteBase) {
+          const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && /integrar|site central/i.test(t.titulo));
+          if (!jaExiste) novaTarefa({titulo:`Integrar ${produto.nome} ao site central`,kit:'autonomo',briefing:`Integrar ${produto.nome} ao site central da empresa sem impor template. Leia a arquitetura atual, preserve o que funciona e faça a alteração necessária para o cliente encontrar e usar o produto.`,projectId:proj.id,baseArquivoId:siteBase.id,origem:'integração ao site central'});
         }
       }
     }
-    // Publicar apenas coloca uma oferta real no portfólio. Dinheiro entra
-    // somente quando o mercado simulado gerar uma venda; não há prêmio por
-    // simplesmente mudar a classe do arquivo.
+    // Publicar congela uma versão que a gerente considerou pronta para sair.
+    // Não existe mercado, cliente ou receita simulados neste aplicativo.
     S.state.gravar();
     S.bus.emit('arquivos');
     return produto;
@@ -516,7 +537,7 @@
 
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
-    const titulo = limpo(dados.titulo, 16); if (!titulo || titulo.length < 6) return null;
+    const titulo = limpo(dados.titulo, 24); if (!titulo || titulo.length < 6) return null;
     if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
     // Dedupe real: o mesmo kit não pode ter duas etapas abertas no mesmo
     // projeto, e uma etapa idêntica concluída há pouco não volta em loop.
@@ -530,7 +551,7 @@
     if (repetidaRecente) return null;
     const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     const t = {
-      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: limpo(dados.briefing) || titulo,
+      id: uid('t'), titulo, kit: dados.kit || 'autonomo', briefing: limpo(dados.briefing) || titulo,
       rodada: Number(dados.rodada) || 0,
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
       projectId: projeto ? projeto.id : null,
@@ -553,6 +574,20 @@
     S.state.gravar(); S.bus.emit('trabalho');
     return t;
   }
+  async function despacharTarefa(t, alvo) {
+    const e=S.state.atual(); if(!e||!t) return false;
+    const candidato=(alvo&&alvo.papel==='func'&&!alvo.ocupado?alvo:null)
+      || rt.find(p=>p.papel==='func'&&!p.ocupado&&p.estado==='sentado'&&p.ref.energia>20&&(!t.para||p.id===t.para));
+    if(!candidato) {
+      t.status='aberta'; S.state.gravar(); return false;
+    }
+    t.para=candidato.id;
+    S.state.gravar(); S.bus.emit('trabalho');
+    candidato.balao=`recebi: ${t.titulo.slice(0,42)}`;
+    await sleep(650); candidato.balao=null;
+    return executar(candidato,t);
+  }
+
   function tarefasAbertas() {
     const e = S.state.atual(); return e ? e.tarefas.filter(t => t.status === 'aberta') : [];
   }
@@ -655,7 +690,7 @@
   }
 
   async function avaliar(g) {
-    const e = S.state.atual(); if (!e || !g || g.ocupado) return;
+    const e = S.state.atual(); if (!e || !g || g.ocupado || (S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel())) return;
     const candidatos = e.arquivos.filter(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
     const cand = candidatos[0];
     if (!cand) return;
@@ -689,7 +724,7 @@ DECIDA PELO TRABALHO REAL. Você pode:
 Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se corrigir/continuar, descreva a próxima ação em termos executáveis.`;
     try {
       const r = await S.ai.perguntar({
-        sistema: contexto + `\n\nRETORNE SOMENTE:\nDECISAO: publicar | corrigir | descartar | continuar\nANALISE: <o que você realmente encontrou no conteúdo, até 100 palavras>\nACAO: <próxima ação concreta, até 80 palavras>\nPARA: <id do funcionário ou vazio>\nBASE: <id do artefato base ou vazio>`,
+        sistema: contexto + `\n\nRETORNE SOMENTE:\nDECISAO: publicar | corrigir | descartar | continuar\nANALISE: <o que você realmente encontrou no conteúdo, até 100 palavras>\nEVIDENCIAS: <até 3 verificações concretas feitas no conteúdo>\nPENDENCIAS: <o que ainda impede o produto; escreva nenhuma se não houver>\nACAO: <próxima ação concreta, até 80 palavras>\nPARA: <id do funcionário ou vazio>\nBASE: <id do artefato base ou vazio>\nPRONTO: sim | nao`,
         pedido: `Inspecione agora o arquivo ${cand.nome}. Não avalie aparência nem atribua nota. Leia o conteúdo e tome uma decisão executiva que altere o próximo estado do projeto.`,
         tokens: 520, reasoning_effort: 'low', agente: g.nome, agenteId: g.id, motivo: 'auditoria real de artefato'
       });
@@ -697,20 +732,27 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
       const c = r.campos || {};
       const decisao = String(c.decisao || '').toLowerCase().trim();
       const analise = String(c.analise || '').trim();
+      const evidencias = String(c.evidencias || '').trim();
+      const pendencias = String(c.pendencias || '').trim();
+      const pronto = String(c.pronto || '').toLowerCase().trim();
       const acao = String(c.acao || '').trim();
       g.balao = analise.slice(0, 70) || decisao;
-      registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
+      registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendencias ? ' Pendências: ' + pendencias : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
       logPessoa(g, `inspecionou ${cand.nome}: ${decisao}. ${analise}`, 'supervisao');
       g.ref.pensamento = `${decisao}: ${analise}`.slice(0, 500);
       cand.avaliado = true;
 
-      if (decisao === 'publicar') {
+      if (decisao === 'publicar' && pronto === 'sim' && (!pendencias || /^nenhuma$|^nenhum$/i.test(pendencias))) {
         cand.liberadoPublicacao = true;
         const produto = publicar(cand.id, g.nome, analise || 'Aprovado pela gerente após inspeção do conteúdo.');
         if (produto) {
           registrarReuniao(g.nome, `Liberei ${produto.nome} para sair do estúdio.`, 'decisao');
           projeto && projeto.atividade.unshift({t:Date.now(),tipo:'release',texto:`${g.nome} aprovou ${produto.nome} após inspeção do conteúdo.`});
         }
+      } else if (decisao === 'publicar') {
+        cand.avaliado = false;
+        const tarefaNova = novaTarefa({titulo:`Resolver pendências de ${cand.nome}`,kit:'autonomo',briefing:acao || pendencias || 'Revisar o produto final e eliminar tudo que ainda impede a publicação.',para:String(c.para||'').trim()||cand.autorId,projectId:cand.projectId||projeto.id,baseArquivoId:cand.id,origem:'gate rigoroso de produto'});
+        if(tarefaNova) registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências ou a verificação final não foi declarada concluída.`,'ordem');
       } else if (decisao === 'descartar') {
         e.arquivos = e.arquivos.filter(a => a.id !== cand.id);
         if (projeto) projeto.arquivoIds = projeto.arquivoIds.filter(id => id !== cand.id);
@@ -765,7 +807,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
         {id:'a2',nome:pick(NOMES),papel:'func',cargo:'Produção',especialidade:'producao',cor:S.state.PALETA[2],energia:85,humor:70,personalidade:personalidadeInicial('producao','')}
       ]});
     S.DB.estudios.unshift(e);S.DB.atual=e.id;S.state.gravarJa();S.state.registrar(`${nome} foi fundada. A equipe vai discutir o primeiro produto.`,'ok');S.bus.emit('trocou');
-    setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&!atual.reuniao?.reunioes?.length&&S.ai.pronta())reuniaoInterna('planejar o primeiro produto da empresa',{inicial:true}).catch(err=>console.error('reunião inicial',err));},1600);
+    setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&!atual.reuniao?.reunioes?.length&&S.ai.pronta())reuniaoInterna('planejar o primeiro produto e decidir como o site central da empresa deve apresentá-lo',{inicial:true}).catch(err=>console.error('reunião inicial',err));},1600);
     return e;
   }
 
@@ -879,7 +921,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.handoff=`${p.nome} removeu um artefato conforme sua decisão: ${saida.resumo || 'não servia ao objetivo'}.`;
         logPessoa(p, `removeu um artefato que julgou inadequado ao objetivo.`, 'entrega'); sucesso=true;
       } else if (saida.arquivos && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || null }, p);
+        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', siteCentral:Boolean(saida.siteCentral), sitePath:saida.sitePath||null, clienteVisivel:true, linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || null }, p);
         tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : []; if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.arquivo=salvos[0] && salvos[0].id; tarefa.handoff=`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')} para inspeção da gerente.`; tarefa.validacao=saida.validacao || null;
         const proj=e.projetos.find(x=>x.id===tarefa.projectId); if(proj){ salvos.forEach(a=>{if(!proj.arquivoIds.includes(a.id))proj.arquivoIds.unshift(a.id);}); proj.atividade.unshift({t:Date.now(),tipo:'entrega',texto:`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')}.`}); proj.atividade=proj.atividade.slice(-40); }
@@ -903,6 +945,10 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     if (e.reuniao && e.reuniao.reuniaoAtiva) return;
     S.bus.emit('relogio');
     if(S.ai.estado && S.ai.estado.pausado) return;
+    if(S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel()) {
+      rt.forEach(p=>{ if(!p.ocupado && p.estado!=='dormindo' && p.estado!=='comendo'){ p.estado='dormindo'; p.ref.cuidados=p.ref.cuidados||{}; p.ref.cuidados.rotina='sono'; p.balao='dormindo'; logPessoa(p,'está descansando: o orçamento de IA de 30 dias chegou ao limite.','rotina'); irPara(p,ESTACOES.dormitorio); }});
+      S.bus.emit('equipe'); return;
+    }
     const g=gerente();
 
     // A gerente primeiro lê entregas reais. Só depois toma uma nova decisão.
@@ -1155,7 +1201,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
-    novaTarefa, tarefasAbertas, executar, registrarContribuicaoAcervo,
+    novaTarefa, tarefasAbertas, despacharTarefa, executar, registrarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,

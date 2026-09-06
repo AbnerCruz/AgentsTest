@@ -8,7 +8,7 @@
 (function (S) {
   'use strict';
 
-  const DECISAO_MIN_MS = 45000;
+  const DECISAO_MIN_MS = 120000;
   const max = (v, n) => String(v || '').slice(0, n);
 
   function agora() { return Date.now(); }

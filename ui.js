@@ -450,7 +450,7 @@
     if (pensamento) pensamento.innerHTML = opcoes('pensamento');
     if (producao) producao.innerHTML = opcoes('producao');
     const limite = $('#limiteTokensSel');
-    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 80000);
+    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 120000);
 
     const o = S.ai.orcamento();
     const h = o.headers;
@@ -461,14 +461,19 @@
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
-        <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
-        <div class="stat"><span>Limite local diário</span><b>${F.num(o.limiteTokensDia || 80000)}</b></div>
-        <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
+        <div class="stat"><span>Orçamento do período</span><b>US$ ${Number(o.orcamentoUSD||3).toFixed(2)} / 30 dias</b></div>
+        <div class="stat"><span>Gasto estimado no período</span><b>US$ ${Number(o.custoPeriodo||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Restante para IA</span><b>US$ ${Number(o.restanteUSD||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Dias restantes</span><b>${Math.ceil(o.diasRestantes||0)}</b></div>
+        <div class="stat"><span>Ritmo médio disponível</span><b>US$ ${Number(o.ritmoDiarioUSD||0).toFixed(4)}/dia</b></div>
+        <div class="stat"><span>Tokens usados hoje</span><b>${F.num(o.tokens)}</b></div>
+        <div class="stat"><span>Teto de segurança diário</span><b>${F.num(o.limiteTokensDia || 120000)}</b></div>
+        <div class="stat"><span>Chamadas feitas hoje</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
-        ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
+        ${(o.esgotado || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? '<p class="panel-foot" style="color:#E08573"><strong>Orçamento esgotado.</strong> A equipe não fará novas chamadas e entrou em rotina de descanso até a renovação.</p>' : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>

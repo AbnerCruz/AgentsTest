@@ -805,13 +805,12 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
           <select id="modeloProducaoSel"></select>
         </div>
         <div class="field">
-          <label for="limiteTokensSel">Limite local de uso diário</label>
+          <label for="limiteTokensSel">Teto de segurança de tokens por dia</label>
           <select id="limiteTokensSel">
-            <option value="30000">30 mil tokens</option>
-            <option value="50000">50 mil tokens</option>
-            <option value="80000">80 mil tokens</option>
+            <option value="60000">60 mil tokens</option>
             <option value="120000">120 mil tokens</option>
             <option value="200000">200 mil tokens</option>
+            <option value="300000">300 mil tokens</option>
           </select>
           <p class="hint">Freio local para impedir que a equipe continue consumindo sua chave indefinidamente. O limite real do provedor continua valendo.</p>
         </div>
@@ -1001,6 +1000,9 @@ window.S = window.S || {};
       f.cuidados.ultimo = f.cuidados.ultimo || 0;
       f.cuidados.agua = Number.isFinite(f.cuidados.agua) ? f.cuidados.agua : 0;
       f.cuidados.pausa = Number.isFinite(f.cuidados.pausa) ? f.cuidados.pausa : 0;
+      f.cuidados.fome = Number.isFinite(f.cuidados.fome) ? f.cuidados.fome : 18;
+      f.cuidados.sono = Number.isFinite(f.cuidados.sono) ? f.cuidados.sono : 18;
+      f.cuidados.rotina = String(f.cuidados.rotina || 'trabalho');
       f.ambiente = f.ambiente && typeof f.ambiente === 'object' ? f.ambiente : {};
       f.ambiente.preferencias = Array.isArray(f.ambiente.preferencias) ? f.ambiente.preferencias.slice(0,8) : [];
       f.ambiente.ultimaAcao = Number(f.ambiente.ultimaAcao) || 0;
@@ -1019,6 +1021,11 @@ window.S = window.S || {};
       pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
       pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
     });
+    e.site = e.site && typeof e.site === 'object' ? e.site : {};
+    e.site.projetoId = e.site.projetoId || (e.projetos[0] && e.projetos[0].id) || null;
+    e.site.raiz = 'site';
+    e.site.arquitetura = String(e.site.arquitetura || 'livre, definida pela equipe a partir da identidade e missão da empresa');
+    e.site.ultimaInspecao = Number(e.site.ultimaInspecao) || 0;
     e.contratos = [];
     // O simulador não possui mercado, vendas ou caixa fictícios. Interações externas ficam com o dono.
     delete e.negocio;
@@ -1027,6 +1034,9 @@ window.S = window.S || {};
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
     e.tarefas.forEach(t => {
       t.projectId = t.projectId || (e.projetos[0] && e.projetos[0].id);
+      // O formato da tarefa é livre; ids antigos de kits são apenas migrados
+      // para a capacidade genérica e nunca mais escolhem o que a empresa produz.
+      t.kit = 'autonomo';
       t.dependsOn = Array.isArray(t.dependsOn) ? t.dependsOn : [];
       t.handoff = t.handoff || null;
     });
@@ -1274,7 +1284,8 @@ window.S = window.S || {};
   const K_CHAVE = 'groq-api-key';        // mantém a chave da versão anterior
   const K_CHAVE_OR = 'openrouter-api-key';
   const K_CFG = 'estudio-ia-cfg';
-  const K_USO = 'estudio-ia-usage-v2';
+  const K_USO = 'estudio-ia-usage-v3';
+  const K_ORCAMENTO = 'estudio-ia-budget-v1';
 
   const MODELOS_GROQ = [
     { id: 'openai/gpt-oss-20b', nome: 'GPT-OSS 20B · econômico', nota: '$0,075 entrada / $0,30 saída por 1M. 1000 t/s. Melhor escolha para planejamento, coordenação e revisão simples.' },
@@ -1336,7 +1347,8 @@ window.S = window.S || {};
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
     { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0,
-      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 80000 },
+      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 120000,
+      orcamentoUSD: 3, periodoDias: 30, margemSegurancaUSD: 0.10 },
     S.local.json(K_CFG, {})
   );
   if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
@@ -1348,7 +1360,8 @@ window.S = window.S || {};
   }
   cfg.pensamento = migrarModelo(cfg.pensamento || cfg.decisao || cfg.revisao);
   cfg.producao = migrarModelo(cfg.producao);
-  cfg.limiteTokensDia = Math.max(10000, Math.min(500000, Number(cfg.limiteTokensDia) || 80000));
+  cfg.limiteTokensDia = Math.max(30000, Math.min(500000, Number(cfg.limiteTokensDia) || 120000));
+  cfg.orcamentoUSD = 3; cfg.periodoDias = 30; cfg.margemSegurancaUSD = 0.10;
   delete cfg.decisao; delete cfg.revisao; delete cfg.maestro;
   S.local.setJson(K_CFG, cfg);
 
@@ -1371,6 +1384,33 @@ window.S = window.S || {};
     { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} },
     S.local.json(K_USO, {})
   );
+  let periodo = Object.assign(
+    { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} },
+    S.local.json(K_ORCAMENTO, {})
+  );
+  function salvarPeriodo(){ S.local.setJson(K_ORCAMENTO, periodo); }
+  function renovarPeriodoSeNecessario(){
+    const inicio = Number(periodo.inicio) || 0;
+    const dias = Number(periodo.dias) || 30;
+    if (!inicio || Date.now() - inicio >= dias * 86400000) {
+      periodo = { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} };
+      salvarPeriodo();
+    }
+    return periodo;
+  }
+  renovarPeriodoSeNecessario();
+  function preco(modelo, provedor){
+    return ((PRECOS_POR_PROVEDOR[provedor || cfg.provedor] || {})[modelo]) || null;
+  }
+  function estimarCusto(provedor, modelo, promptTokens, completionTokens){
+    const p=preco(modelo, provedor); if(!p) return 0;
+    const base=(Number(promptTokens)||0)/1e6*p.entrada + (Number(completionTokens)||0)/1e6*p.saida;
+    return (provedor==='groq' && cfg.tier==='dev') ? base*DESCONTO_DEV : base;
+  }
+  function custoPeriodo(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD)||0; }
+  function restanteUSD(){ renovarPeriodoSeNecessario(); return Math.max(0, Number(periodo.limiteUSD)-Number(periodo.margemUSD||0)-Number(periodo.gastoUSD||0)); }
+  function orcamentoEsgotado(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD||0) >= Number(periodo.limiteUSD||3)-Number(periodo.margemUSD||0); }
+  function orcamentoIndisponivel(){ return orcamentoEsgotado() || estado.orcamentoPreventivo; }
   function usoHoje() {
     const d = new Date().toISOString().slice(0, 10);
     if (uso.dia !== d) {
@@ -1383,6 +1423,7 @@ window.S = window.S || {};
 
   /* ---------- estado do motor ---------- */
   const estado = {
+    orcamentoPreventivo: false,
     situacao: 'off',
     mensagem: 'IA desligada',
     detalhe: '',
@@ -1453,14 +1494,18 @@ window.S = window.S || {};
   function contabilizar(modelo, dados, ms) {
     const q = usoHoje();
     const u = (dados && dados.usage) || {};
-    q.requisicoes += 1;
-    q.entrada += Number(u.prompt_tokens || 0);
-    q.saida += Number(u.completion_tokens || 0);
-    q.tokens += Number(u.total_tokens || (u.prompt_tokens || 0) + (u.completion_tokens || 0));
-    const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0 };
-    m.requisicoes += 1; m.tokens += Number(u.total_tokens || 0);
-    q.ultimoModelo = modelo;
-    salvarUso();
+    const pin=Number(u.prompt_tokens || 0), pout=Number(u.completion_tokens || 0), total=Number(u.total_tokens || pin+pout);
+    const custo=estimarCusto(cfg.provedor,modelo,pin,pout);
+    q.requisicoes += 1; q.entrada += pin; q.saida += pout; q.tokens += total;
+    const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0, entrada:0, saida:0, custo:0 };
+    m.requisicoes += 1; m.tokens += total; m.entrada += pin; m.saida += pout; m.custo += custo;
+    q.ultimoModelo = modelo; salvarUso();
+    renovarPeriodoSeNecessario();
+    periodo.requisicoes += 1; periodo.tokens += total; periodo.gastoUSD += custo;
+    const pmKey=cfg.provedor+':'+modelo;
+    const pm=periodo.porModelo[pmKey]=periodo.porModelo[pmKey]||{provedor:cfg.provedor,modelo,requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
+    pm.requisicoes += 1; pm.tokens += total; pm.entrada += pin; pm.saida += pout; pm.custo += custo;
+    salvarPeriodo();
 
     const e = S.state.atual();
     if (e) {
@@ -1543,10 +1588,17 @@ window.S = window.S || {};
     }
 
     const q = usoHoje();
+    renovarPeriodoSeNecessario();
+    if (orcamentoEsgotado() || estado.orcamentoPreventivo) {
+      const er = new Error('Orçamento de IA do período de 30 dias esgotado. A equipe entra em rotina de descanso até a renovação.');
+      er.orcamento = true; throw er;
+    }
     const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
     const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
-    if (!op.forcar && q.tokens + estimativa >= cfg.limiteTokensDia) {
-      const er = new Error(`Limite local de ${cfg.limiteTokensDia.toLocaleString('pt-BR')} tokens atingido; novas chamadas ficam bloqueadas até amanhã.`);
+    const custoEstimado = estimarCusto(cfg.provedor, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
+    if ((custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
+      estado.orcamentoPreventivo=true;
+      const er = new Error(`Orçamento de IA do período de 30 dias quase esgotado; chamada não iniciada para preservar o limite.`);
       er.limiteLocal = true; throw er;
     }
 
@@ -1600,7 +1652,7 @@ window.S = window.S || {};
         throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
       }
 
-      estado.falhas=0; l.falhas=0; l.bloqueadaAte=0;
+      estado.falhas=0; estado.orcamentoPreventivo=false; l.falhas=0; l.bloqueadaAte=0;
       registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms,ok:true,tokens:(dados.usage||{}).total_tokens||0,em:Date.now()});
       situar('pronta','IA pronta',`última resposta em ${(ms/1000).toFixed(1)}s`);
       return {texto,usage:dados.usage||{},ms,modelo};
@@ -1609,11 +1661,13 @@ window.S = window.S || {};
       estado.falhas++; l.falhas++;
       if(err&&err.cota){
         // bloqueio global já foi definido pelo cabeçalho do provedor.
+      }else if(err&&err.orcamento){
+        // orçamento local é um freio planejado, não uma falha do modelo.
       }else if(!err.limiteLocal){
         l.bloqueadaAte=Date.now() + (/401|inválida/i.test(msg)?90000:Math.min(30000,5000*l.falhas));
       }
       registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms:Date.now()-inicio,ok:false,erro:msg,em:Date.now()});
-      situar(err.limiteLocal?'pronta':'erro',err.limiteLocal?'Limite local atingido':'Falha na IA',msg);
+      situar((err.limiteLocal||err.orcamento)?'pronta':'erro',(err.orcamento?'Orçamento do período atingido':err.limiteLocal?'Limite local atingido':'Falha na IA'),msg);
       throw err;
     }finally{
       estado.emVoo=Math.max(0,estado.emVoo-1);
@@ -1698,37 +1752,23 @@ window.S = window.S || {};
   /* Custo do dia em dólar, calculado sobre o uso que o provedor contabilizou.
      É estimativa de acompanhamento, não fatura. */
   function custoDoDia() {
-    const q = usoHoje();
-    let total = 0, temPreco = false;
-    Object.keys(q.porModelo || {}).forEach(id => {
-      const p = (PRECOS_POR_PROVEDOR[cfg.provedor] || {})[id];
-      if (!p) return;
-      temPreco = true;
-      const m = q.porModelo[id];
-      // Sem separação por modelo de entrada/saída, usa a proporção do dia.
-      const prop = q.tokens > 0 ? q.entrada / q.tokens : 0.7;
-      const ent = (m.tokens || 0) * prop, sai = (m.tokens || 0) * (1 - prop);
-      total += (ent / 1e6) * p.entrada + (sai / 1e6) * p.saida;
-    });
-    if (!temPreco) return null;
-    return (cfg.provedor === 'groq' && cfg.tier === 'dev') ? total * DESCONTO_DEV : total;
+    const q=usoHoje();
+    return Object.values(q.porModelo||{}).reduce((n,m)=>n+Number(m.custo||0),0) || 0;
   }
 
+
   function orcamento() {
-    const q = usoHoje();
-    const h = q.headers;
-    const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
-    const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
-    // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
-    // sabemos a janela real da organização; depois dela, usamos os headers do provedor ativo.
-    const pctTokens = temTok ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100) : null;
-    const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
-    return {
-      requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-      pctTokens, pctReq, fonte: (temTok || temReq) ? cfg.provedor : 'aguardando headers', provedor: cfg.provedor,
-      ref: null, headers: h, porModelo: q.porModelo,
-      custo: custoDoDia(), tier: cfg.tier, limiteTokensDia: cfg.limiteTokensDia
-    };
+    renovarPeriodoSeNecessario();
+    const q=usoHoje(), h=q.headers;
+    const temTok=h && Number.isFinite(h.limiteTok) && h.limiteTok>0;
+    const temReq=h && Number.isFinite(h.limiteReq) && h.limiteReq>0;
+    const pctTokens=temTok?clamp(((h.limiteTok-(Number.isFinite(h.restaTok)?h.restaTok:h.limiteTok))/h.limiteTok)*100,0,100):null;
+    const pctReq=temReq?clamp(((h.limiteReq-(Number.isFinite(h.restaReq)?h.restaReq:h.limiteReq))/h.limiteReq)*100,0,100):null;
+    const diasPassados=Math.max(0,(Date.now()-periodo.inicio)/86400000);
+    const diasRestantes=Math.max(0,periodo.dias-diasPassados);
+    const restante=restanteUSD();
+    const ritmo=diasRestantes>0?restante/diasRestantes:0;
+    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:custoDoDia(),custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:periodo.margemUSD,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),tier:cfg.tier,limiteTokensDia:cfg.limiteTokensDia};
   }
 
   S.ai = {
@@ -1748,7 +1788,7 @@ window.S = window.S || {};
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
     },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, limiteTokensDia,
-    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
+    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoIndisponivel, restanteUSD, custoPeriodo,
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
       S.local.setJson(K_CFG, cfg);
@@ -1783,14 +1823,7 @@ window.S = window.S || {};
     vende:'Ferramenta de produção; não determina o que a empresa deve vender.', tokens:2400,
     obrigatorios:[]
   }];
-  const LEGADO = {
-    obra:{especialidade:'criacao',nome:'Produção autônoma'}, landing:{especialidade:'criacao',nome:'Produção autônoma'},
-    artigo:{especialidade:'criacao',nome:'Produção autônoma'}, marca:{especialidade:'criacao',nome:'Produção autônoma'},
-    anuncios:{especialidade:'comercial',nome:'Produção autônoma'}, emails:{especialidade:'comercial',nome:'Produção autônoma'},
-    catalogo:{especialidade:'dados',nome:'Produção autônoma'}, calendario:{especialidade:'comercial',nome:'Produção autônoma'},
-    proposta:{especialidade:'comercial',nome:'Produção autônoma'}
-  };
-  const porId = id => KITS.find(k => k.id === id) || (LEGADO[id] ? Object.assign({id}, LEGADO[id]) : null);
+  const porId = id => KITS.find(k => k.id === id) || (id ? KITS[0] : null);
   const disponiveis = () => KITS.slice();
 
   const placeholder = /<[^>]{2,}>|lorem ipsum|xxx+|\[\s*(?:preencher|exemplo|aqui)\s*\]|preencher aqui|conteúdo em elaboração/i;
@@ -1822,17 +1855,26 @@ window.S = window.S || {};
     return {id:projeto.id,nome:projeto.nome,objetivo:projeto.objetivo,arquivos,tarefas};
   }
 
+  function normalizarSitePath(nome) {
+    const n=String(nome||'').trim().replace(/\\/g,'/').replace(/^\.\//,'').replace(/^\/+/, '');
+    return /^site\//i.test(n) ? n : 'site/' + n.replace(/^site\//i,'');
+  }
+
   async function produzir(op) {
     const e=S.state.atual(); const agente=op.agente||null;
     if(!e || !S.ai.disponivel(agente&&agente.id)) return null;
     const projeto=contextoProjeto(e,op.projectId);
     const base=op.baseArquivoId?e.arquivos.find(a=>a.id===op.baseArquivoId):null;
     const arquivos=(projeto.arquivos||[]).map(a=>
-      `ID=${a.id} | ${a.nome} | ${a.tipo} | ${a.classe} | v${a.versao||1}\n${a.conteudo}`
+      `ID=${a.id} | ${a.nome} | ${a.tipo} | ${a.classe} | v${a.versao||1} | site=${a.siteCentral?'sim':'nao'}\n${String(a.conteudo||'').slice(0,9000)}`
     ).join('\n\n')||'Nenhum artefato existente.';
+    const siteArquivos=e.arquivos.filter(a=>a.siteCentral && a.projectId===projeto.id).slice(0,8);
+    const siteContext=siteArquivos.length?siteArquivos.map(a=>`SITE ${a.sitePath||a.nome} | ${a.tipo} | v${a.versao||1}\n${String(a.conteudo||'').slice(0,9000)}`).join('\n\n'):'O site central ainda não existe; a primeira arquitetura deve ser criada pela equipe, sem template.';
     const tarefas=(projeto.tarefas||[]).map(t=>`${t.status}: ${t.titulo} | ${t.briefing} | ${t.handoff||''}`).join('\n')||'Nenhuma tarefa.';
     const memoria=agente&&Array.isArray(agente.memoria)?agente.memoria.slice(-10).map(m=>typeof m==='string'?m:m.texto).join(' | '):'';
-    const sistema=`Você é ${agente?agente.nome:'um funcionário'} do estúdio ${e.nome}. Você está na etapa de EXECUÇÃO, não de planejamento. Sua função agora é transformar uma decisão de trabalho em um resultado concreto no acervo.\n\nEMPRESA: ${e.nome}\nMISSÃO: ${e.missao}\nRAMO: ${e.ramo}\nPÚBLICO: ${e.publico}\nPROJETO: ${projeto.nome}\nOBJETIVO: ${projeto.objetivo}\n\nDECISÃO E BRIEFING:\n${String(op.briefing||'').slice(0,2200)}\n\nPENSAMENTO DO FUNCIONÁRIO:\n${String(op.deliberacao||'').slice(0,1800)}\n\nARTEFATO BASE:\n${base?`ID=${base.id} | ${base.nome} | ${base.tipo} | v${base.versao||1}\n${String(base.conteudo||'').slice(0,14000)}`:'nenhum'}\n\nACERVO DO PROJETO:\n${arquivos.slice(0,28000)}\n\nTAREFAS:\n${tarefas.slice(0,7000)}\n\nMEMÓRIA:\n${memoria||'nenhuma'}\n\nEXECUTE AGORA. Você pode criar um arquivo, atualizar um arquivo existente ou excluir um arquivo que realmente não serve. Se atualizar, devolva o arquivo completo. Não devolva plano, promessa, avaliação ou explicação no lugar do arquivo. Não invente fatos ausentes. Não use placeholders.\n\nFORMATOS ACEITOS: ${FORMATOS.join(', ')}\n\nRETORNE EXATAMENTE:\nACAO: criar | atualizar | excluir\nARQUIVO_ID: <id existente se atualizar/excluir; vazio se criar>\nNOME: <nome completo com extensão>\nTIPO: <formato>\nRESUMO: <uma frase sobre o que mudou>\n---\nCONTEUDO COMPLETO DO ARQUIVO`; 
+    const sistema=`Você é ${agente?agente.nome:'um funcionário'} do estúdio ${e.nome}. Você está na etapa de EXECUÇÃO, não de planejamento. Sua função agora é transformar uma decisão de trabalho em um resultado concreto no acervo.\n\nEMPRESA: ${e.nome}\nMISSÃO: ${e.missao}\nRAMO: ${e.ramo}\nPÚBLICO: ${e.publico}\nPROJETO: ${projeto.nome}\nOBJETIVO: ${projeto.objetivo}\n\nDECISÃO E BRIEFING:\n${String(op.briefing||'').slice(0,2200)}\n\nPENSAMENTO DO FUNCIONÁRIO:\n${String(op.deliberacao||'').slice(0,1800)}\n\nARTEFATO BASE:\n${base?`ID=${base.id} | ${base.nome} | ${base.tipo} | v${base.versao||1}\n${String(base.conteudo||'').slice(0,14000)}`:'nenhum'}\n\nACERVO DO PROJETO:\n${arquivos.slice(0,28000)}\n\nTAREFAS:\n${tarefas.slice(0,7000)}\n\nMEMÓRIA:\n${memoria||'nenhuma'}\n\nEXECUTE AGORA. Você pode criar um arquivo, atualizar um arquivo existente ou excluir um arquivo que realmente não serve. Se atualizar, devolva o arquivo completo.
+
+SITE CENTRAL: toda entrega que o cliente verá deve viver no site central. Não use layout, copy, estrutura ou identidade padronizados. A arquitetura, navegação, linguagem visual e organização devem nascer do contexto real da empresa e dos artefatos existentes. Se estiver construindo o site, escolha você mesmo a estrutura necessária. Se já houver site, preserve o que funciona e evolua a partir dele. Não devolva plano, promessa, avaliação ou explicação no lugar do arquivo. Não invente fatos ausentes. Não use placeholders.\n\nFORMATOS ACEITOS: ${FORMATOS.join(', ')}\n\nRETORNE EXATAMENTE:\nACAO: criar | atualizar | excluir\nARQUIVO_ID: <id existente se atualizar/excluir; vazio se criar>\nNOME: <nome completo com extensão>\nTIPO: <formato>\nRESUMO: <uma frase sobre o que mudou>\n---\nCONTEUDO COMPLETO DO ARQUIVO`; 
     try {
       const r=await S.ai.chamar({sistema,pedido:'Execute a decisão agora. O conteúdo depois de --- deve ser o arquivo final completo. Não pare em uma descrição.',tipo:'conteudo',tokens:Math.max(1800,Math.min(3600,Number(op.tokens||2400))),agente:agente&&agente.nome,agenteId:agente&&agente.id,motivo:'execução de decisão'});
       const c=S.ai.campos(r.texto), corpo=S.ai.corpo(r.texto);
@@ -1843,12 +1885,14 @@ window.S = window.S || {};
         if(!alvo) throw new Error('A produção pediu exclusão sem apontar um arquivo existente.');
         return {arquivos:[],excluir:[alvo.id],kit:'autonomo',classe:'candidato',viaIA:true,resumo:String(c.resumo||'').slice(0,400),validacao:{pronto:true,problemas:[]}};
       }
-      const nome=String(c.nome||'').trim()||(alvo&&alvo.nome)||`${slug(c.resumo||'entrega')}.md`;
+      let nome=String(c.nome||'').trim()||(alvo&&alvo.nome)||`${slug(c.resumo||'entrega')}.md`;
+      const siteCentral = op.siteCentral !== false;
+      if(siteCentral) nome=normalizarSitePath(nome);
       const tipo=String(c.tipo||'').trim().toLowerCase()||((nome.match(/\.([a-z0-9]+)$/i)||[])[1]||'md');
       if(corpo.trim().length<80) throw new Error('A produção devolveu um arquivo vazio ou insuficiente.');
       if(acao==='atualizar'&&!alvo) throw new Error('A produção pediu atualização sem arquivo base.');
-      const arquivo={nome,tipo,conteudo:corpo.trim(),baseArquivoId:alvo?alvo.id:null};
-      return {arquivos:[arquivo],kit:'autonomo',classe:'candidato',viaIA:true,linhagem:alvo&&alvo.linhagem||null,validacao:validar(null,c,[arquivo]),campos:c,resumo:String(c.resumo||'').slice(0,400)};
+      const arquivo={nome,tipo,conteudo:corpo.trim(),baseArquivoId:alvo?alvo.id:null,siteCentral,sitePath:siteCentral?nome:null,clienteVisivel:true};
+      return {arquivos:[arquivo],kit:'autonomo',classe:'candidato',viaIA:true,siteCentral,clienteVisivel:true,sitePath:arquivo.sitePath,linhagem:alvo&&alvo.linhagem||null,validacao:validar(null,c,[arquivo]),campos:c,resumo:String(c.resumo||'').slice(0,400)};
     } catch(err) { console.error('Produção autônoma falhou',err); return null; }
   }
 
@@ -1868,7 +1912,7 @@ window.S = window.S || {};
 (function (S) {
   'use strict';
 
-  const DECISAO_MIN_MS = 45000;
+  const DECISAO_MIN_MS = 120000;
   const max = (v, n) => String(v || '').slice(0, n);
 
   function agora() { return Date.now(); }
@@ -2078,10 +2122,11 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
   const assento = p => ({ x: p.mesa.x, y: p.mesa.y + 40 });
 
   const ESTACOES = {
-    cafe: { x: 120, y: 350, rotulo: 'café' },
+    cafe: { x: 120, y: 350, rotulo: 'café/refeição' },
     reuniao: { x: 345, y: 276, rotulo: 'reunião' },
     quadro: { x: 525, y: 276, rotulo: 'quadro' },
-    descanso: { x: 350, y: 350, rotulo: 'descanso' }
+    descanso: { x: 350, y: 350, rotulo: 'descanso' },
+    dormitorio: { x: 555, y: 350, rotulo: 'dormitório' }
   };
 
   function montar() {
@@ -2194,7 +2239,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
   function relatorioReuniao(){const e=S.state.atual();if(!e)return '';const texto=gerarRelatorioLocal(e);registrarReuniao('Relatório',texto,'relatorio');return texto;}
 
   async function reuniaoInterna(motivo,opcoes){
-    const e=S.state.atual();if(!e||!S.ai.pronta())return null;
+    const e=S.state.atual();if(!e||!S.ai.pronta()||(S.ai.orcamentoIndisponivel&&S.ai.orcamentoIndisponivel()))return null;
     e.reuniao=e.reuniao||{mensagens:[],relatorios:[],reunioes:[]};if(e.reuniao.reuniaoAtiva)return null;
     const g=gerente();const participantes=rt.filter(p=>p.ref.energia>30&&!p.ocupado&&p.estado==='sentado').slice(0,3);
     if(g&&!participantes.includes(g))participantes.push(g);if(participantes.length<2)return null;
@@ -2204,11 +2249,11 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
     await Promise.all(participantes.map((p,i)=>irPara(p,{x:mesa.x+(i-1)*26,y:mesa.y})));
     participantes.forEach(p=>{p.estado='falando';p.balao='ouvindo a equipe';});
     const projeto=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];
-    const estado=`MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}\nOBJETIVO=${projeto?projeto.objetivo:e.missao}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.id+' '+t.titulo).join(' | ')||'nenhuma'}\nARTEFATOS=${e.arquivos.slice(0,8).map(a=>a.id+' '+a.nome+' ['+a.classe+']').join(' | ')||'nenhum'}\nMOTIVO=${motivo}`;
+    const estado=`MISSÃO=${e.missao}\nPROJETO=${projeto?projeto.nome:'principal'}\nOBJETIVO=${projeto?projeto.objetivo:e.missao}\nTAREFAS=${e.tarefas.filter(t=>t.status!=='feita').slice(0,8).map(t=>t.id+' '+t.titulo).join(' | ')||'nenhuma'}\nARTEFATOS=${e.arquivos.slice(0,8).map(a=>a.id+' '+a.nome+' ['+a.classe+']').join(' | ')||'nenhum'}\nSITE CENTRAL=${e.site&&e.site.projetoId?'sim — arquitetura livre, definida pela equipe':'a definir'}\nMOTIVO=${motivo}`;
     const falas=[];
     for(const p of participantes.filter(x=>x!==g)){
       const hist=falas.map(x=>`[${x.nome}] ${x.texto}`).join('\n')||'ninguém falou';
-      const r=await S.ai.perguntar({sistema:`Você é ${p.nome}, ${p.cargo}. Reunião presencial de trabalho. Fale em voz alta, sem revelar raciocínio privado. Traga uma observação ou proposta que possa mudar a decisão.\n${estado}\nRETORNE: FALA: <até 65 palavras>`,pedido:`Histórico:\n${hist}\nDiga o que deve ser feito a seguir.`,tokens:150,agente:p.nome,agenteId:p.id,motivo:'reunião de trabalho'});
+      const r=await S.ai.perguntar({sistema:`Você é ${p.nome}, ${p.cargo}. Reunião presencial de trabalho. Fale em voz alta, sem revelar raciocínio privado. Traga uma observação ou proposta que possa mudar a decisão. O produto e o site central devem nascer do contexto desta empresa; não use modelo ou layout pré-pronto.\n${estado}\nRETORNE: FALA: <até 65 palavras>`,pedido:`Histórico:\n${hist}\nDiga o que deve ser feito a seguir.`,tokens:150,agente:p.nome,agenteId:p.id,motivo:'reunião de trabalho'});
       const texto=r?String(r.campos.fala||'').trim():'';if(texto){falas.push({id:p.id,nome:p.nome,texto});registrarReuniao(p.nome,texto,'reuniao');logPessoa(p,`contribuiu: ${texto}`,'reuniao');p.ref.pensamento=texto.slice(0,220);p.balao=texto.slice(0,70);}
     }
     let decisao=null;
@@ -2245,37 +2290,58 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
     const e = S.state.atual(); if (!e) return;
     const hora = new Date().getHours() + new Date().getMinutes()/60;
     const rel = { expediente: hora >= 8 && hora < 18 };
+    const semOrcamento = S.ai && S.ai.orcamentoEsgotado && S.ai.orcamentoEsgotado();
     rt.forEach(p => {
-      const f = p.ref;
-      if (!f) return;
-      // Energia é proporcional ao tempo real, não ao número de ciclos.
-      // Um ciclo de 7 s não pode equivaler a horas de trabalho.
-      if (p.ocupado) f.energia = clamp(f.energia - 0.12, 0, 100);
+      const f = p.ref; if (!f) return;
+      f.cuidados = f.cuidados || {};
+      f.cuidados.fome = clamp(Number(f.cuidados.fome || 0) + (p.ocupado ? 0.16 : 0.07), 0, 100);
+      f.cuidados.sono = clamp(Number(f.cuidados.sono || 0) + (p.ocupado ? 0.12 : 0.05), 0, 100);
+      if (p.estado === 'dormindo') {
+        f.energia = clamp(f.energia + 0.55, 0, 100);
+        f.cuidados.sono = clamp(f.cuidados.sono - 0.85, 0, 100);
+        f.humor = clamp(f.humor + 0.12, 0, 100);
+      } else if (p.estado === 'comendo') {
+        f.cuidados.fome = clamp(f.cuidados.fome - 1.25, 0, 100);
+        f.cuidados.sono = clamp(f.cuidados.sono + 0.01, 0, 100);
+        f.energia = clamp(f.energia + 0.08, 0, 100);
+      } else if (p.ocupado) f.energia = clamp(f.energia - 0.12, 0, 100);
       else if (p.estado === 'pausa' || !rel.expediente) f.energia = clamp(f.energia + 0.25, 0, 100);
       else f.energia = clamp(f.energia - 0.015, 0, 100);
-      // Humor volta devagar para o meio quando nada acontece.
       f.humor = clamp(f.humor + (f.humor < 60 ? 0.35 : -0.12), 0, 100);
       const agora = Date.now();
-      f.cuidados = f.cuidados || {};
-      if (rel.expediente && f.energia < 62 && agora - (f.cuidados.ultimo || 0) > 12 * 60 * 1000 && !p.ocupado) {
+
+      // Quando o orçamento de 30 dias acaba, a equipe não finge trabalhar:
+      // a rotina física continua, mas nenhuma chamada de IA é iniciada.
+      if (semOrcamento && !p.ocupado && p.estado !== 'dormindo' && p.estado !== 'comendo') {
+        if (f.cuidados.fome > 58) {
+          p.estado='comendo'; f.cuidados.rotina='refeicao'; p.balao='comendo';
+          logPessoa(p,'foi comer enquanto o orçamento de IA está esgotado.','rotina');
+          irPara(p,ESTACOES.cafe).then(()=>setTimeout(()=>{ if(p.estado==='comendo'){p.estado='dormindo';f.cuidados.rotina='sono';p.balao='dormindo';irPara(p,ESTACOES.dormitorio);logPessoa(p,'foi descansar no dormitório; aguardando a renovação do orçamento de IA.','rotina');}},7000));
+        } else {
+          p.estado='dormindo'; f.cuidados.rotina='sono'; p.balao='dormindo';
+          logPessoa(p,'encerrou o expediente e foi dormir porque o orçamento de IA do período acabou.','rotina');
+          irPara(p,ESTACOES.dormitorio);
+        }
+        return;
+      }
+      if (!semOrcamento && p.estado === 'dormindo' && f.cuidados.sono < 45) {
+        p.estado='andando'; p.balao='voltando ao trabalho';
+        irPara(p,assento(p)).then(()=>{p.estado='sentado';p.balao=null;f.cuidados.rotina='trabalho';logPessoa(p,'voltou ao posto depois que o orçamento de IA foi renovado.','rotina');});
+      }
+      if (rel.expediente && f.energia < 62 && agora - (f.cuidados.ultimo || 0) > 12 * 60 * 1000 && !p.ocupado && !semOrcamento) {
         f.cuidados.ultimo = agora; f.cuidados.pausa = (f.cuidados.pausa || 0) + 1;
         p.estado = 'pausa';
         const est = f.energia < 42 ? ESTACOES.descanso : ESTACOES.cafe;
         logPessoa(p, f.energia < 42 ? 'fez uma pausa de recuperação antes de retomar o trabalho.' : 'fez uma pausa curta para água/café e reorganização.', 'bem-estar');
         irPara(p, est).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou as atividades após a pausa.', 'bem-estar'); }); }, 9000));
       }
-      if (rel.expediente && agora - (f.cuidados.agua || 0) > 25 * 60 * 1000 && !p.ocupado) {
-        f.cuidados.agua = agora;
-        logPessoa(p, 'fez uma pausa breve para hidratação.', 'bem-estar');
-      }
-      if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado) {
-        p.estado = 'pausa';
-        logPessoa(p, 'interrompeu o trabalho para recuperação: energia baixa.', 'bem-estar');
+      if (rel.expediente && agora - (f.cuidados.agua || 0) > 25 * 60 * 1000 && !p.ocupado && !semOrcamento) { f.cuidados.agua = agora; logPessoa(p, 'fez uma pausa breve para hidratação.', 'bem-estar'); }
+      if (f.energia < 18 && p.estado !== 'pausa' && !p.ocupado && !semOrcamento) {
+        p.estado = 'pausa'; logPessoa(p, 'interrompeu o trabalho para recuperação: energia baixa.', 'bem-estar');
         irPara(p, ESTACOES.descanso).then(() => setTimeout(() => { if (p.estado === 'pausa') irPara(p, assento(p)).then(() => { p.estado = 'sentado'; logPessoa(p, 'retomou o trabalho após recuperação.', 'bem-estar'); }); }, 9000));
       }
     });
-    S.bus.emit('equipe');
-    S.state.gravar();
+    S.bus.emit('equipe'); S.state.gravar();
   }
 
   function humor(p, delta, motivo) {
@@ -2320,7 +2386,8 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
         linhagem: meta.linhagem || (meta.baseArquivoId && e.arquivos.find(x => x.id === meta.baseArquivoId)?.linhagem) || ('p:' + (meta.projectId || (e.projetos[0] && e.projetos[0].id) || '') + ':' + slug(a.nome)),
         autor: p ? p.nome : 'equipe', autorId: p ? p.id : null, criadoEm: Date.now(), quando: S.fmt.dataHora(),
         taskId: meta.taskId || null, baseArquivoId: meta.baseArquivoId || null,
-        briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false
+        briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false,
+        siteCentral: Boolean(meta.siteCentral), sitePath: meta.sitePath || null, clienteVisivel: Boolean(meta.clienteVisivel)
       };
       e.arquivos.unshift(arq);
       return arq;
@@ -2445,21 +2512,19 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
       if (!proj.arquivoIds.includes(produto.id)) proj.arquivoIds.unshift(produto.id);
       proj.atividade.unshift({ t: Date.now(), tipo: 'publicacao', texto: `${produto.nome} entrou no projeto.` });
       proj.atividade = proj.atividade.slice(-40);
-      // Um produto novo só pede integração quando existe um site anterior.
-      // Não cria uma nova versão do próprio site automaticamente.
-      if (base.kit !== 'landing' && base.kit !== 'autonomo') {
-        const site = e.arquivos.find(a => a.classe === 'produto' && a.kit === 'landing');
-        const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && t.kit === 'landing' && /atualiz|catálogo|catalogo/i.test(t.titulo));
-        if (site && !jaExiste) {
-          novaTarefa({ titulo: `Integrar ${produto.nome} ao site`, kit: 'landing',
-            briefing: `Atualizar o site existente para integrar ${produto.nome}. Preserve o conteúdo que já funciona e altere apenas o necessário.`,
-            projectId: proj.id, baseArquivoId: site.id, origem: 'integração de produto' });
+      // Tudo que é cliente-visível pertence ao site central da empresa.
+      // A equipe decide a arquitetura e a linguagem; o código não fornece template.
+      if (!base.siteCentral && base.clienteVisivel) {
+        const siteArquivos = e.arquivos.filter(a => a.siteCentral && a.projectId === proj.id);
+        const siteBase = siteArquivos.find(a => /(^|\/)index\.html$/i.test(a.sitePath || a.nome)) || siteArquivos[0];
+        if (siteBase) {
+          const jaExiste = e.tarefas.some(t => t.status !== 'feita' && t.projectId === proj.id && /integrar|site central/i.test(t.titulo));
+          if (!jaExiste) novaTarefa({titulo:`Integrar ${produto.nome} ao site central`,kit:'autonomo',briefing:`Integrar ${produto.nome} ao site central da empresa sem impor template. Leia a arquitetura atual, preserve o que funciona e faça a alteração necessária para o cliente encontrar e usar o produto.`,projectId:proj.id,baseArquivoId:siteBase.id,origem:'integração ao site central'});
         }
       }
     }
-    // Publicar apenas coloca uma oferta real no portfólio. Dinheiro entra
-    // somente quando o mercado simulado gerar uma venda; não há prêmio por
-    // simplesmente mudar a classe do arquivo.
+    // Publicar congela uma versão que a gerente considerou pronta para sair.
+    // Não existe mercado, cliente ou receita simulados neste aplicativo.
     S.state.gravar();
     S.bus.emit('arquivos');
     return produto;
@@ -2558,7 +2623,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
 
   function novaTarefa(dados) {
     const e = S.state.atual(); if (!e) return null;
-    const titulo = limpo(dados.titulo, 16); if (!titulo || titulo.length < 6) return null;
+    const titulo = limpo(dados.titulo, 24); if (!titulo || titulo.length < 6) return null;
     if (e.tarefas.some(t => t.status !== 'feita' && t.titulo.toLowerCase() === titulo.toLowerCase())) return null;
     // Dedupe real: o mesmo kit não pode ter duas etapas abertas no mesmo
     // projeto, e uma etapa idêntica concluída há pouco não volta em loop.
@@ -2572,7 +2637,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
     if (repetidaRecente) return null;
     const projeto = e.projetos.find(p => p.id === dados.projectId) || e.projetos.find(p => p.status === 'ativo') || e.projetos[0];
     const t = {
-      id: uid('t'), titulo, kit: dados.kit || 'landing', briefing: limpo(dados.briefing) || titulo,
+      id: uid('t'), titulo, kit: dados.kit || 'autonomo', briefing: limpo(dados.briefing) || titulo,
       rodada: Number(dados.rodada) || 0,
       para: dados.para || null, status: 'aberta', origem: dados.origem || 'gerente',
       projectId: projeto ? projeto.id : null,
@@ -2595,6 +2660,20 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
     S.state.gravar(); S.bus.emit('trabalho');
     return t;
   }
+  async function despacharTarefa(t, alvo) {
+    const e=S.state.atual(); if(!e||!t) return false;
+    const candidato=(alvo&&alvo.papel==='func'&&!alvo.ocupado?alvo:null)
+      || rt.find(p=>p.papel==='func'&&!p.ocupado&&p.estado==='sentado'&&p.ref.energia>20&&(!t.para||p.id===t.para));
+    if(!candidato) {
+      t.status='aberta'; S.state.gravar(); return false;
+    }
+    t.para=candidato.id;
+    S.state.gravar(); S.bus.emit('trabalho');
+    candidato.balao=`recebi: ${t.titulo.slice(0,42)}`;
+    await sleep(650); candidato.balao=null;
+    return executar(candidato,t);
+  }
+
   function tarefasAbertas() {
     const e = S.state.atual(); return e ? e.tarefas.filter(t => t.status === 'aberta') : [];
   }
@@ -2697,7 +2776,7 @@ OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, ban
   }
 
   async function avaliar(g) {
-    const e = S.state.atual(); if (!e || !g || g.ocupado) return;
+    const e = S.state.atual(); if (!e || !g || g.ocupado || (S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel())) return;
     const candidatos = e.arquivos.filter(a => (a.classe === 'candidato' || a.classe === 'prototipo') && !a.avaliado);
     const cand = candidatos[0];
     if (!cand) return;
@@ -2731,7 +2810,7 @@ DECIDA PELO TRABALHO REAL. Você pode:
 Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se corrigir/continuar, descreva a próxima ação em termos executáveis.`;
     try {
       const r = await S.ai.perguntar({
-        sistema: contexto + `\n\nRETORNE SOMENTE:\nDECISAO: publicar | corrigir | descartar | continuar\nANALISE: <o que você realmente encontrou no conteúdo, até 100 palavras>\nACAO: <próxima ação concreta, até 80 palavras>\nPARA: <id do funcionário ou vazio>\nBASE: <id do artefato base ou vazio>`,
+        sistema: contexto + `\n\nRETORNE SOMENTE:\nDECISAO: publicar | corrigir | descartar | continuar\nANALISE: <o que você realmente encontrou no conteúdo, até 100 palavras>\nEVIDENCIAS: <até 3 verificações concretas feitas no conteúdo>\nPENDENCIAS: <o que ainda impede o produto; escreva nenhuma se não houver>\nACAO: <próxima ação concreta, até 80 palavras>\nPARA: <id do funcionário ou vazio>\nBASE: <id do artefato base ou vazio>\nPRONTO: sim | nao`,
         pedido: `Inspecione agora o arquivo ${cand.nome}. Não avalie aparência nem atribua nota. Leia o conteúdo e tome uma decisão executiva que altere o próximo estado do projeto.`,
         tokens: 520, reasoning_effort: 'low', agente: g.nome, agenteId: g.id, motivo: 'auditoria real de artefato'
       });
@@ -2739,20 +2818,27 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
       const c = r.campos || {};
       const decisao = String(c.decisao || '').toLowerCase().trim();
       const analise = String(c.analise || '').trim();
+      const evidencias = String(c.evidencias || '').trim();
+      const pendencias = String(c.pendencias || '').trim();
+      const pronto = String(c.pronto || '').toLowerCase().trim();
       const acao = String(c.acao || '').trim();
       g.balao = analise.slice(0, 70) || decisao;
-      registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
+      registrarReuniao(g.nome, `${decisao.toUpperCase()}: ${analise}${evidencias ? ' Evidências: ' + evidencias : ''}${pendencias ? ' Pendências: ' + pendencias : ''}${acao ? ' Próximo passo: ' + acao : ''}`, 'gerencia');
       logPessoa(g, `inspecionou ${cand.nome}: ${decisao}. ${analise}`, 'supervisao');
       g.ref.pensamento = `${decisao}: ${analise}`.slice(0, 500);
       cand.avaliado = true;
 
-      if (decisao === 'publicar') {
+      if (decisao === 'publicar' && pronto === 'sim' && (!pendencias || /^nenhuma$|^nenhum$/i.test(pendencias))) {
         cand.liberadoPublicacao = true;
         const produto = publicar(cand.id, g.nome, analise || 'Aprovado pela gerente após inspeção do conteúdo.');
         if (produto) {
           registrarReuniao(g.nome, `Liberei ${produto.nome} para sair do estúdio.`, 'decisao');
           projeto && projeto.atividade.unshift({t:Date.now(),tipo:'release',texto:`${g.nome} aprovou ${produto.nome} após inspeção do conteúdo.`});
         }
+      } else if (decisao === 'publicar') {
+        cand.avaliado = false;
+        const tarefaNova = novaTarefa({titulo:`Resolver pendências de ${cand.nome}`,kit:'autonomo',briefing:acao || pendencias || 'Revisar o produto final e eliminar tudo que ainda impede a publicação.',para:String(c.para||'').trim()||cand.autorId,projectId:cand.projectId||projeto.id,baseArquivoId:cand.id,origem:'gate rigoroso de produto'});
+        if(tarefaNova) registrarReuniao(g.nome,`Não liberei ${cand.nome}: ainda existem pendências ou a verificação final não foi declarada concluída.`,'ordem');
       } else if (decisao === 'descartar') {
         e.arquivos = e.arquivos.filter(a => a.id !== cand.id);
         if (projeto) projeto.arquivoIds = projeto.arquivoIds.filter(id => id !== cand.id);
@@ -2807,7 +2893,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
         {id:'a2',nome:pick(NOMES),papel:'func',cargo:'Produção',especialidade:'producao',cor:S.state.PALETA[2],energia:85,humor:70,personalidade:personalidadeInicial('producao','')}
       ]});
     S.DB.estudios.unshift(e);S.DB.atual=e.id;S.state.gravarJa();S.state.registrar(`${nome} foi fundada. A equipe vai discutir o primeiro produto.`,'ok');S.bus.emit('trocou');
-    setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&!atual.reuniao?.reunioes?.length&&S.ai.pronta())reuniaoInterna('planejar o primeiro produto da empresa',{inicial:true}).catch(err=>console.error('reunião inicial',err));},1600);
+    setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&!atual.reuniao?.reunioes?.length&&S.ai.pronta())reuniaoInterna('planejar o primeiro produto e decidir como o site central da empresa deve apresentá-lo',{inicial:true}).catch(err=>console.error('reunião inicial',err));},1600);
     return e;
   }
 
@@ -2921,7 +3007,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.handoff=`${p.nome} removeu um artefato conforme sua decisão: ${saida.resumo || 'não servia ao objetivo'}.`;
         logPessoa(p, `removeu um artefato que julgou inadequado ao objetivo.`, 'entrega'); sucesso=true;
       } else if (saida.arquivos && saida.arquivos.length) {
-        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || null }, p);
+        const salvos = salvarArquivos(saida.arquivos, { projectId:tarefa.projectId, taskId:tarefa.id, baseArquivoId:tarefa.baseArquivoId || null, briefing:tarefa.briefing, viaIA:true, kit:'autonomo', classe:'candidato', siteCentral:Boolean(saida.siteCentral), sitePath:saida.sitePath||null, clienteVisivel:true, linhagem:(tarefa.baseArquivoId && e.arquivos.find(a=>a.id===tarefa.baseArquivoId)?.linhagem) || null }, p);
         tarefa.contributors = Array.isArray(tarefa.contributors) ? tarefa.contributors : []; if(!tarefa.contributors.includes(p.id)) tarefa.contributors.push(p.id);
         tarefa.status='feita'; tarefa.concluidaEm=Date.now(); tarefa.arquivo=salvos[0] && salvos[0].id; tarefa.handoff=`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')} para inspeção da gerente.`; tarefa.validacao=saida.validacao || null;
         const proj=e.projetos.find(x=>x.id===tarefa.projectId); if(proj){ salvos.forEach(a=>{if(!proj.arquivoIds.includes(a.id))proj.arquivoIds.unshift(a.id);}); proj.atividade.unshift({t:Date.now(),tipo:'entrega',texto:`${p.nome} entregou ${salvos.map(a=>a.nome).join(', ')}.`}); proj.atividade=proj.atividade.slice(-40); }
@@ -2945,6 +3031,10 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     if (e.reuniao && e.reuniao.reuniaoAtiva) return;
     S.bus.emit('relogio');
     if(S.ai.estado && S.ai.estado.pausado) return;
+    if(S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel()) {
+      rt.forEach(p=>{ if(!p.ocupado && p.estado!=='dormindo' && p.estado!=='comendo'){ p.estado='dormindo'; p.ref.cuidados=p.ref.cuidados||{}; p.ref.cuidados.rotina='sono'; p.balao='dormindo'; logPessoa(p,'está descansando: o orçamento de IA de 30 dias chegou ao limite.','rotina'); irPara(p,ESTACOES.dormitorio); }});
+      S.bus.emit('equipe'); return;
+    }
     const g=gerente();
 
     // A gerente primeiro lê entregas reais. Só depois toma uma nova decisão.
@@ -3197,7 +3287,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     ESPECIALIDADES, NOMES,
     montar, iniciar, parar, ajustarCanvas, cliqueNoChao,
     pessoas: () => rt, pessoa, gerente,
-    novaTarefa, tarefasAbertas, executar, registrarContribuicaoAcervo,
+    novaTarefa, tarefasAbertas, despacharTarefa, executar, registrarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
     selecionado: () => selecionado,
@@ -3660,7 +3750,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     if (pensamento) pensamento.innerHTML = opcoes('pensamento');
     if (producao) producao.innerHTML = opcoes('producao');
     const limite = $('#limiteTokensSel');
-    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 80000);
+    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 120000);
 
     const o = S.ai.orcamento();
     const h = o.headers;
@@ -3671,14 +3761,19 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
-        <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
-        <div class="stat"><span>Limite local diário</span><b>${F.num(o.limiteTokensDia || 80000)}</b></div>
-        <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
+        <div class="stat"><span>Orçamento do período</span><b>US$ ${Number(o.orcamentoUSD||3).toFixed(2)} / 30 dias</b></div>
+        <div class="stat"><span>Gasto estimado no período</span><b>US$ ${Number(o.custoPeriodo||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Restante para IA</span><b>US$ ${Number(o.restanteUSD||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Dias restantes</span><b>${Math.ceil(o.diasRestantes||0)}</b></div>
+        <div class="stat"><span>Ritmo médio disponível</span><b>US$ ${Number(o.ritmoDiarioUSD||0).toFixed(4)}/dia</b></div>
+        <div class="stat"><span>Tokens usados hoje</span><b>${F.num(o.tokens)}</b></div>
+        <div class="stat"><span>Teto de segurança diário</span><b>${F.num(o.limiteTokensDia || 120000)}</b></div>
+        <div class="stat"><span>Chamadas feitas hoje</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
-        ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
+        ${(o.esgotado || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? '<p class="panel-foot" style="color:#E08573"><strong>Orçamento esgotado.</strong> A equipe não fará novas chamadas e entrou em rotina de descanso até a renovação.</p>' : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>

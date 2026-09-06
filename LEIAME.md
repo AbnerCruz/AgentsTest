@@ -237,3 +237,15 @@ A unidade de autonomia é o funcionário. Cada funcionário possui sua própria 
 Não existe catálogo obrigatório de produtos, roteiro de marketing, mercado simulado ou maestro. A gerente é a autoridade final e lê o conteúdo produzido antes de decidir seu destino. Funcionários podem iniciar conversas, colaborar e convocar reuniões quando uma decisão conjunta for necessária.
 
 Ao fundar uma empresa, a equipe realiza uma primeira reunião de planejamento assim que a IA estiver disponível. O resultado da reunião é convertido em trabalho persistente.
+
+
+## v44 — orçamento de IA e site central
+
+- Orçamento local fixado em **US$ 3,00 por 30 dias**, com margem de segurança de US$ 0,10. O orçamento é calculado pelo uso real de entrada e saída registrado nas respostas do provedor.
+- O limite diário de tokens continua apenas como segundo freio de segurança; ele não é o orçamento principal. O Estúdio calcula também o ritmo médio disponível para o restante do período.
+- Quando o orçamento não comporta uma nova chamada, os agentes não simulam trabalho intelectual: entram em rotina física de refeição/descanso/dormitório e aguardam a renovação do período.
+- O custo é reduzido evitando chamadas redundantes: decisão autônoma espaçada, uma deliberação operacional por tarefa, produção somente quando existe uma consequência concreta e inspeção gerencial concentrada nas entregas.
+- **Não existe mercado, venda, cliente, receita ou comissão simulados.** O mundo externo fica com o dono.
+- Cada funcionário continua com sua própria lane de IA, usando separadamente o modelo de pensamento e o modelo de produção definidos na configuração. A gerente é a autoridade executiva; não existe maestro.
+- Toda entrega cliente-visível é armazenada no **site central da empresa**. A equipe decide a arquitetura, navegação, identidade e organização do site a partir do contexto real; não há template visual ou estrutura de site pré-fabricada.
+- O produto final passa por inspeção da gerente com conteúdo real, evidências, pendências e declaração explícita de prontidão. Não existe nota artificial de qualidade.

@@ -146,6 +146,9 @@ window.S = window.S || {};
       f.cuidados.ultimo = f.cuidados.ultimo || 0;
       f.cuidados.agua = Number.isFinite(f.cuidados.agua) ? f.cuidados.agua : 0;
       f.cuidados.pausa = Number.isFinite(f.cuidados.pausa) ? f.cuidados.pausa : 0;
+      f.cuidados.fome = Number.isFinite(f.cuidados.fome) ? f.cuidados.fome : 18;
+      f.cuidados.sono = Number.isFinite(f.cuidados.sono) ? f.cuidados.sono : 18;
+      f.cuidados.rotina = String(f.cuidados.rotina || 'trabalho');
       f.ambiente = f.ambiente && typeof f.ambiente === 'object' ? f.ambiente : {};
       f.ambiente.preferencias = Array.isArray(f.ambiente.preferencias) ? f.ambiente.preferencias.slice(0,8) : [];
       f.ambiente.ultimaAcao = Number(f.ambiente.ultimaAcao) || 0;
@@ -164,6 +167,11 @@ window.S = window.S || {};
       pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
       pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
     });
+    e.site = e.site && typeof e.site === 'object' ? e.site : {};
+    e.site.projetoId = e.site.projetoId || (e.projetos[0] && e.projetos[0].id) || null;
+    e.site.raiz = 'site';
+    e.site.arquitetura = String(e.site.arquitetura || 'livre, definida pela equipe a partir da identidade e missão da empresa');
+    e.site.ultimaInspecao = Number(e.site.ultimaInspecao) || 0;
     e.contratos = [];
     // O simulador não possui mercado, vendas ou caixa fictícios. Interações externas ficam com o dono.
     delete e.negocio;
@@ -172,6 +180,9 @@ window.S = window.S || {};
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
     e.tarefas.forEach(t => {
       t.projectId = t.projectId || (e.projetos[0] && e.projetos[0].id);
+      // O formato da tarefa é livre; ids antigos de kits são apenas migrados
+      // para a capacidade genérica e nunca mais escolhem o que a empresa produz.
+      t.kit = 'autonomo';
       t.dependsOn = Array.isArray(t.dependsOn) ? t.dependsOn : [];
       t.handoff = t.handoff || null;
     });
