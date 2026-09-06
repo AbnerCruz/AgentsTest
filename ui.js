@@ -524,7 +524,15 @@
         <div class="field"><label for="cfgMissao">Missão</label><input id="cfgMissao" type="text" value="${esc(e.missao)}"></div>
         <div class="field"><label for="cfgTom">Tom da marca</label><input id="cfgTom" type="text" value="${esc(e.tom)}"></div>
         <div class="row-actions"><button class="btn btn-primary" id="salvarCfgBtn" type="button">Salvar</button></div>
-        <p class="hint">Esses campos entram em toda instrução mandada para a IA. Quanto mais específicos, melhor a entrega; o contexto também consome tokens.</p>`;
+        <div class="foundation-summary">
+          <div class="panel-head"><span class="panel-label">Fundação estratégica</span><span class="status-chip">${esc(e.fundacao?.estado==='operacional'?'concluída':'em preparação')}</span></div>
+          <p class="hint"><b>${esc(e.fundacao?.identidade?.slogan||'Identidade definida pela gerente')}</b></p>
+          <p class="hint">${esc(e.fundacao?.identidade?.posicionamento||'A gerente ainda está construindo o posicionamento.')}</p>
+          <details><summary>Plano de negócio</summary><pre class="foundation-text">${esc(e.fundacao?.planoNegocio||'Ainda não concluído.')}</pre></details>
+          <details><summary>Planejamento do primeiro produto</summary><pre class="foundation-text">${esc(e.fundacao?.primeiroProduto||'Ainda não concluído.')}</pre></details>
+          <details><summary>Manifesto</summary><pre class="foundation-text">${esc(e.fundacao?.identidade?.manifesto||'Ainda não concluído.')}</pre></details>
+        </div>
+        <p class="hint">A gerente decide a identidade e a estratégia durante a fundação. Os dados persistentes e os artefatos anteriores continuam no contexto dos agentes.</p>Esses campos entram em toda instrução mandada para a IA. Quanto mais específicos, melhor a entrega; o contexto também consome tokens.</p>`;
       $('#salvarCfgBtn').onclick = () => {
         e.nome = $('#cfgNome').value.trim() || e.nome;
         e.ramo = $('#cfgRamo').value.trim() || e.ramo;
@@ -543,31 +551,17 @@
      ============================================================ */
   function dialogoFundar() {
     folha(`
-      <h2>Fundar estúdio</h2>
-      <p class="sub">A fundação é imediata e não gasta nenhuma chamada de IA. Você pode ajustar tudo depois no Motor.</p>
-      <div class="field"><label for="fNome">Nome do estúdio</label><input id="fNome" type="text" placeholder="ex: Ateliê Rebimboca"></div>
-      <div class="field"><label for="fRamo">Ramo</label><input id="fRamo" type="text" placeholder="ex: loja de roupas vintage online"></div>
-      <div class="field"><label for="fPublico">Público</label><input id="fPublico" type="text" placeholder="ex: mulheres de 25 a 40 que gostam de garimpo"></div>
-      <div class="field"><label for="fMissao">Missão em uma frase</label><input id="fMissao" type="text" placeholder="ex: achar peças únicas e entregar com capricho"></div>
-      <div class="sheet-actions">
-        <button class="btn" id="cancelFundar" type="button">Cancelar</button>
-        <button class="btn btn-primary" id="okFundar" type="button">Fundar</button>
-      </div>`, box => {
-      box.querySelector('#cancelFundar').onclick = fecharFolha;
-      box.querySelector('#okFundar').onclick = () => {
-        const ramo = box.querySelector('#fRamo').value.trim() || 'serviços criativos';
-        const nome = box.querySelector('#fNome').value.trim()
-          || 'Estúdio ' + ramo.split(/\s+/).slice(0, 2).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
-        S.studio.fundar({
-          nome, ramo,
-          publico: box.querySelector('#fPublico').value.trim() || 'pequenos negócios',
-          missao: box.querySelector('#fMissao').value.trim() || `Entregar ${ramo} com capricho e prazo curto.`,
-          tom: 'direto e caloroso'
-        });
-        fecharFolha();
-        mostrar('estudio');
-        toast('Estúdio fundado. A equipe começou a organizar o projeto.', 'ok');
-      };
+      <h2>Fundar nova empresa</h2>
+      <p class="sub">Você fornece só as decisões estruturais. A nova gerente decide o nome, identidade visual, missão, manifesto, plano de negócio e primeiro produto; depois contrata a equipe que realmente precisar.</p>
+      <div class="field"><label for="fIdeia">Ideia central</label><textarea id="fIdeia" rows="3" placeholder="O que você quer criar ou resolver?"></textarea></div>
+      <div class="field"><label for="fObjetivo">Objetivo</label><textarea id="fObjetivo" rows="2" placeholder="Onde você quer chegar com essa empresa?"></textarea></div>
+      <div class="field"><label for="fTipo">Tipo de produto</label><input id="fTipo" type="text" placeholder="ex.: software, livro, curso, serviço, ferramenta"></div>
+      <div class="field"><label for="fPublico">Público que você imagina</label><input id="fPublico" type="text" placeholder="Pode ser uma hipótese; a gerente vai refiná-la."></div>
+      <div class="field"><label for="fRestricoes">Recursos ou restrições importantes</label><textarea id="fRestricoes" rows="2" placeholder="ex.: tecnologia, conhecimento, orçamento, prazo, país"></textarea></div>
+      <p class="hint">A empresa começa com a gerente. O ciclo normal de trabalho só libera depois que a fundação estratégica for concluída.</p>
+      <div class="sheet-actions"><button class="btn" id="cancelFundar" type="button">Cancelar</button><button class="btn btn-primary" id="okFundar" type="button">Fundar e deixar a gerente decidir</button></div>`, box => {
+      box.querySelector('#cancelFundar').onclick=fecharFolha;
+      box.querySelector('#okFundar').onclick=async()=>{const b=box.querySelector('#okFundar'),d={ideia:box.querySelector('#fIdeia').value.trim(),objetivo:box.querySelector('#fObjetivo').value.trim(),tipoProduto:box.querySelector('#fTipo').value.trim(),publico:box.querySelector('#fPublico').value.trim(),restricoes:box.querySelector('#fRestricoes').value.trim(),ramo:box.querySelector('#fTipo').value.trim()||'empresa de produto'};if(!d.ideia&&!d.objetivo&&!d.tipoProduto){toast('Informe pelo menos a ideia, o objetivo ou o tipo de produto.','erro');return;}b.disabled=true;b.textContent='Criando empresa…';try{const e=S.studio.fundar(d);await S.studio.processarFundacaoAtual();fecharFolha();mostrar('estudio');pintarTudo();const ok=e.fundacao&&e.fundacao.estado==='operacional';toast(ok?'Empresa fundada. A gerente definiu a estratégia e montou a equipe.':'Empresa criada. A gerente concluirá a fundação quando a IA estiver disponível.',ok?'ok':'info');}catch(err){b.disabled=false;b.textContent='Fundar e deixar a gerente decidir';toast(err.message||'Falha ao fundar a empresa.','erro');}};
     });
   }
 
@@ -645,7 +639,7 @@
     if(mp) mp.innerHTML=pessoas.map(f=>`<div class="meeting-person"><span class="avatar" style="background:${esc(f.cor)}">${esc(f.nome.slice(0,2).toUpperCase())}</span><span><b>${esc(f.nome)}</b><small>${esc(f.cargo)} · ${f.foco?esc(f.foco):'disponível'}</small></span></div>`).join('');
     const active=r.reuniaoAtiva;
     const head=document.querySelector('.meeting-room-head .panel-foot');
-    if(head) head.textContent=active ? `Reunião em andamento: ${active.motivo}. As falas e decisões são registradas automaticamente.` : 'A equipe usa esta sala para alinhamentos reais, decisões e conversas internas. As interações ficam na ata e também na memória individual.';
+    if(head) head.textContent = active ? `Reunião em andamento: ${active.motivo}. As falas e decisões são registradas automaticamente.` : (e.fundacao && e.fundacao.estado !== 'operacional' ? 'A empresa está em fundação. A gerente está consolidando identidade, plano de negócio e primeiro produto antes do trabalho normal.' : 'A equipe usa esta sala para alinhamentos reais, decisões e conversas internas. As interações ficam na ata e também na memória individual.');
     const box=$('#meetingMessages');
     if(!box) return;
     const msgs=(r.mensagens||[]).slice(-80);

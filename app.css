@@ -583,3 +583,11 @@ input[type=text],input[type=password],input[type=number],input[type=email],input
 .economy-card{padding:11px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.025)}
 .economy-card b{display:block;font-size:17px}.economy-card span{font-size:10px;opacity:.55}
 @media(max-width:600px){.economy-grid{grid-template-columns:repeat(2,1fr)}}
+
+/* Fundação estratégica: conteúdo consultável sem competir com a tela principal. */
+.foundation-summary{margin-top:14px;padding:14px;border:1px solid var(--line,#263039);border-radius:14px;background:rgba(255,255,255,.018)}
+.foundation-summary .panel-head{margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.foundation-summary details{border-top:1px solid var(--line,#263039);padding:10px 0}
+.foundation-summary summary{cursor:pointer;font-weight:700}
+.foundation-text{white-space:pre-wrap;overflow:auto;max-height:420px;font:inherit;line-height:1.5;color:var(--muted,#9aa5aa);margin:10px 0 0}
+.status-chip{font-size:11px;padding:4px 8px;border:1px solid var(--line,#263039);border-radius:999px;color:var(--muted,#9aa5aa)}

@@ -803,18 +803,94 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
   }
   function demitir(id){const e=S.state.atual();if(!e)return false;const f=e.equipe.find(x=>x.id===id);if(!f||f.papel==='gerente')return false;e.equipe=e.equipe.filter(x=>x.id!==id);e.tarefas.forEach(t=>{if(t.para===id)t.para=null;});S.state.registrar(`${f.nome} deixou a equipe.`,'alerta');S.state.gravar();montar();return true;}
   function fundar(dados){
-    const nome=String(dados.nome||'').trim()||'Estúdio Novo';
-    const e=S.state.normalizarEstudio({id:uid('e'),nome,ramo:dados.ramo,missao:dados.missao,tom:dados.tom,publico:dados.publico,criadoEm:Date.now(),xp:0,
-      projetos:[{id:uid('proj'),nome:'Projeto principal',objetivo:dados.missao||'Construir o primeiro produto do estúdio.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}],
-      equipe:[
-        {id:'a0',nome:dados.gerente||'Ana',papel:'gerente',cargo:'Sócia-gerente',especialidade:'geral',cor:S.state.PALETA[0],energia:88,humor:74,personalidade:personalidadeInicial('geral',dados.gerente||'Ana')},
-        {id:'a1',nome:pick(NOMES),papel:'func',cargo:'Criação',especialidade:'criacao',cor:S.state.PALETA[1],energia:85,humor:70,personalidade:personalidadeInicial('criacao','')},
-        {id:'a2',nome:pick(NOMES),papel:'func',cargo:'Produção',especialidade:'producao',cor:S.state.PALETA[2],energia:85,humor:70,personalidade:personalidadeInicial('producao','')}
-      ]});
-    S.DB.estudios.unshift(e);S.DB.atual=e.id;S.state.gravarJa();S.state.registrar(`${nome} foi fundada. A equipe vai discutir o primeiro produto.`,'ok');S.bus.emit('trocou');
-    setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&!atual.reuniao?.reunioes?.length&&S.ai.pronta())reuniaoInterna('planejar o primeiro produto e decidir como o site central da empresa deve apresentá-lo',{inicial:true}).catch(err=>console.error('reunião inicial',err));},1600);
-    return e;
+    const agora=Date.now(), gerenteNome=String(dados.gerente||pick(NOMES));
+    const e=S.state.normalizarEstudio({id:uid('e'),nome:'Nova empresa',ramo:'em definição pela gerente',missao:'Em definição pela gerente',tom:'Em definição pela gerente',publico:String(dados.publico||'a definir'),criadoEm:agora,xp:0,
+      fundacao:{versao:2,estado:'criando',perguntas:{ideia:String(dados.ideia||''),objetivo:String(dados.objetivo||''),tipoProduto:String(dados.tipoProduto||''),publico:String(dados.publico||''),restricoes:String(dados.restricoes||'')},identidade:{},planoNegocio:'',primeiroProduto:'',equipePlanejada:[],ultimaTentativa:0,concluidaEm:0},
+      projetos:[{id:uid('proj'),nome:'Primeiro produto — planejamento inicial',objetivo:String(dados.objetivo||'Definir e planejar o primeiro produto.'),status:'ativo',criadoEm:agora,tarefaIds:[],arquivoIds:[],atividade:[]}],
+      equipe:[{id:'a0',nome:gerenteNome,papel:'gerente',cargo:'Sócia-gerente',especialidade:'geral',cor:S.state.PALETA[0],energia:88,humor:74,personalidade:personalidadeInicial('geral',gerenteNome)}]});
+    S.DB.estudios.unshift(e);S.DB.atual=e.id;S.state.gravarJa();S.state.registrar(`Nova empresa criada. ${gerenteNome} foi nomeada gerente e começou a fundação estratégica.`,'ok');S.bus.emit('trocou');return e;
   }
+
+  function parseLista(v){ return String(v||'').split(/[,;|]/).map(x=>x.trim()).filter(Boolean).slice(0,8); }
+
+  function fundacaoContexto(e){
+    const f=e.fundacao||{}, q=f.perguntas||{}, projeto=(e.projetos||[]).find(x=>x.status==='ativo')||(e.projetos||[])[0];
+    const artefatos=(e.arquivos||[]).slice(0,10).map(a=>`${a.nome}[${a.classe||'arquivo'}]`).join('; ')||'nenhum';
+    const tarefas=(e.tarefas||[]).filter(t=>t.status!=='feita').slice(0,8).map(t=>t.titulo).join('; ')||'nenhuma';
+    return `IDEIA DO DONO: ${q.ideia||'não informada'}
+OBJETIVO: ${q.objetivo||projeto?.objetivo||'não informado'}
+TIPO DE PRODUTO: ${q.tipoProduto||'a definir'}
+PÚBLICO: ${q.publico||e.publico||'a definir'}
+RESTRIÇÕES/RECURSOS: ${q.restricoes||'não informados'}
+EMPRESA ATUAL: ${e.nome} | ramo=${e.ramo} | missão=${e.missao} | público=${e.publico}
+PROJETO EXISTENTE: ${projeto?.nome||'nenhum'} | objetivo=${projeto?.objetivo||'nenhum'}
+ARTEFATOS JÁ EXISTENTES: ${artefatos}
+TRABALHO ABERTO JÁ EXISTENTE: ${tarefas}`;
+  }
+
+  async function construirFundacao(e, modo='nova'){
+    if(!e || !S.ai.pronta() || (S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel())) return false;
+    e.fundacao=e.fundacao||{};e.fundacao.estado='criando';e.fundacao.ultimaTentativa=Date.now();
+    const gerente=(e.equipe||[]).find(x=>x.papel==='gerente');
+    const prompt=`Você é ${gerente?.nome||'a gerente'}, sócia-gerente e autoridade fundadora. ${modo==='migracao'?'Esta empresa já existe e possui dados persistentes; reinterprete-os sem apagar ou invalidar o que já foi construído.':'Esta empresa acabou de ser fundada e você recebeu somente algumas respostas estruturais do dono.'}
+
+Sua primeira responsabilidade é fundar a empresa de verdade. Você decide NOME, identidade visual, missão, visão, valores, posicionamento, tom, manifesto, plano de negócio completo e planejamento do primeiro produto.
+
+O plano deve cobrir problema/oportunidade, cliente ideal, proposta de valor, posicionamento, diferenciais, modelo de negócio, canais, aquisição, operação, recursos/capacidades, métricas a acompanhar, riscos/premissas e roadmap inicial. Não invente faturamento, clientes, validações ou fatos externos: marque hipóteses e incertezas.
+O primeiro produto deve ter nome, problema, público, proposta de valor, escopo, funcionalidades/entregáveis, critérios de aceitação, dependências, lançamento inicial e o que fica fora do v1.
+Escolha uma equipe mínima de 2 a 4 pessoas além da gerente, somente entre criacao, comercial, dados, producao e geral.
+
+${fundacaoContexto(e)}
+
+RETORNE SOMENTE:
+NOME: <nome escolhido>
+RAMO: <ramo/categoria da empresa>
+SLOGAN: <frase curta>
+MISSAO: <missão>
+VISAO: <visão>
+VALORES: <3 a 5 valores separados por vírgula>
+POSICIONAMENTO: <uma frase>
+TOM: <tom de comunicação>
+CORES: <paleta/direção cromática>
+TIPOGRAFIA: <direção tipográfica>
+ESTILO_VISUAL: <direção visual>
+EQUIPE: <especialidades separadas por vírgula>
+---
+PLANO DE NEGÓCIO
+<texto completo>
+
+PLANEJAMENTO DO PRIMEIRO PRODUTO
+<texto completo>
+
+MANIFESTO
+<manifesto curto>`;
+    try{
+      const r=await S.ai.perguntar({sistema:prompt,pedido:modo==='migracao'?'Atualize a empresa existente usando os dados persistentes como fonte primária e conclua a nova fundação.':'Tome as decisões fundadoras agora, com coerência entre identidade, negócio e primeiro produto.',tokens:900,agente:gerente?.nome||'gerente',agenteId:gerente?.id,motivo:modo==='migracao'?'migração da fundação':'fundação estratégica'});if(!r)return false;
+      const c=r.campos||{},identidade=e.fundacao.identidade=e.fundacao.identidade||{},map={nome:'nome',slogan:'slogan',missao:'missao',visao:'visao',valores:'valores',posicionamento:'posicionamento',tom:'tom',cores:'cores',tipografia:'tipografia',estilo_visual:'estiloVisual'};Object.keys(map).forEach(k=>{if(c[k])identidade[map[k]]=String(c[k]).trim().slice(0,1200);});
+      const corpo=String(r.corpo||'').trim();
+      const pm=corpo.match(/PLANO DE NEGÓCIO\s*\n([\s\S]*?)(?:\n+PLANEJAMENTO DO PRIMEIRO PRODUTO\s*\n|$)/i);
+      const fm=corpo.match(/PLANEJAMENTO DO PRIMEIRO PRODUTO\s*\n([\s\S]*?)(?:\n+MANIFESTO\s*\n|$)/i);
+      const mm=corpo.match(/MANIFESTO\s*\n([\s\S]*)$/i);
+      e.fundacao.planoNegocio=(pm?pm[1]:corpo).trim().slice(0,18000);e.fundacao.primeiroProduto=(fm?fm[1]:corpo).trim().slice(0,14000);identidade.manifesto=(mm?mm[1]:'').trim().slice(0,4000);
+      e.nome=identidade.nome||e.nome;e.ramo=String(c.ramo||e.ramo||e.fundacao.perguntas.tipoProduto||'empresa de produto');e.missao=identidade.missao||e.missao;e.tom=identidade.tom||e.tom;e.publico=e.fundacao.perguntas.publico||e.publico;
+      const validos=new Set(ESPECIALIDADES.map(x=>x.id));e.fundacao.equipePlanejada=parseLista(c.equipe).filter(id=>validos.has(id)).map(especialidade=>({especialidade}));
+      for(const item of e.fundacao.equipePlanejada.slice(0,4)){if(!e.equipe.filter(x=>x.papel!=='gerente').some(x=>x.especialidade===item.especialidade))contratar('',item.especialidade);}
+      const pr=e.projetos?.find(x=>x.status==='ativo')||e.projetos?.[0],produtoTit=((e.fundacao.primeiroProduto.match(/(?:^|\n)#{1,3}\s*(?:Nome do produto|Produto|Nome)\s*:?\s*(.+)/i)||[])[1]||'Primeiro produto').trim().slice(0,180);
+      if(!pr)e.projetos=[{id:uid('proj'),nome:produtoTit,objetivo:e.fundacao.perguntas.objetivo||'Executar o planejamento do primeiro produto.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}];else if(/primeiro produto|principal|planejamento inicial/i.test(pr.nome)){pr.nome=produtoTit||pr.nome;pr.objetivo=e.fundacao.perguntas.objetivo||pr.objetivo;}
+      const active=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];e.site=e.site||{};e.site.projetoId=active?.id||e.site.projetoId;
+      if(!e.tarefas.some(t=>/plano de negócio|primeiro produto/i.test(t.titulo||'')))novaTarefa({titulo:'Consolidar plano de negócio e planejamento do primeiro produto',kit:'autonomo',briefing:`Criar os artefatos persistentes de estratégia e produto a partir da fundação decidida pela gerente. Preserve o contexto existente.
+
+PLANO DE NEGÓCIO:
+${e.fundacao.planoNegocio}
+
+PRIMEIRO PRODUTO:
+${e.fundacao.primeiroProduto}`,projectId:active?.id,origem:'fundação da empresa'});
+      e.fundacao.versao=2;e.fundacao.estado='operacional';e.fundacao.concluidaEm=Date.now();e.gerencia.recomendacao='Fundação concluída: identidade, plano de negócio e primeiro produto definidos. A equipe agora trabalha sobre esse contexto.';
+      registrarReuniao('Sistema',`Fundação concluída${modo==='migracao'?' a partir dos dados persistentes':''}. ${e.nome} agora tem identidade, plano de negócio, primeiro produto e equipe definida.`,'fundacao');S.state.registrar(`${e.nome}: fundação concluída; identidade, plano de negócio e primeiro produto definidos.`,'ok');S.state.gravar();S.bus.emit('reuniao');S.bus.emit('equipe');S.bus.emit('trabalho');S.bus.emit('arquivos');S.bus.emit('trocou');
+      setTimeout(()=>{const atual=S.state.atual();if(atual&&atual.id===e.id&&S.ai.pronta()&&!(atual.reuniao?.reuniaoAtiva))reuniaoInterna('reunião de kickoff: validar o plano de negócio e transformar o planejamento do primeiro produto em prioridades de execução',{inicial:true}).catch(()=>{});},1200);return true;
+    }catch(err){e.fundacao.estado=modo==='migracao'?'migracao_pendente':'aguardando_IA';e.fundacao.ultimoErro=String(err.message||err).slice(0,400);S.state.gravar();return false;}
+  }
+  async function processarFundacaoAtual(){const e=S.state.atual();if(!e||!e.fundacao||e.fundacao.estado==='operacional')return true;return construirFundacao(e,e.fundacao.estado==='migracao_pendente'?'migracao':'nova');}
 
   /* ============================================================
      MEMÓRIA DE IDEIAS
@@ -950,6 +1026,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     if (e.reuniao && e.reuniao.reuniaoAtiva) return;
     S.bus.emit('relogio');
     if(S.ai.estado && S.ai.estado.pausado) return;
+    if(e.fundacao && e.fundacao.estado && e.fundacao.estado !== 'operacional'){ await processarFundacaoAtual(); return; }
     if(S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel()) {
       const orc = S.ai.orcamento ? S.ai.orcamento() : null;
       rt.forEach(p=>{ if(!p.ocupado && !['dormindo','comendo','assistindo','andando'].includes(p.estado)){ p.estado='dormindo'; p.ref.cuidados=p.ref.cuidados||{}; p.ref.cuidados.rotina='sono'; p.balao='dormindo'; logPessoa(p,orc&&orc.esgotado ? 'está descansando: o orçamento do ciclo chegou ao limite.' : 'está descansando: o limite diário de IA chegou ao limite.','rotina'); irPara(p,ESTACOES.dormitorio); }});
@@ -1210,6 +1287,7 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     novaTarefa, tarefasAbertas, despacharTarefa, executar, registrarContribuicaoAcervo,
     salvarArquivos, publicar, editarArquivo,
     contratar, demitir, custoContratacao, fundar, construirAmbiente, reorganizarAmbiente, interagirAmbiente, ambienteObjetos, OBJETOS_AMBIENTE, tiposAmbiente,
+    processarFundacaoAtual,
     selecionado: () => selecionado,
     selecionar(id) { selecionado = id; }
   };

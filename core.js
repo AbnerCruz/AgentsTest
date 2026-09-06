@@ -88,7 +88,7 @@ window.S = window.S || {};
     return { nivel: n, base, topo, pct: clamp(((xp - base) / (topo - base)) * 100, 0, 100), falta: Math.max(0, topo - xp) };
   }
 
-  const DB = { estudios: [], atual: null, versao: 2 };
+  const DB = { estudios: [], atual: null, versao: 3 };
   S.DB = DB;
 
   function normalizarEstudio(e) {
@@ -99,6 +99,19 @@ window.S = window.S || {};
     e.missao = String(e.missao || 'Entregar material útil e bem-feito.');
     e.tom = String(e.tom || 'direto e caloroso');
     e.publico = String(e.publico || 'pequenos negócios');
+    // Fundação estratégica persistente; empresas antigas passam por migração sem perder trabalho.
+    e.fundacao = e.fundacao && typeof e.fundacao === 'object' ? e.fundacao : {};
+    e.fundacao.versao = Number(e.fundacao.versao) || 0;
+    e.fundacao.estado = String(e.fundacao.estado || (e.fundacao.versao >= 2 ? 'operacional' : 'migracao_pendente'));
+    e.fundacao.perguntas = e.fundacao.perguntas && typeof e.fundacao.perguntas === 'object' ? e.fundacao.perguntas : {};
+    ['ideia','objetivo','tipoProduto','publico','restricoes'].forEach(k => { e.fundacao.perguntas[k] = String(e.fundacao.perguntas[k] || ''); });
+    e.fundacao.identidade = e.fundacao.identidade && typeof e.fundacao.identidade === 'object' ? e.fundacao.identidade : {};
+    ['nome','slogan','missao','visao','valores','posicionamento','manifesto','tom','cores','tipografia','estiloVisual'].forEach(k => { e.fundacao.identidade[k] = String(e.fundacao.identidade[k] || ''); });
+    e.fundacao.planoNegocio = String(e.fundacao.planoNegocio || '');
+    e.fundacao.primeiroProduto = String(e.fundacao.primeiroProduto || '');
+    e.fundacao.equipePlanejada = Array.isArray(e.fundacao.equipePlanejada) ? e.fundacao.equipePlanejada.slice(0,6) : [];
+    e.fundacao.ultimaTentativa = Number(e.fundacao.ultimaTentativa) || 0;
+    e.fundacao.concluidaEm = Number(e.fundacao.concluidaEm) || 0;
     e.criadoEm = e.criadoEm || Date.now();
     e.xp = Number(e.xp) || 0;
     e.ambiente = e.ambiente && typeof e.ambiente === 'object' ? e.ambiente : {};
@@ -219,6 +232,21 @@ window.S = window.S || {};
       migrarV1();
     }
     if (DB.atual && !DB.estudios.some(e => e.id === DB.atual)) DB.atual = DB.estudios[0] ? DB.estudios[0].id : null;
+    // Empresas sem a nova fundação recebem uma etapa de migração assistida pela IA.
+    DB.estudios.forEach(e => {
+      if (!e.fundacao || e.fundacao.versao < 2) {
+        e.fundacao = e.fundacao || {};
+        e.fundacao.versao = 1;
+        e.fundacao.estado = 'migracao_pendente';
+        e.fundacao.perguntas = e.fundacao.perguntas || {};
+        e.fundacao.perguntas.ideia = e.fundacao.perguntas.ideia || e.missao || '';
+        e.fundacao.perguntas.objetivo = e.fundacao.perguntas.objetivo || ((e.projetos && e.projetos[0] && e.projetos[0].objetivo) || e.missao || '');
+        e.fundacao.perguntas.tipoProduto = e.fundacao.perguntas.tipoProduto || ((e.projetos && e.projetos[0] && e.projetos[0].nome) || '');
+        e.fundacao.perguntas.publico = e.fundacao.perguntas.publico || e.publico || '';
+        e.fundacao.perguntas.restricoes = e.fundacao.perguntas.restricoes || '';
+      }
+    });
+    if (DB.estudios.some(e => e.fundacao && e.fundacao.estado === 'migracao_pendente')) gravar();
     return DB;
   }
 

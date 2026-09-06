@@ -43,6 +43,9 @@
       projeto: pr,
       texto: [
         `EMPRESA: ${e.nome} | ramo: ${e.ramo} | missão: ${e.missao} | público: ${e.publico} | tom: ${e.tom}`,
+        `IDENTIDADE/ESTRATÉGIA: slogan=${e.fundacao?.identidade?.slogan||'n/d'} | posicionamento=${e.fundacao?.identidade?.posicionamento||'n/d'} | valores=${e.fundacao?.identidade?.valores||'n/d'} | estado da fundação=${e.fundacao?.estado||'n/d'}`,
+        `PLANO DE NEGÓCIO DA GERENTE: ${max(e.fundacao?.planoNegocio||'ainda não consolidado',2200)}`,
+        `PLANEJAMENTO DO PRIMEIRO PRODUTO: ${max(e.fundacao?.primeiroProduto||'ainda não consolidado',2200)}`,
         `PROJETO: ${pr ? pr.nome : 'nenhum'} | objetivo: ${pr ? pr.objetivo : e.missao} | status: ${pr ? pr.status : 'sem projeto'}`,
         `ARTEFATOS EXISTENTES: ${arqs.length ? arqs.map(a => `${a.id}:${a.nome}[${a.classe}, kit=${a.kit||'?'}, v${a.versao||1}]`).join('; ') : 'nenhum'}`,
         `TRABALHO ABERTO: ${tarefas.length ? tarefas.map(t => `${t.id}:${t.titulo}[${t.status}, responsável=${t.para||'livre'}, base=${t.baseArquivoId||'nenhuma'}]`).join('; ') : 'nenhum'}`,
