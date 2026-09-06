@@ -64,7 +64,7 @@
 
   function normalizar(c, ctx) {
     const acaoRaw = String(c.acao || '').trim().toLowerCase();
-    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','reuniao','planejar','construir','reorganizar','esperar'];
+    const permitidas = ['executar_tarefa','criar_tarefa','revisar','estudar','colaborar','reuniao','planejar','construir','reorganizar','contratar','demitir','esperar'];
     let acao = permitidas.includes(acaoRaw) ? acaoRaw : 'esperar';
     const kit = String(c.kit || '').trim();
     const taskId = String(c.tarefa || '').trim();
@@ -79,7 +79,8 @@
       risco: max(c.risco, 240),
       objeto: max(c.objeto, 40),
       colega: max(c.colega || c.para, 60),
-      especialidade: max(c.especialidade, 40),
+      especialidade: max(c.especialidade || c.cargo, 40),
+      funcionario: max(c.funcionario || c.candidato, 1200),
       projetoId: ctx.projeto ? ctx.projeto.id : '',
       executivo: !!(ctx && ctx.executivo),
       em: agora()
@@ -108,7 +109,7 @@ Sua autonomia é limitada pelo propósito da empresa, pela realidade dos dados a
 
 Pense profundamente antes de decidir. Compare o valor das alternativas, observe dependências, procure oportunidades de melhorar o que já existe e considere se outra pessoa precisa ser envolvida. O resultado persistido deve ser apenas a decisão operacional, nunca seu raciocínio privado passo a passo.
 
-Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, reuniao, planejar, construir, reorganizar, esperar.
+Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, reuniao, planejar, construir, reorganizar, contratar, demitir, esperar.
 - executar_tarefa: escolha uma tarefa aberta que realmente combine com você.
 - criar_tarefa: crie trabalho concreto que seja consequência do estado atual, preferindo evolução ou integração de algo existente.
 - revisar: examine uma entrega ou problema existente; só use se houver algo concreto para revisar.
@@ -118,6 +119,8 @@ Ações possíveis: executar_tarefa, criar_tarefa, revisar, estudar, colaborar, 
 - planejar: só quando houver uma decisão de escopo/ordem que realmente precise ser tomada.
 - construir: só quando uma mudança física no ambiente tiver valor para trabalho, bem-estar ou identidade da equipe; escolha um tipo simples de mobiliário.
 - reorganizar: só quando mover um objeto existente resolver um problema concreto de fluxo, colaboração ou uso do espaço.
+- contratar: somente para a gerente; use quando houver demanda/capacidade insuficiente real. Informe ESPECIALIDADE com um cargo-base e crie uma ficha individual em FUNCIONARIO. O mesmo cargo pode ter várias pessoas.
+- demitir: somente para a gerente; use quando houver excesso estrutural de capacidade ou uma função deixar de ser necessária. Informe em FUNCIONARIO o ID exato do funcionário. Nunca demita a gerente geral.
 - esperar: quando agir agora teria pouco valor, quando não há base suficiente ou quando outra pessoa precisa agir primeiro.
 
 Se criar_tarefa, descreva exatamente o resultado que deve ser produzido. Não escolha um template de produto: a ferramenta de produção interpretará sua decisão. Prefira evoluir um artefato existente quando isso trouxer valor.
@@ -125,7 +128,8 @@ REGRA DE CONTINUIDADE: você é responsável por encontrar uma próxima ação �
 REGRA DE CONCRETUDE: revisar exige um artefato real; estudar exige uma lacuna concreta; esperar exige uma dependência real.
 REGRA SOCIAL: quando outra pessoa pode melhorar a decisão, converse com ela e registre a conversa; quando uma decisão precisa da autoridade da gerente, convoque reunião.
 Não invente clientes, pedidos, métricas, preços, datas, aprovações, resultados ou fatos ausentes.
-${p.papel === 'gerente' ? `REGRA EXECUTIVA: você é a autoridade final. Leia os artefatos, acompanhe o trabalho real, decida o que continua, muda, é descartado ou está pronto para release. Quando precisar de opinião, convoque os envolvidos. Quando decidir uma ação, encaminhe-a ao responsável. Seu ciclo deve deixar o projeto em um estado diferente ou claramente justificar uma dependência real.` : ''}
+${p.papel === 'gerente' ? `REGRA EXECUTIVA: você é a autoridade final. Leia os artefatos, acompanhe o trabalho real, decida o que continua, muda, é descartado ou está pronto para release. Quando precisar de opinião, convoque os envolvidos. Quando decidir uma ação, encaminhe-a ao responsável. Seu ciclo deve deixar o projeto em um estado diferente ou claramente justificar uma dependência real.
+REGRA DE QUADRO DE PESSOAL: você também administra a equipe. Os únicos cargos-base disponíveis são Criação (criacao), Comercial (comercial), Dados (dados), Produção (producao) e Generalista (geral). Você decide quantas pessoas de cada cargo são necessárias conforme a demanda, gargalos, especialização e carga real. Pode haver várias pessoas no mesmo cargo. Só pode existir UMA gerente geral. Não contrate para manter atividade artificial: contrate apenas quando houver trabalho recorrente, gargalo ou capacidade necessária que a equipe atual não consiga cobrir. Pode demitir quando uma função estiver estruturalmente sem demanda ou houver excesso de capacidade. Antes de contratar ou demitir, observe o quadro atual e as tarefas abertas. Se contratar, descreva um perfil coerente para a nova pessoa no campo FUNCIONARIO. Se demitir, informe o ID exato da pessoa em FUNCIONARIO.` : ''}
 
 Retorne SOMENTE:
 ACAO: <uma das ações>
@@ -138,7 +142,9 @@ PARA: <id de colega que deve receber colaboração/handoff ou vazio>
 MOTIVO: <por que esta é a melhor ação agora, até 35 palavras>
 ABORDAGEM: <como pretende agir, até 45 palavras>
 RISCO: <principal risco ou incerteza, até 30 palavras>
-OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, bancada; senão vazio>`;
+OBJETO: <se construir, um de mesa, planta, estante, luminaria, sofa, quadro, bancada; senão vazio>
+ESPECIALIDADE: <se contratar, criacao | comercial | dados | producao | geral; senão vazio>
+FUNCIONARIO: <se contratar, uma ficha curta no formato nome=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...; se demitir, o ID exato; senão vazio>`;
 
     try {
       const r = await S.ai.chamar({

@@ -121,6 +121,7 @@
     const alertas = gr.alertas || [];
     const abertas = (e.tarefas || []).filter(t => t.status !== 'feita').length;
     const feitas = (e.tarefas || []).filter(t => t.status === 'feita').length;
+    const quadro = S.studio.ESPECIALIDADES.map(x => { const n=(e.equipe||[]).filter(f=>f.papel!=='gerente' && f.especialidade===x.id).length; return `${x.cargo}: ${n}`; }).join(' · ');
     box.innerHTML = `
       <div class="panel-head"><span class="panel-label">Supervisão da gerente</span><span class="chip">contínua</span></div>
       <div class="management-summary">
@@ -128,6 +129,7 @@
         <div><b>${feitas}</b><span>concluídas</span></div>
         <div><b>${(e.equipe||[]).filter(x=>x.papel!=='gerente').length}</b><span>funcionários</span></div>
       </div>
+      <p class="panel-foot"><strong>Quadro:</strong> ${esc(quadro)} · A gerente decide contratações e desligamentos conforme a demanda real.</p>
       <p class="manager-focus"><strong>${esc(g ? g.nome : 'Gerente')}:</strong> ${esc(g && g.pensamento || gr.recomendacao || 'Avaliando a operação.')}</p>
       ${gr.recomendacao ? `<div class="manager-recommendation"><b>Recomendação</b><span>${esc(gr.recomendacao)}</span></div>` : ''}
       ${alertas.length ? `<div class="manager-alerts">${alertas.slice(-5).map(a=>`<div>⚠ ${esc(a)}</div>`).join('')}</div>` : '<p class="panel-foot">Nenhum alerta operacional no momento.</p>'}`;
@@ -175,11 +177,8 @@
       <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-head"><span class="panel-label">Log individual</span><span class="chip">últimos eventos</span></div><div class="logbox person-log">${((f.log||[]).slice(-30).reverse()).map(l=>`<div class="log-line ${esc(l.tag||'info')}"><span class="log-ts">${F.hora(l.t)}</span><span class="log-txt">${esc(l.texto)}</span></div>`).join('') || '<div class="empty">Ainda não há eventos individuais.</div>'}</div></div>
       <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Cuidados e rotina</div><p class="panel-foot">Pausas de recuperação: ${Number(f.cuidados&&f.cuidados.pausa||0)} · Hidratação e pausas são simuladas como hábitos de bem-estar, sem monitoramento invasivo.</p></div>
       <div class="sheet-actions">
-        ${p.papel === 'gerente' ? '' : `<button class="btn btn-danger" id="demitirBtn" type="button">Dispensar</button>`}
         <button class="btn btn-primary" id="fecharPessoa" type="button">Fechar</button>
       </div>`, box => {
-      const d = box.querySelector('#demitirBtn');
-      if (d) d.onclick = () => { S.studio.demitir(id); fecharFolha(); toast(p.nome + ' saiu da equipe.'); };
       box.querySelector('#fecharPessoa').onclick = fecharFolha;
     });
   }
@@ -445,9 +444,12 @@
     if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
     const tierField = $('#tierField');
     if (tierField) tierField.hidden = !auto && pv !== 'groq';
-    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput');
-    if(gki) gki.placeholder=S.ai.statusFornecedores().groq.status==='disponivel'?'gsk_••••••':'gsk_...';
-    if(ori) ori.placeholder=S.ai.statusFornecedores().openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
+    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput'), mgmt=$('#openrouterManagementKeyInput'), mgmtStatus=$('#openrouterManagementStatus');
+    const ps=S.ai.statusFornecedores();
+    if(gki) gki.placeholder=ps.groq.status==='disponivel'?'gsk_••••••':'gsk_...';
+    if(ori) ori.placeholder=ps.openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
+    if(mgmt) mgmt.placeholder=ps.openrouterManagementConfigured?'Management Key · ••••••':'Management Key OpenRouter';
+    if(mgmtStatus) { const r=ps.openrouter; mgmtStatus.textContent = r.saldoConta!=null ? `Saldo real: US$ ${Number(r.saldoConta).toFixed(4)}${r.ultimoSyncCreditos ? ' · sincronizado' : ''}` : (r.erroCreditos ? `Falha ao sincronizar: ${r.erroCreditos}` : (ps.openrouterManagementConfigured ? 'Management Key configurada · sincronizando…' : 'Cole a Management Key e sincronize o saldo.')); mgmtStatus.style.color = r.erroCreditos ? '#E08573' : ''; }
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -552,13 +554,13 @@
   function dialogoFundar() {
     folha(`
       <h2>Fundar nova empresa</h2>
-      <p class="sub">Você fornece só as decisões estruturais. A nova gerente decide o nome, identidade visual, missão, manifesto, plano de negócio e primeiro produto; depois contrata a equipe que realmente precisar.</p>
+      <p class="sub">Você fornece só as decisões estruturais. A nova gerente decide o nome, identidade visual, missão, manifesto, plano de negócio e primeiro produto. Ela também define os cargos iniciais e cria as fichas dos funcionários que a empresa realmente precisa.</p>
       <div class="field"><label for="fIdeia">Ideia central</label><textarea id="fIdeia" rows="3" placeholder="O que você quer criar ou resolver?"></textarea></div>
       <div class="field"><label for="fObjetivo">Objetivo</label><textarea id="fObjetivo" rows="2" placeholder="Onde você quer chegar com essa empresa?"></textarea></div>
       <div class="field"><label for="fTipo">Tipo de produto</label><input id="fTipo" type="text" placeholder="ex.: software, livro, curso, serviço, ferramenta"></div>
       <div class="field"><label for="fPublico">Público que você imagina</label><input id="fPublico" type="text" placeholder="Pode ser uma hipótese; a gerente vai refiná-la."></div>
       <div class="field"><label for="fRestricoes">Recursos ou restrições importantes</label><textarea id="fRestricoes" rows="2" placeholder="ex.: tecnologia, conhecimento, orçamento, prazo, país"></textarea></div>
-      <p class="hint">A empresa começa com a gerente. O ciclo normal de trabalho só libera depois que a fundação estratégica for concluída.</p>
+      <p class="hint">A gerente geral é criada primeiro. A IA define os cargos e cria as fichas dos funcionários necessários; depois a gerente mantém o quadro, podendo contratar ou demitir conforme a demanda real.</p>
       <div class="sheet-actions"><button class="btn" id="cancelFundar" type="button">Cancelar</button><button class="btn btn-primary" id="okFundar" type="button">Fundar e deixar a gerente decidir</button></div>`, box => {
       box.querySelector('#cancelFundar').onclick=fecharFolha;
       box.querySelector('#okFundar').onclick=async()=>{const b=box.querySelector('#okFundar'),d={ideia:box.querySelector('#fIdeia').value.trim(),objetivo:box.querySelector('#fObjetivo').value.trim(),tipoProduto:box.querySelector('#fTipo').value.trim(),publico:box.querySelector('#fPublico').value.trim(),restricoes:box.querySelector('#fRestricoes').value.trim(),ramo:box.querySelector('#fTipo').value.trim()||'empresa de produto'};if(!d.ideia&&!d.objetivo&&!d.tipoProduto){toast('Informe pelo menos a ideia, o objetivo ou o tipo de produto.','erro');return;}b.disabled=true;b.textContent='Criando empresa…';try{const e=S.studio.fundar(d);await S.studio.processarFundacaoAtual();fecharFolha();mostrar('estudio');pintarTudo();const ok=e.fundacao&&e.fundacao.estado==='operacional';toast(ok?'Empresa fundada. A gerente definiu a estratégia e montou a equipe.':'Empresa criada. A gerente concluirá a fundação quando a IA estiver disponível.',ok?'ok':'info');}catch(err){b.disabled=false;b.textContent='Fundar e deixar a gerente decidir';toast(err.message||'Falha ao fundar a empresa.','erro');}};
@@ -675,7 +677,6 @@
     $('#pedirFeedbackBtn').onclick = () => enviarReuniao('Quero feedback da equipe: o que está funcionando, o que está bloqueando o produto final e o que devemos melhorar agora?');
     $('#limparReuniaoBtn').onclick = () => { const e=S.state.atual(); if(e){ e.reuniao=e.reuniao||{mensagens:[],relatorios:[]}; e.reuniao.mensagens=[]; S.state.gravarJa(); pintarReuniao(); toast('Conversa da sala limpa.'); } };
 
-    $('#contratarBtn').onclick = dialogoContratar;
     $('#floor').onclick = ev => {
       const alvo = S.studio.cliqueNoChao(ev);
       if (alvo && alvo.objeto) {
@@ -694,7 +695,7 @@
     $('#exportarTudoBtn').onclick = exportarZip;
 
     const salvarIABtn = $('#salvarIABtn');
-    if (salvarIABtn) salvarIABtn.onclick = () => {
+    if (salvarIABtn) salvarIABtn.onclick = async () => {
       try {
         const key = $('#apiKeyInput');
         const pensamento = $('#modeloPensamentoSel');
@@ -705,6 +706,8 @@
         const autoDia = $('#diarioAutoInput');
         const modoOrcamento = $('#modoOrcamentoSel');
         const digitada = key ? key.value.trim() : '';
+        const mgmt = $('#openrouterManagementKeyInput');
+        if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
         if (S.ai.cfg.roteamento === 'automatico') {
           const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
           S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
@@ -730,12 +733,27 @@
         const diario = $('#limiteDiarioUSDInput');
         const autoDia = $('#diarioAutoInput');
         const modoOrcamento = $('#modoOrcamentoSel');
+        const mgmt = $('#openrouterManagementKeyInput');
+        if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
         if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(g) g.value=''; if(r) r.value=''; }
         else if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
       b.disabled = false; b.textContent = 'Testar'; pintarMotor();
+    };
+    const sincronizarSaldoBtn = $('#sincronizarSaldoBtn');
+    if (sincronizarSaldoBtn) sincronizarSaldoBtn.onclick = async () => {
+      const b=sincronizarSaldoBtn; const mgmt=$('#openrouterManagementKeyInput');
+      try {
+        b.disabled=true; b.textContent='sincronizando…';
+        if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
+        else if (!S.ai.statusFornecedores().openrouterManagementConfigured) throw new Error('Cole a Management Key do OpenRouter primeiro.');
+        const r=await S.ai.sincronizarCreditosOpenRouter();
+        if (!r) throw new Error(S.ai.statusFornecedores().openrouter.erroCreditos || 'Não foi possível consultar os créditos.');
+        toast('Saldo OpenRouter sincronizado.', 'ok');
+      } catch(err) { toast(err.message, 'erro'); }
+      finally { b.disabled=false; b.textContent='Sincronizar saldo'; pintarMotor(); }
     };
     const pausarBtn = $('#pausarBtn');
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };

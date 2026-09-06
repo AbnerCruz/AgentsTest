@@ -123,7 +123,7 @@
         <p class="panel-foot" id="floorFoot">Os agentes podem reorganizar o espaço quando uma mudança tiver utilidade real. Móveis e decoração permanecem salvos.</p>
       </div>
       <div class="panel">
-        <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
+        <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><span class="chip">quadro decidido pela gerente</span></div>
         <div class="team" id="teamList"></div>
       </div>
       <div class="panel" id="gerenciaPanel"></div>
@@ -224,7 +224,11 @@
         </div>
         <div class="field" id="managementKeyField">
           <label for="openrouterManagementKeyInput">Management Key OpenRouter · sincronização do saldo</label>
-          <input id="openrouterManagementKeyInput" type="password" placeholder="sk-or-... (Management Key)" autocomplete="off" spellcheck="false">
+          <input id="openrouterManagementKeyInput" type="password" placeholder="Management Key OpenRouter" autocomplete="off" spellcheck="false">
+          <div class="row-actions" style="margin-top:8px">
+            <button class="btn" id="sincronizarSaldoBtn" type="button">Sincronizar saldo</button>
+          </div>
+          <p class="hint" id="openrouterManagementStatus">Cole a Management Key e sincronize o saldo.</p>
           <p class="hint">Usada somente para consultar o crédito real da conta. A chave fica no armazenamento local deste navegador.</p>
         </div>
         <div class="field" id="chavesAutoField" hidden>

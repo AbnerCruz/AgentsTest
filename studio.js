@@ -838,7 +838,7 @@ Sua primeira responsabilidade é fundar a empresa de verdade. Você decide NOME,
 
 O plano deve cobrir problema/oportunidade, cliente ideal, proposta de valor, posicionamento, diferenciais, modelo de negócio, canais, aquisição, operação, recursos/capacidades, métricas a acompanhar, riscos/premissas e roadmap inicial. Não invente faturamento, clientes, validações ou fatos externos: marque hipóteses e incertezas.
 O primeiro produto deve ter nome, problema, público, proposta de valor, escopo, funcionalidades/entregáveis, critérios de aceitação, dependências, lançamento inicial e o que fica fora do v1.
-Escolha uma equipe mínima de 2 a 4 pessoas além da gerente, somente entre criacao, comercial, dados, producao e geral.
+Monte a equipe inicial mínima necessária, com 2 a 4 funcionários além da gerente, usando somente os cargos-base criacao, comercial, dados, producao e geral. Um cargo pode aparecer mais de uma vez quando a demanda exigir. Não crie outra gerente geral. Para cada funcionário, crie uma ficha individual coerente com o cargo e com o negócio.
 
 ${fundacaoContexto(e)}
 
@@ -854,7 +854,11 @@ TOM: <tom de comunicação>
 CORES: <paleta/direção cromática>
 TIPOGRAFIA: <direção tipográfica>
 ESTILO_VISUAL: <direção visual>
-EQUIPE: <especialidades separadas por vírgula>
+EQUIPE: <cargos-base separados por vírgula; pode repetir um cargo>
+FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
+FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
+FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
+FUNCIONARIO: nome=...; cargo=...; tracos=...; comunicacao=...; prioridades=...; estilo=...; colaboracao=...; aversoes=...; experiencia=...
 ---
 PLANO DE NEGÓCIO
 <texto completo>
@@ -877,16 +881,24 @@ MANIFESTO
       const aliases={criacao:['criação','criativa','design','produto','criacao'],comercial:['comercial','marketing','vendas','negócios','negocios'],dados:['dados','data','analise','análise','analytics'],producao:['produção','producao','desenvolvimento','engenharia','tech'],geral:['geral','operações','operacoes','multifuncional']};
       const normalizarEsp=(valor)=>{const v=String(valor||'').trim().toLowerCase(); if(validos.has(v)) return v; for(const [id,arr] of Object.entries(aliases)){if(arr.some(a=>v===a || v.includes(a))) return id;} return null;};
       let planejadas=parseLista(c.equipe).map(normalizarEsp).filter(Boolean);
-      planejadas=[...new Set(planejadas)].slice(0,4);
-      // A fundação nunca pode terminar com uma gerente isolada: se a resposta da IA não trouxe
-      // especialidades válidas, escolhemos uma equipe mínima coerente com a execução do primeiro produto.
+      const linhasFuncionarios=String(r.texto||'').split(/\n+/).filter(l=>/^\s*FUNCIONARIO\s*:/i.test(l));
+      const funcionarios=[];
+      linhasFuncionarios.slice(0,6).forEach(l=>{
+        const corpoLinha=l.replace(/^\s*FUNCIONARIO\s*:\s*/i,''); const obj={};
+        corpoLinha.split(/\s*;\s*/).forEach(parte=>{const m=parte.match(/^\s*([^=]+?)\s*=\s*(.*?)\s*$/);if(m)obj[m[1].trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')]=m[2].trim();});
+        const esp=normalizarEsp(obj.cargo); if(esp){obj.cargo=esp;obj.tracos=String(obj.tracos||'').split(/[,|]/).map(x=>x.trim()).filter(Boolean);funcionarios.push(obj);}
+      });
+      if(funcionarios.length) planejadas=funcionarios.map(x=>x.cargo);
+      planejadas=planejadas.slice(0,4);
+      // A gerente nunca fica sozinha por falha de formato. Se a IA não trouxe uma ficha válida,
+      // preservamos os cargos mínimos e criamos fichas coerentes de recuperação.
       if(planejadas.length<2){
         const tipo=String(e.fundacao?.perguntas?.tipoProduto||'').toLowerCase();
         const padrao=/software|app|site|web|ia|tecnolog|produto digital/.test(tipo) ? ['producao','criacao','comercial'] : ['producao','comercial','criacao'];
         for(const id of padrao) if(!planejadas.includes(id) && planejadas.length<3) planejadas.push(id);
       }
-      e.fundacao.equipePlanejada=planejadas.map(especialidade=>({especialidade}));
-      for(const item of e.fundacao.equipePlanejada.slice(0,4)){if(!e.equipe.filter(x=>x.papel!=='gerente').some(x=>x.especialidade===item.especialidade))contratar('',item.especialidade);}
+      e.fundacao.equipePlanejada=planejadas.map((especialidade,i)=>({especialidade,funcionario:funcionarios[i]||null}));
+      e.fundacao.equipePlanejada.slice(0,4).forEach(item=>contratarPerfil(item.funcionario?.nome||'',item.especialidade,item.funcionario||{},'gerência fundadora'));
       const pr=e.projetos?.find(x=>x.status==='ativo')||e.projetos?.[0],produtoTit=((e.fundacao.primeiroProduto.match(/(?:^|\n)#{1,3}\s*(?:Nome do produto|Produto|Nome)\s*:?\s*(.+)/i)||[])[1]||'Primeiro produto').trim().slice(0,180);
       if(!pr)e.projetos=[{id:uid('proj'),nome:produtoTit,objetivo:e.fundacao.perguntas.objetivo||'Executar o planejamento do primeiro produto.',status:'ativo',criadoEm:Date.now(),tarefaIds:[],arquivoIds:[],atividade:[]}];else if(/primeiro produto|principal|planejamento inicial/i.test(pr.nome)){pr.nome=produtoTit||pr.nome;pr.objetivo=e.fundacao.perguntas.objetivo||pr.objetivo;}
       const active=e.projetos.find(x=>x.status==='ativo')||e.projetos[0];e.site=e.site||{};e.site.projetoId=active?.id||e.site.projetoId;

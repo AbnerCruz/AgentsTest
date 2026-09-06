@@ -316,10 +316,12 @@
       o.ultimoSyncCreditos=Date.now();
       o.erroCreditos=null;
       if(o.saldoConta!==null && o.saldoConta<=0) o.status='esgotado';
-      else if(o.status!=='esgotado' || o.saldoConta>0) o.status='disponivel';
+      else if(o.saldoConta!==null) o.status='disponivel';
+      S.bus.emit('ia');
       return x;
     } catch(e) {
       o.erroCreditos=String(e.message||e);
+      S.bus.emit('ia');
       return null;
     }
   }
