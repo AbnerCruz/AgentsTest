@@ -16,9 +16,14 @@ Para ativar a equipe, entre em **Motor** e configure uma chave da Groq. A chave 
 
 ### Sem teto diário
 
-O tier gratuito da Groq tem limite de requisições por dia; quando ele estoura, a equipe para até a janela reabrir. O tier **Developer** remove esse teto diário e aplica 25% de desconto por token. É liberado apenas cadastrando um cartão em console.groq.com, sem mínimo de gasto e sem mensalidade: você paga só os tokens consumidos. Nos modelos GPT-OSS, o consumo típico do Estúdio fica na casa de centavos por dia.
+O Estúdio aceita dois provedores, um ativo por vez. Ambos falam o formato OpenAI, então trocar entre eles muda apenas endereço, chave e nomes de modelo.
 
-Marque o plano no campo **Plano da sua conta Groq**. Isso não muda o comportamento do motor — só ajusta a estimativa de custo mostrada no painel.
+- **Groq**: rápida, mas o plano gratuito tem teto diário de requisições. O upgrade para Developer, que removeria o teto, está **suspenso pela própria Groq** por alta demanda.
+- **OpenRouter**: em modelos pagos não há limite de plataforma — sem teto diário e sem RPM imposto. Funciona com crédito pré-pago (mínimo US$ 5, não expira, não vira assinatura), então não fica cartão gerando cobrança recorrente. O `openai/gpt-oss-120b` sai a cerca de US$ 0,036 por 1M de entrada, contra US$ 0,15 na Groq.
+
+Cada provedor guarda a própria chave: trocar de um para outro e voltar não exige recolar nada. Ao trocar, os modelos selecionados caem no padrão da nova lista, porque os identificadores diferem entre as plataformas.
+
+O campo **Plano da sua conta Groq** aparece só quando a Groq está ativa, e serve apenas para ajustar a estimativa de custo.
 
 ## O que é persistente
 

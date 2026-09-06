@@ -202,11 +202,19 @@
       <div class="panel" id="conexaoPanel">
         <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
         <div class="field">
-          <label for="apiKeyInput">Chave da Groq</label>
-          <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
-          <p class="hint">A chave fica só neste aparelho, no armazenamento do navegador. Pegue uma gratuita em console.groq.com.</p>
+          <label for="provedorSel">Provedor</label>
+          <select id="provedorSel">
+            <option value="groq">Groq — rápida, com teto diário no plano gratuito</option>
+            <option value="openrouter">OpenRouter — sem teto, crédito pré-pago</option>
+          </select>
+          <p class="hint" id="provedorHint"></p>
         </div>
         <div class="field">
+          <label for="apiKeyInput" id="apiKeyLabel">Chave</label>
+          <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+          <p class="hint" id="apiKeyHint"></p>
+        </div>
+        <div class="field" id="tierField">
           <label for="tierSel">Plano da sua conta Groq</label>
           <select id="tierSel">
             <option value="free">Gratuito — tem teto diário de requisições</option>

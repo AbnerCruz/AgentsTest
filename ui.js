@@ -424,8 +424,21 @@
     const msg = $('#conexaoMsg');
     if (chip) chip.textContent = st.pausado ? 'pausada' : S.ai.temChave() ? st.situacao : 'desligada';
     if (pausar) pausar.textContent = st.pausado ? 'Religar equipe' : 'Pausar equipe';
-    if (apiKeyInput && !apiKeyInput.value && S.ai.temChave()) apiKeyInput.placeholder = S.ai.chaveMascarada();
     if (msg) msg.textContent = st.detalhe || '';
+
+    const pv = S.ai.provedorAtual();
+    const info = S.ai.PROVEDORES[pv];
+    const provSel = $('#provedorSel');
+    if (provSel && provSel.value !== pv) provSel.value = pv;
+    const pHint = $('#provedorHint');
+    if (pHint) pHint.textContent = info.nota;
+    const kLabel = $('#apiKeyLabel');
+    if (kLabel) kLabel.textContent = `Chave do ${info.nome}`;
+    const kHint = $('#apiKeyHint');
+    if (kHint) kHint.textContent = `A chave fica só neste aparelho, no armazenamento do navegador. Pegue a sua em ${info.console}.`;
+    if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
+    const tierField = $('#tierField');
+    if (tierField) tierField.hidden = pv !== 'groq';
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -455,7 +468,7 @@
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
-      ${st.ultimo429 && o.tier !== 'dev' ? `<p class="panel-foot" style="color:#E4A03E">A cota gratuita já barrou a equipe hoje. O tier Developer da Groq (é só cadastrar um cartão no console) remove o teto diário e ainda aplica 25% de desconto por token — para este consumo, custa centavos por dia.</p>` : ''}
+      ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A cota gratuita da Groq já barrou a equipe hoje, e os upgrades para Developer estão suspensos por lá. Para rodar sem teto, troque o provedor para OpenRouter: nos modelos pagos não há limite de plataforma, o crédito é pré-pago a partir de US$ 5 e o GPT-OSS 120B sai mais barato que na Groq.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
         ? 'Os limites de janela vêm dos cabeçalhos que a Groq devolve na última resposta. O Estúdio não impõe uma cota diária artificial.'
         : 'Ainda sem resposta da Groq nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
@@ -682,6 +695,13 @@
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
     const tierSel = $('#tierSel');
     if (tierSel) tierSel.onchange = () => { S.ai.definirTier(tierSel.value); pintarMotor(); };
+    const provedorSel = $('#provedorSel');
+    if (provedorSel) provedorSel.onchange = () => {
+      S.ai.definirProvedor(provedorSel.value);
+      const k = $('#apiKeyInput'); if (k) k.value = '';
+      toast(`Provedor: ${S.ai.PROVEDORES[provedorSel.value].nome}.`, 'ok');
+      pintarMotor();
+    };
 
     const fecharEstudioBtn = $('#fecharEstudioBtn');
     if (fecharEstudioBtn) fecharEstudioBtn.onclick = () => {
