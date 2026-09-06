@@ -21,6 +21,17 @@
     { id: 'openai/gpt-oss-safeguard-20b', nome: 'GPT-OSS Safeguard 20B · segurança', nota: '$0,075 entrada / $0,30 saída por 1M. Especializado em classificação de segurança; não é a escolha principal para produção.' }
   ];
 
+  /* Preço por 1M de tokens, em dólar, na tabela on-demand. No tier
+     Developer a Groq aplica 25% de desconto sobre esses valores. */
+  const PRECOS = {
+    'openai/gpt-oss-20b': { entrada: 0.075, saida: 0.30 },
+    'openai/gpt-oss-120b': { entrada: 0.15, saida: 0.60 },
+    'qwen/qwen3.8-27b': { entrada: 0.80, saida: 4.00 },
+    'qwen/qwen3.6-27b': { entrada: 0.60, saida: 3.00 },
+    'openai/gpt-oss-safeguard-20b': { entrada: 0.075, saida: 0.30 }
+  };
+  const DESCONTO_DEV = 0.75;
+
   /* A Groq decomissionou os antigos Llama (llama-3.1-8b-instant e
      llama-3.3-70b-versatile) em 16/08/2026 para conta gratuita/dev.
      Quem tinha um desses salvos no aparelho é migrado automaticamente
@@ -42,22 +53,10 @@
   }
 
 
-  /* O motor padrão é local: o Estúdio precisa funcionar sem internet,
-     sem chave e sem cota. A nuvem entra como acelerador opcional.
-
-     provedor: qual motor local roda a base — 'webllm' (neste aparelho)
-               ou 'ollama' (um PC da rede).
-     nuvem:    quando usar a Groq — 'nunca' | 'producao' | 'sempre'.
-               'producao' é o meio-termo bom: o aparelho coordena, decide
-               e revisa; a nuvem só é gasta no produto final. */
   const cfg = Object.assign(
-    { provedor: 'webllm', nuvem: 'producao', decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { tier: 'free', decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
     S.local.json(K_CFG, {})
   );
-  // Migração das versões em que 'provedor' podia valer 'groq'.
-  if (cfg.provedor === 'groq') { cfg.provedor = 'webllm'; if (!cfg.nuvem) cfg.nuvem = 'sempre'; }
-  if (!['webllm', 'ollama'].includes(cfg.provedor)) cfg.provedor = 'webllm';
-  if (!['nunca', 'producao', 'sempre'].includes(cfg.nuvem)) cfg.nuvem = 'producao';
   cfg.decisao = migrarModelo(cfg.decisao);
   cfg.producao = migrarModelo(cfg.producao);
   cfg.revisao = migrarModelo(cfg.revisao);
@@ -87,23 +86,11 @@
     emVoo: 0,
     bloqueadaAte: 0,
     falhas: 0,
+    ultimo429: 0,
+    esperaAtual: 0,
     ultimaAutonoma: 0,
-    groqVoltaEm: 0,       // até quando a nuvem fica de fora (cota, queda, rede)
-    ultimaQueda: '',      // por que a nuvem saiu de cena, para mostrar no Motor
     chamadas: []          // histórico curto para a aba Motor
   };
-
-  /* Quanto tempo até a Groq aceitar de novo, lido da própria resposta. */
-  function esperaDaGroq(resp, dados) {
-    const h = n => { try { return resp.headers.get(n); } catch (e) { return null; } };
-    const cands = [h('retry-after'), h('x-ratelimit-reset-tokens'), h('x-ratelimit-reset-requests')]
-      .map(v => msDeHeader(v)).filter(v => Number.isFinite(v) && v > 0);
-    if (cands.length) return Math.min(6 * 36e5, Math.max(30e3, Math.max.apply(null, cands)));
-    const txt = String((dados && dados.error && dados.error.message) || '');
-    const m = txt.match(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b/i);
-    const ms = m ? msDeHeader(m[0]) : null;
-    return Number.isFinite(ms) && ms > 0 ? Math.max(30e3, ms) : 15 * 60e3;
-  }
 
   function situar(situacao, mensagem, detalhe) {
     estado.situacao = situacao;
@@ -112,28 +99,7 @@
     S.bus.emit('ia');
   }
 
-  /* A nuvem só conta como disponível se houver chave, rede e nenhuma
-     janela de espera em curso. Sem ela o Estúdio segue igual. */
-  function nuvemDisponivel() {
-    if (cfg.nuvem === 'nunca' || !chave) return false;
-    if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
-    return Date.now() >= estado.groqVoltaEm;
-  }
-  function localDisponivel() { return S.iaLocal.pronto(cfg.provedor); }
-  /* "Rodando local" = neste instante nenhuma chamada iria para a nuvem. */
-  const local = () => !nuvemDisponivel();
-  function pronta() {
-    if (estado.pausado) return false;
-    return localDisponivel() || nuvemDisponivel();
-  }
-  /* Roteamento de cada chamada. O padrão é o aparelho; a nuvem é ganho,
-     não dependência. */
-  function rota(tipo) {
-    if (!nuvemDisponivel()) return cfg.provedor;
-    if (cfg.nuvem === 'sempre') return 'groq';
-    if (cfg.nuvem === 'producao' && tipo === 'conteudo') return 'groq';
-    return cfg.provedor;
-  }
+  function pronta() { return Boolean(chave) && !estado.pausado; }
   function disponivel() {
     return pronta() && Date.now() >= estado.bloqueadaAte && estado.emVoo === 0;
   }
@@ -208,70 +174,29 @@
     S.bus.emit('ia');
   }
 
-  /* ---------- chamada local (sem cota) ----------
-     Modelos pequenos não aguentam o mesmo contexto que a Groq: o texto
-     é apertado e o teto de saída baixado, senão o aparelho leva minutos
-     por resposta e o modelo perde o formato CHAVE: valor. */
-  async function chamarLocal(op, tipo, prov) {
-    const { sistema, pedido, agente, motivo } = op;
-    prov = prov || 'webllm';
-    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 900 : 260), 100, tipo === 'conteudo' ? 1400 : 480);
-    const mensagens = [{
-      role: 'user',
-      content: String(sistema || '').slice(0, 2200) + '\n\n' + String(pedido || '').slice(0, 2200)
-    }];
-
-    estado.emVoo++;
-    const rotulo = S.iaLocal.modeloAtual(prov);
-    situar('ocupada', 'IA trabalhando neste aparelho', `${rotulo} · ${motivo || 'chamada'}`);
-    const inicio = Date.now();
-    try {
-      const r = await S.iaLocal.chamar(prov, mensagens, teto, tipo === 'conteudo' ? 0.55 : 0.2);
-      const ms = Date.now() - inicio;
-      if (!r.texto) throw new Error('O modelo local não devolveu texto.');
-      if (r.usage) contabilizar(r.modelo, { usage: r.usage }, ms);
-      estado.falhas = 0; estado.bloqueadaAte = 0;
-      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo: r.modelo, ms, ok: true, tokens: (r.usage || {}).total_tokens || 0, em: Date.now() });
-      situar('pronta', 'IA pronta', `respondeu em ${(ms / 1000).toFixed(1)}s · sem cota`);
-      return { texto: r.texto, usage: r.usage || {}, ms, modelo: r.modelo };
-    } catch (err) {
-      const msg = String(err && err.message || err);
-      estado.falhas++;
-      // Sem cota não existe castigo longo: falha local é erro de carga
-      // ou de servidor, e uma espera curta basta para tentar de novo.
-      estado.bloqueadaAte = Date.now() + Math.min(20000, 4000 * estado.falhas);
-      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo: rotulo, ms: Date.now() - inicio, ok: false, erro: msg, em: Date.now() });
-      situar('erro', 'Falha na IA local', msg);
-      throw err;
-    } finally {
-      estado.emVoo = Math.max(0, estado.emVoo - 1);
-      S.bus.emit('ia');
-    }
+  /* Quanto falta até a Groq aceitar de novo, lido da própria resposta.
+     Esperar o tempo certo é o que diferencia "a equipe retoma sozinha"
+     de "a equipe fica batendo na porta e tomando 429". */
+  function esperaDaGroq(resp, dados) {
+    const h = n => { try { return resp.headers.get(n); } catch (e) { return null; } };
+    const cands = [h('retry-after'), h('x-ratelimit-reset-tokens'), h('x-ratelimit-reset-requests')]
+      .map(v => msDeHeader(v)).filter(v => Number.isFinite(v) && v > 0);
+    if (cands.length) return Math.min(6 * 36e5, Math.max(5e3, Math.max.apply(null, cands)));
+    const txt = String((dados && dados.error && dados.error.message) || '');
+    const m = txt.match(/(\d+(?:\.\d+)?)\s*(ms|s|m|h)\b/i);
+    const ms = m ? msDeHeader(m[0]) : null;
+    return Number.isFinite(ms) && ms > 0 ? Math.max(5e3, ms) : 60e3;
   }
 
-  /* ---------- chamada ----------
-     Uma chamada nunca fracassa só porque a nuvem falhou: se a Groq
-     recusa, cai ou some junto com a internet, o mesmo pedido é refeito
-     no motor local e o trabalho segue. */
+  /* ---------- chamada ---------- */
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
     const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'decisao';
+    if (!chave) throw new Error('Nenhuma chave da Groq configurada.');
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
       throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
     }
-    const destino = op.destino || rota(tipo);
-    if (destino !== 'groq') return chamarLocal(op, tipo, destino);
-
-    // Recuo para o motor local, usado em qualquer falha da nuvem.
-    const recuar = async (espera, porque) => {
-      estado.groqVoltaEm = Date.now() + espera;
-      estado.ultimaQueda = porque;
-      S.bus.emit('nuvem');
-      if (!localDisponivel()) throw new Error(porque);
-      return chamarLocal(op, tipo, cfg.provedor);
-    };
-
     const q = usoHoje();
     const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'revisao' ? cfg.revisao : cfg.decisao);
     const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1000);
@@ -279,29 +204,19 @@
     const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
 
     estado.emVoo++;
-    situar('ocupada', 'IA trabalhando na nuvem', `${modelo} · ${motivo || 'chamada'}`);
+    situar('ocupada', 'IA trabalhando', `${modelo} · ${motivo || 'chamada'}`);
     const inicio = Date.now();
-    let resp = null, dados = null, redeCaiu = null;
     try {
-      try {
-        resp = await fetch(ENDPOINT, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave },
-          body: JSON.stringify({
-            model: modelo, messages: mensagens,
-            max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-            stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
-          })
-        });
-      } catch (e) { redeCaiu = e; }
-
-      if (redeCaiu) {
-        // Sem internet não existe erro: existe modo offline.
-        estado.emVoo = Math.max(0, estado.emVoo - 1);
-        situar('ocupada', 'Sem internet', 'a equipe continuou no motor deste aparelho');
-        return await recuar(60e3, 'Sem conexão com a nuvem.');
-      }
-
+      const resp = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave },
+        body: JSON.stringify({
+          model: modelo, messages: mensagens,
+          max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
+          stream: false, reasoning_effort: tipo === 'conteudo' ? 'medium' : 'low'
+        })
+      });
+      let dados = null;
       try { dados = await resp.json(); } catch (e) {}
       lerHeaders(resp);
       const ms = Date.now() - inicio;
@@ -311,39 +226,41 @@
 
       if (!resp.ok) {
         const msg = (dados && dados.error && dados.error.message) || `A Groq respondeu HTTP ${resp.status}.`;
-        estado.emVoo = Math.max(0, estado.emVoo - 1);
-        if (resp.status === 401) {
-          situar('ocupada', 'Chave da nuvem recusada', 'a equipe continuou no motor deste aparelho');
-          return await recuar(6 * 36e5, 'Chave da Groq inválida ou expirada.');
+        if (resp.status === 401) throw new Error('Chave da Groq inválida ou expirada.');
+        if (resp.status === 429) {
+          // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
+          // do estúdio volta sozinho quando a janela reabre.
+          const espera = esperaDaGroq(resp, dados);
+          estado.bloqueadaAte = Date.now() + espera;
+          estado.ultimo429 = Date.now();
+          estado.esperaAtual = espera;
+          const e429 = new Error(`Limite da Groq atingido. A equipe retoma em ${Math.ceil(espera / 1000)}s.`);
+          e429.cota = true;
+          throw e429;
         }
-        if (resp.status === 429 || resp.status === 503 || resp.status >= 500) {
-          situar('ocupada', 'Cota da nuvem esgotada', 'a equipe continuou no motor deste aparelho');
-          return await recuar(esperaDaGroq(resp, dados), 'Limite da Groq atingido.');
-        }
-        situar('ocupada', 'Falha na nuvem', 'a equipe continuou no motor deste aparelho');
-        return await recuar(5 * 60e3, msg);
+        throw new Error(msg);
       }
-
       const escolha = (dados.choices || [])[0] || {};
       const texto = String((escolha.message && escolha.message.content) || escolha.text || '').trim();
-      if (!texto) {
-        estado.emVoo = Math.max(0, estado.emVoo - 1);
-        return await recuar(60e3, `A Groq não devolveu texto (finish_reason=${escolha.finish_reason || '?'}).`);
-      }
+      if (!texto) throw new Error(`A Groq não devolveu texto (finish_reason=${escolha.finish_reason || '?'}).`);
 
-      estado.falhas = 0; estado.bloqueadaAte = 0; estado.ultimaQueda = '';
+      estado.falhas = 0; estado.bloqueadaAte = 0;
       registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms, ok: true, tokens: (dados.usage || {}).total_tokens || 0, em: Date.now() });
-      situar('pronta', 'IA pronta', `nuvem respondeu em ${(ms / 1000).toFixed(1)}s`);
+      situar('pronta', 'IA pronta', `respondeu em ${(ms / 1000).toFixed(1)}s`);
       return { texto, usage: dados.usage || {}, ms, modelo };
     } catch (err) {
       const msg = String(err && err.message || err);
       estado.falhas++;
-      estado.bloqueadaAte = Date.now() + Math.min(40000, 6000 * estado.falhas);
+      if (err && err.cota) {
+        // bloqueadaAte já foi definido com o tempo real devolvido pela Groq.
+      } else {
+        estado.bloqueadaAte = Date.now() + (/401|inválida/i.test(msg) ? 90000 : Math.min(40000, 6000 * estado.falhas));
+      }
       registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms: Date.now() - inicio, ok: false, erro: msg, em: Date.now() });
       situar('erro', 'Falha na IA', msg);
       throw err;
     } finally {
-      if (resp && resp.ok) estado.emVoo = Math.max(0, estado.emVoo - 1);
+      estado.emVoo = Math.max(0, estado.emVoo - 1);
       S.bus.emit('ia');
     }
   }
@@ -380,7 +297,7 @@
   }
 
   async function testar() {
-    if (!localDisponivel() && !chave) throw new Error('Prepare o motor deste aparelho ou informe uma chave antes de testar.');
+    if (!chave) throw new Error('Informe a chave antes de testar.');
     const r = await chamar({
       sistema: 'Responda exatamente com a linha abaixo, sem mais nada.',
       pedido: 'STATUS: ok', tokens: 60, motivo: 'teste de conexão', forcar: true, agente: 'você'
@@ -391,18 +308,6 @@
   /* novaChave === undefined significa "mantenha a que já está salva".
      String vazia significa "remova". Sem essa distinção, salvar só para
      trocar o ritmo apagaria a chave do usuário. */
-  /* Troca de provedor. Nada é apagado: a chave da Groq continua salva
-     mesmo enquanto o estúdio roda no motor local, e voltar é imediato. */
-  function definirProvedor(p) {
-    if (!['webllm', 'ollama'].includes(p)) return;
-    cfg.provedor = p;
-    S.local.setJson(K_CFG, cfg);
-    estado.bloqueadaAte = 0; estado.falhas = 0;
-    situar(pronta() ? 'pronta' : 'off',
-      pronta() ? 'IA pronta' : 'IA desligada',
-      p === 'ollama' ? 'servidor da rede, sem cota' : 'modelo deste aparelho, sem cota');
-  }
-
   function salvarCfg(novaChave, decisao, producao, ritmo, revisao) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
@@ -415,20 +320,31 @@
     if (chave) S.local.set(K_CHAVE, chave); else S.local.del(K_CHAVE);
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0;
-    const ok = pronta();
-    situar(ok ? 'pronta' : 'off', ok ? 'IA pronta' : 'IA desligada',
-      local() ? 'motor deste aparelho, sem cota' : 'nuvem ligada como acelerador');
+    situar(chave ? 'pronta' : 'off', chave ? 'IA pronta' : 'IA desligada', chave ? 'configuração salva' : 'sem chave');
+  }
+
+  /* Custo do dia em dólar, calculado sobre o que a Groq contabilizou.
+     É estimativa de acompanhamento, não fatura. */
+  function custoDoDia() {
+    const q = usoHoje();
+    let total = 0, temPreco = false;
+    Object.keys(q.porModelo || {}).forEach(id => {
+      const p = PRECOS[id];
+      if (!p) return;
+      temPreco = true;
+      const m = q.porModelo[id];
+      // Sem separação por modelo de entrada/saída, usa a proporção do dia.
+      const prop = q.tokens > 0 ? q.entrada / q.tokens : 0.7;
+      const ent = (m.tokens || 0) * prop, sai = (m.tokens || 0) * (1 - prop);
+      total += (ent / 1e6) * p.entrada + (sai / 1e6) * p.saida;
+    });
+    if (!temPreco) return null;
+    return cfg.tier === 'dev' ? total * DESCONTO_DEV : total;
   }
 
   function orcamento() {
     const q = usoHoje();
-    const h = local() ? null : q.headers;
-    if (local()) {
-      return {
-        requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
-        pctTokens: null, pctReq: null, fonte: 'local', ref: null, headers: null, porModelo: q.porModelo
-      };
-    }
+    const h = q.headers;
     const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
     const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
     // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
@@ -438,29 +354,23 @@
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
       pctTokens, pctReq, fonte: (temTok || temReq) ? 'groq' : 'aguardando headers',
-      ref: null, headers: h, porModelo: q.porModelo
+      ref: null, headers: h, porModelo: q.porModelo,
+      custo: custoDoDia(), tier: cfg.tier
     };
   }
 
   S.ai = {
     MODELOS, cfg, estado, chamar, perguntar, campos, corpo, testar, salvarCfg,
-    orcamento, pronta, disponivel, reservarAutonomia, faltaParaAutonomia, msDeHeader,
-    definirProvedor, rota, nuvemDisponivel, localDisponivel,
-    definirNuvem(v) {
-      if (!['nunca', 'producao', 'sempre'].includes(v)) return;
-      cfg.nuvem = v; S.local.setJson(K_CFG, cfg);
-      estado.groqVoltaEm = 0; estado.ultimaQueda = '';
-      situar(pronta() ? 'pronta' : 'off', pronta() ? 'IA pronta' : 'IA desligada', '');
-    },
-    temChave: () => Boolean(chave) || localDisponivel(),
-    temChaveGroq: () => Boolean(chave),
+    orcamento, pronta, disponivel, PRECOS,
+    definirTier(v) {
+      cfg.tier = v === 'dev' ? 'dev' : 'free';
+      S.local.setJson(K_CFG, cfg);
+      S.bus.emit('ia');
+    }, reservarAutonomia, faltaParaAutonomia, msDeHeader,
+    temChave: () => Boolean(chave),
     chaveMascarada: () => (chave ? chave.slice(0, 7) + '••••••' + chave.slice(-4) : ''),
     pausar(v) { estado.pausado = Boolean(v); situar(estado.pausado ? 'off' : (chave ? 'pronta' : 'off'), estado.pausado ? 'Equipe pausada' : (chave ? 'IA pronta' : 'IA desligada')); },
-    iniciar() {
-      const ok = pronta();
-      situar(ok ? 'pronta' : 'off', ok ? 'IA pronta' : 'IA desligada',
-        nuvemDisponivel() ? 'nuvem disponível como acelerador' : 'motor deste aparelho, sem cota');
-    }
+    iniciar() { if (chave) situar('pronta', 'IA pronta', 'chave carregada deste aparelho'); }
   };
   void sleep;
 })(window.S);

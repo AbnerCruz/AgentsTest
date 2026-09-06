@@ -202,28 +202,17 @@
       <div class="panel" id="conexaoPanel">
         <div class="panel-head"><span class="panel-label">Conexão com a IA</span><span class="chip" id="conexaoChip">desligada</span></div>
         <div class="field">
-          <label for="provedorSel">Motor principal <span class="tag tag-real">sempre disponível</span></label>
-          <select id="provedorSel">
-            <option value="webllm">Neste aparelho · WebLLM — funciona offline, sem cota</option>
-            <option value="ollama">Servidor da rede · Ollama — mais forte, exige PC ligado</option>
-          </select>
-          <p class="hint" id="provedorHint"></p>
-        </div>
-        <div id="localCfg"></div>
-        <div class="field">
-          <label for="nuvemSel">Acelerador na nuvem <span class="tag">opcional</span></label>
-          <select id="nuvemSel">
-            <option value="nunca">Não usar — 100% neste aparelho</option>
-            <option value="producao">Só no produto final — economiza a cota</option>
-            <option value="sempre">Sempre que houver cota — mais rápido</option>
-          </select>
-          <p class="hint" id="nuvemHint"></p>
-        </div>
-        <div id="groqCfg">
-        <div class="field">
           <label for="apiKeyInput">Chave da Groq</label>
           <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
           <p class="hint">A chave fica só neste aparelho, no armazenamento do navegador. Pegue uma gratuita em console.groq.com.</p>
+        </div>
+        <div class="field">
+          <label for="tierSel">Plano da sua conta Groq</label>
+          <select id="tierSel">
+            <option value="free">Gratuito — tem teto diário de requisições</option>
+            <option value="dev">Developer — sem teto diário, 25% mais barato</option>
+          </select>
+          <p class="hint">O Developer é liberado só cadastrando um cartão em console.groq.com, sem mínimo de gasto: você paga apenas os tokens que usar. Esta escolha ajusta a estimativa de custo abaixo.</p>
         </div>
         <div class="field">
           <label for="modeloDecisaoSel">Modelo de decisão <span class="tag tag-real">barato</span></label>
@@ -236,7 +225,6 @@
         <div class="field">
           <label for="modeloRevisaoSel">Modelo de revisão <span class="tag tag-real">barato</span></label>
           <select id="modeloRevisaoSel"></select>
-        </div>
         </div>
         <div class="row-actions">
           <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>
@@ -275,7 +263,6 @@
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
 <script src="./core.js"></script>
-<script src="./local.js"></script>
 <script src="./ai.js"></script>
 <script src="./market.js"></script>
 <script src="./factory.js"></script>

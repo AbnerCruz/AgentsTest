@@ -12,22 +12,13 @@ python3 -m http.server 8000
 
 Depois abra `http://localhost:8000`.
 
-O Estúdio nasce funcionando **sem internet, sem chave e sem cota**. A nuvem é um acelerador opcional.
+Para ativar a equipe, entre em **Motor** e configure uma chave da Groq. A chave fica apenas no `localStorage` do navegador.
 
-Em **Motor** existem duas escolhas independentes:
+### Sem teto diário
 
-**1. Motor principal — sempre disponível**
-- **Neste aparelho · WebLLM** (padrão): o modelo roda na GPU do navegador via WebGPU. Baixe uma vez (0,9 a 2,4 GB conforme o modelo), no Wi-Fi e com a tela aberta; depois disso trabalha offline.
-- **Servidor da rede · Ollama**: um PC responde pelo Estúdio, bem mais forte. Suba com `OLLAMA_ORIGINS=* ollama serve`. Se o Estúdio estiver em HTTPS e o servidor em outro aparelho por HTTP, o navegador bloqueia — abra o Estúdio pelo endereço local do próprio PC.
+O tier gratuito da Groq tem limite de requisições por dia; quando ele estoura, a equipe para até a janela reabrir. O tier **Developer** remove esse teto diário e aplica 25% de desconto por token. É liberado apenas cadastrando um cartão em console.groq.com, sem mínimo de gasto e sem mensalidade: você paga só os tokens consumidos. Nos modelos GPT-OSS, o consumo típico do Estúdio fica na casa de centavos por dia.
 
-**2. Acelerador na nuvem — opcional**
-- **Não usar**: 100% no aparelho.
-- **Só no produto final** (padrão): o aparelho coordena, decide e revisa; a cota da Groq é gasta apenas na entrega final. Rende muito mais que gastar a cota em coordenação.
-- **Sempre que houver cota**: a nuvem assume enquanto houver rede e cota.
-
-Quando a nuvem falha — cota estourada, chave recusada, servidor fora ou internet caída — o **mesmo pedido é refeito no motor local na hora**. Nenhuma tarefa se perde. O Estúdio anota quando a janela reabre e volta a usar a nuvem sozinho.
-
-A chave da Groq fica apenas no `localStorage` deste aparelho.
+Marque o plano no campo **Plano da sua conta Groq**. Isso não muda o comportamento do motor — só ajusta a estimativa de custo mostrada no painel.
 
 ## O que é persistente
 
@@ -96,30 +87,8 @@ A versão atual mantém uma sala persistente para conversa direta com a equipe. 
 - A produção deve sempre transformar o contexto real do projeto em um artefato verificável; conversa, promessa ou cenário hipotético não conta como trabalho concluído.
 
 
-## Motor local (v22)
+## Espera e retomada
 
-Quando o provedor não é a Groq, o Estúdio ignora chave, cabeçalhos de cota e bloqueio por 429. Uma falha local gera espera curta, não castigo de minutos.
+Quando a Groq devolve 429, o Estúdio lê o tempo de reabertura no cabeçalho da própria resposta e espera exatamente esse tempo, em vez de chutar um intervalo fixo. O ciclo retoma sozinho assim que a janela abre, sem nenhuma ação sua.
 
-Modelos pequenos não aguentam o mesmo contexto da nuvem, então no motor local o Estúdio aperta o contexto (2200 caracteres por bloco) e baixa o teto de saída (900 tokens na produção, 260 na decisão). Isso mantém o formato `CHAVE: valor` funcionando e evita respostas de vários minutos no celular.
-
-Recomendação prática: Qwen 2.5 1.5B em celular; Qwen 2.5 3B ou Ollama no PC quando o objetivo for produto final.
-
-`estudio-arquivo-unico.html` continua sendo a versão antiga, só com Groq.
-
-
-## Reserva local (queda automática)
-
-O padrão continua sendo a Groq. No painel **Motor → Reserva local**:
-
-1. Escolha o modelo da reserva (Qwen 2.5 1.5B para celular).
-2. Toque em **Preparar reserva** no Wi-Fi, com a tela aberta. Baixa uma vez e fica guardado no navegador.
-3. Deixe a caixa de queda automática marcada.
-
-A partir daí, quando a Groq devolve 429 ou 503, o Estúdio lê o tempo de espera na própria resposta, refaz o mesmo pedido no modelo do aparelho e segue trabalhando. Passada a janela, ele volta para a nuvem e descarrega o modelo da memória.
-
-A queda **só acontece se o modelo já estiver baixado**. Sem isso o Estúdio prefere esperar a cota voltar a disparar mais de 1 GB de download em rede móvel.
-
-
-## Offline de verdade
-
-A biblioteca do WebLLM é buscada em `./vendor/web-llm.js` (se você colocar o arquivo lá) e, na falta dele, em esm.run/esm.sh. O service worker guarda esses arquivos no primeiro carregamento, então depois disso o Estúdio abre e produz sem rede nenhuma. Os pesos do modelo já ficam guardados pelo próprio WebLLM.
+O painel Motor mostra o custo estimado do dia (calculado sobre os tokens que a Groq contabilizou) e, quando a cota gratuita barra a equipe, o aviso sobre o tier Developer.

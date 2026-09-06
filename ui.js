@@ -412,129 +412,6 @@
   /* ============================================================
      Motor
      ============================================================ */
-  /* ============================================================
-     Motor principal (local) e acelerador na nuvem
-     ============================================================ */
-  const HINT_MOTOR = {
-    webllm: 'O modelo roda dentro deste navegador, na GPU do aparelho. Baixa uma vez e depois trabalha sem internet, sem chave e sem cota.',
-    ollama: 'Um PC da sua rede responde pelo Estúdio: bem mais forte que o modelo do celular, também sem cota, mas a máquina precisa estar ligada.'
-  };
-  const HINT_NUVEM = {
-    nunca: 'O Estúdio nunca sai deste aparelho. Nada depende de rede, chave ou cota.',
-    producao: 'O aparelho coordena, decide e revisa; a nuvem só é gasta no produto final. É o ajuste que rende mais com a cota gratuita.',
-    sempre: 'A nuvem assume enquanto houver cota e rede. Assim que faltar qualquer uma das duas, o aparelho continua sozinho.'
-  };
-
-  function pintarProvedor() {
-    const prov = S.ai.cfg.provedor;
-    const sel = $('#provedorSel');
-    if (sel && sel.value !== prov) sel.value = prov;
-    const hint = $('#provedorHint');
-    if (hint) hint.textContent = HINT_MOTOR[prov] || '';
-
-    const nsel = $('#nuvemSel');
-    if (nsel && nsel.value !== S.ai.cfg.nuvem) nsel.value = S.ai.cfg.nuvem;
-    const nhint = $('#nuvemHint');
-    if (nhint) nhint.textContent = (HINT_NUVEM[S.ai.cfg.nuvem] || '') + estadoDaNuvem();
-    const groqCfg = $('#groqCfg');
-    if (groqCfg) groqCfg.hidden = S.ai.cfg.nuvem === 'nunca';
-
-    const box = $('#localCfg');
-    if (!box) return;
-    // Só remonta quando o motor muda: remontar a cada evento apagaria
-    // o que o usuário está digitando no endereço do servidor.
-    if (box.dataset.prov !== prov) { montarLocalCfg(box, prov); box.dataset.prov = prov; }
-    pintarCargaLocal();
-  }
-
-  function estadoDaNuvem() {
-    const st = S.ai.estado;
-    const falta = st.groqVoltaEm - Date.now();
-    if (falta > 0) return ` Agora ela está de fora (${esc(st.ultimaQueda || 'indisponível')}) e volta em ${F.dur(falta)} — o trabalho segue no aparelho.`;
-    return '';
-  }
-
-  function pintarCargaLocal() {
-    const c = S.iaLocal.carga;
-    const barra = $('#localBar');
-    const txt = $('#localProg');
-    const btn = $('#prepararLocalBtn');
-    if (barra) barra.style.width = (c.pct || 0) + '%';
-    if (btn) btn.textContent = S.iaLocal.emCache() ? 'Carregar agora' : `Baixar modelo · ${S.iaLocal.tamanhoDe()}`;
-    if (!txt) return;
-    if (S.iaLocal.carregado()) { txt.innerHTML = `<span class="tag tag-real">ativo</span> ${esc(S.iaLocal.modeloCarregado())} rodando neste aparelho.`; return; }
-    if (S.iaLocal.emCache()) { txt.innerHTML = '<span class="tag tag-real">pronto</span> Modelo já baixado. Carrega sozinho na primeira tarefa, mesmo sem internet.'; return; }
-    txt.textContent = c.texto || 'Modelo ainda não baixado. Faça isso no Wi-Fi, com a tela aberta: é uma vez só.';
-  }
-
-  function montarLocalCfg(box, prov) {
-    if (prov === 'webllm') {
-      box.innerHTML = `
-        <div class="field">
-          <label for="modeloLocalSel">Modelo deste aparelho</label>
-          <select id="modeloLocalSel">${S.iaLocal.MODELOS_WEBLLM.map(m =>
-            `<option value="${m.id}" ${S.iaLocal.cfg.modeloWebllm === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('')}</select>
-          <p class="hint" id="modeloLocalNota"></p>
-        </div>
-        <div class="meter ok"><i id="localBar" style="width:0%"></i></div>
-        <p class="hint" id="localProg"></p>
-        <div class="row-actions">
-          <button class="btn btn-primary" id="prepararLocalBtn" type="button">Baixar modelo</button>
-          <button class="btn btn-ghost" id="descarregarLocalBtn" type="button">Liberar memória</button>
-        </div>`;
-      const sel = $('#modeloLocalSel');
-      const nota = () => {
-        const m = S.iaLocal.MODELOS_WEBLLM.find(x => x.id === sel.value);
-        $('#modeloLocalNota').textContent = m ? m.nota : '';
-      };
-      nota();
-      sel.onchange = () => { S.iaLocal.definir({ modeloWebllm: sel.value }); nota(); pintarCargaLocal(); };
-      $('#prepararLocalBtn').onclick = async () => {
-        const b = $('#prepararLocalBtn'); b.disabled = true; b.textContent = 'baixando…';
-        try { await S.iaLocal.carregarWebllm(sel.value); toast('Modelo pronto. O Estúdio já trabalha sem internet.', 'ok'); }
-        catch (err) { toast(String(err.message || err), 'erro'); }
-        b.disabled = false; pintarMotor();
-      };
-      $('#descarregarLocalBtn').onclick = async () => { await S.iaLocal.descarregar(); pintarMotor(); };
-      if (!S.iaLocal.temWebGPU()) {
-        box.insertAdjacentHTML('afterbegin',
-          '<p class="hint" style="color:#E08573">Este navegador não expõe WebGPU. Atualize o Chrome, ou use Ollama, ou deixe o acelerador da nuvem como motor.</p>');
-      }
-      return;
-    }
-
-    box.innerHTML = `
-      <div class="field">
-        <label for="urlOllamaInp">Endereço do servidor</label>
-        <input id="urlOllamaInp" type="text" spellcheck="false" value="${esc(S.iaLocal.cfg.urlOllama)}" placeholder="http://localhost:11434">
-      </div>
-      <div class="field">
-        <label for="modeloOllamaInp">Modelo</label>
-        <input id="modeloOllamaInp" type="text" spellcheck="false" list="ollamaLista" value="${esc(S.iaLocal.cfg.modeloOllama)}" placeholder="qwen2.5:3b-instruct">
-        <datalist id="ollamaLista"></datalist>
-      </div>
-      <div class="row-actions">
-        <button class="btn btn-primary" id="salvarOllamaBtn" type="button">Salvar servidor</button>
-        <button class="btn" id="buscarOllamaBtn" type="button">Buscar modelos</button>
-      </div>
-      <p class="hint" id="localProg"></p>
-      <p class="hint">No PC: <code>OLLAMA_ORIGINS=* ollama serve</code>. Se o Estúdio estiver em HTTPS e o servidor em outro aparelho por HTTP, o navegador bloqueia — abra o Estúdio pelo endereço local do próprio PC.</p>`;
-    $('#salvarOllamaBtn').onclick = () => {
-      S.iaLocal.definir({ urlOllama: $('#urlOllamaInp').value, modeloOllama: $('#modeloOllamaInp').value });
-      toast('Servidor salvo.', 'ok'); pintarMotor();
-    };
-    $('#buscarOllamaBtn').onclick = async () => {
-      const b = $('#buscarOllamaBtn'); b.disabled = true; b.textContent = 'buscando…';
-      try {
-        S.iaLocal.definir({ urlOllama: $('#urlOllamaInp').value });
-        const nomes = await S.iaLocal.listarOllama();
-        $('#ollamaLista').innerHTML = nomes.map(n => `<option value="${esc(n)}"></option>`).join('');
-        toast(nomes.length ? `${nomes.length} modelo(s) encontrados.` : 'O servidor respondeu, mas não tem modelo instalado.', 'ok');
-      } catch (err) { toast(String(err.message || err), 'erro'); }
-      b.disabled = false; b.textContent = 'Buscar modelos';
-    };
-  }
-
   function pintarMotor() {
     const e = S.state.atual();
     const st = S.ai.estado;
@@ -559,10 +436,11 @@
     if (producao) producao.innerHTML = opcoes('producao');
     if (revisao) revisao.innerHTML = opcoes('revisao');
 
-    pintarProvedor();
-
     const o = S.ai.orcamento();
     const h = o.headers;
+    const tierSel = $('#tierSel');
+    if (tierSel && tierSel.value !== o.tier) tierSel.value = o.tier;
+    const espera = S.ai.estado.bloqueadaAte - Date.now();
     $('#consumoPanel').innerHTML = `
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
@@ -573,11 +451,12 @@
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes na Groq</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela (Groq)</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
         <div class="stat"><span>Autonomia</span><b>${S.ai.disponivel() ? 'disponível' : st.emVoo ? 'em execução' : st.pausado ? 'pausada' : 'aguardando'}</b></div>
+        ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
+        ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
-      <p class="panel-foot">${o.fonte === 'local'
-        ? 'O motor está rodando neste aparelho ou no seu servidor: não existe cota, teto diário nem janela para esperar. Os tokens abaixo são só uma medida de trabalho.'
-        : o.fonte === 'groq'
+      ${st.ultimo429 && o.tier !== 'dev' ? `<p class="panel-foot" style="color:#E4A03E">A cota gratuita já barrou a equipe hoje. O tier Developer da Groq (é só cadastrar um cartão no console) remove o teto diário e ainda aplica 25% de desconto por token — para este consumo, custa centavos por dia.</p>` : ''}
+      <p class="panel-foot">${o.fonte === 'groq'
         ? 'Os limites de janela vêm dos cabeçalhos que a Groq devolve na última resposta. O Estúdio não impõe uma cota diária artificial.'
         : 'Ainda sem resposta da Groq nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
 
@@ -801,15 +680,8 @@
     };
     const pausarBtn = $('#pausarBtn');
     if (pausarBtn) pausarBtn.onclick = () => { S.ai.pausar(!S.ai.estado.pausado); pintarMotor(); };
-
-    const provSel = $('#provedorSel');
-    if (provSel) provSel.onchange = () => { S.ai.definirProvedor(provSel.value); pintarMotor(); };
-    const nuvemSel = $('#nuvemSel');
-    if (nuvemSel) nuvemSel.onchange = () => {
-      S.ai.definirNuvem(nuvemSel.value);
-      toast(nuvemSel.value === 'nunca' ? 'Estúdio 100% neste aparelho.' : 'Nuvem ligada como acelerador.', 'ok');
-      pintarMotor();
-    };
+    const tierSel = $('#tierSel');
+    if (tierSel) tierSel.onchange = () => { S.ai.definirTier(tierSel.value); pintarMotor(); };
 
     const fecharEstudioBtn = $('#fecharEstudioBtn');
     if (fecharEstudioBtn) fecharEstudioBtn.onclick = () => {
@@ -832,8 +704,6 @@
   /* ---------- reações a eventos ---------- */
   function assinar() {
     S.bus.on('ia', () => { pintarPulso(); if (viewAtual === 'motor') pintarMotor(); });
-    S.bus.on('ia-local', () => { if (viewAtual === 'motor') pintarCargaLocal(); });
-    S.bus.on('nuvem', () => toast('A nuvem saiu de cena. A equipe continuou neste aparelho.', 'ok'));
     S.bus.on('gerencia', () => pintarGerencia());
     S.bus.on('equipe', () => pintarGerencia());
     S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
