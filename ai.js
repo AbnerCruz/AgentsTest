@@ -100,26 +100,21 @@
      configuração precisam existir antes de qualquer chamada a
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0, decisao: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', maestro: 'openai/gpt-oss-120b', revisao: 'openai/gpt-oss-20b' },
+    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0,
+      pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 80000 },
     S.local.json(K_CFG, {})
   );
   if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
-
-  /* Recuperação de configuração antiga: se a versão anterior deixou Groq
-     selecionada mas já existe uma chave OpenRouter válida, priorizamos o
-     OpenRouter. Isso evita que uma cota antiga mantenha o estúdio preso mesmo
-     depois de o usuário ter configurado o provedor novo. */
 
   function migrarModelo(id) {
     const lista = MODELOS_DE(cfg.provedor);
     if (lista.some(m => m.id === id)) return id;
     return MODELOS_MIGRADOS[id] || lista[0].id;
   }
-
-  cfg.decisao = migrarModelo(cfg.decisao);
+  cfg.pensamento = migrarModelo(cfg.pensamento || cfg.decisao || cfg.revisao);
   cfg.producao = migrarModelo(cfg.producao);
-  cfg.maestro = migrarModelo(cfg.maestro || cfg.producao);
-  cfg.revisao = migrarModelo(cfg.revisao);
+  cfg.limiteTokensDia = Math.max(10000, Math.min(500000, Number(cfg.limiteTokensDia) || 80000));
+  delete cfg.decisao; delete cfg.revisao; delete cfg.maestro;
   S.local.setJson(K_CFG, cfg);
 
   /* Cada provedor guarda a própria chave: trocar de um para outro e
@@ -130,9 +125,8 @@
   };
   if (chaves.openrouter && cfg.provedor === 'groq' && !cfg.providerSelecionadoEm) {
     cfg.provedor = 'openrouter';
-    cfg.decisao = 'openai/gpt-oss-20b';
+    cfg.pensamento = 'openai/gpt-oss-20b';
     cfg.producao = 'openai/gpt-oss-120b';
-    cfg.revisao = 'openai/gpt-oss-20b';
     S.local.setJson(K_CFG, cfg);
   }
   const prov = () => PROVEDORES[cfg.provedor];
@@ -154,18 +148,23 @@
 
   /* ---------- estado do motor ---------- */
   const estado = {
-    situacao: 'off',      // off | pronta | ocupada | erro
+    situacao: 'off',
     mensagem: 'IA desligada',
     detalhe: '',
     pausado: false,
     emVoo: 0,
-    bloqueadaAte: 0,
+    bloqueadaAte: 0,       // bloqueio do provedor; vale para todos os agentes
     falhas: 0,
     ultimo429: 0,
     esperaAtual: 0,
     ultimaAutonoma: 0,
-    chamadas: []          // histórico curto para a aba Motor
+    chamadas: [],
+    agentes: Object.create(null)
   };
+  function lane(id) {
+    const k = String(id || 'estudio');
+    return estado.agentes[k] || (estado.agentes[k] = { emVoo: 0, falhas: 0, bloqueadaAte: 0, ultima: 0 });
+  }
 
   function situar(situacao, mensagem, detalhe) {
     estado.situacao = situacao;
@@ -176,17 +175,12 @@
 
   const chave = () => chaves[cfg.provedor];
   function pronta() { return Boolean(chave()) && !estado.pausado; }
-  function disponivel() {
-    return pronta() && Date.now() >= estado.bloqueadaAte && estado.emVoo === 0;
+  function disponivel(agenteId) {
+    const l = lane(agenteId);
+    return pronta() && Date.now() >= estado.bloqueadaAte && Date.now() >= l.bloqueadaAte && l.emVoo === 0 && !atingiuLimite();
   }
-  /* A autonomia não possui um cronômetro artificial.
-     A equipe pode agir sempre que houver uma decisão ou trabalho real.
-     O próprio estado emVoo impede chamadas simultâneas; o ciclo operacional
-     continua sendo o responsável por não duplicar trabalho. */
-  function reservarAutonomia() {
-    if (!disponivel()) return false;
-    estado.ultimaAutonoma = Date.now();
-    return true;
+  function reservarAutonomia(agenteId) {
+    return disponivel(agenteId);
   }
   function faltaParaAutonomia() { return 0; }
 
@@ -276,115 +270,119 @@
     if (!PROVEDORES[p] || !chaves[p]) return false;
     cfg.provedor = p;
     const lista = MODELOS_DE(p);
-    cfg.decisao = lista.some(m => m.id === cfg.decisao) ? cfg.decisao : lista[0].id;
+    cfg.pensamento = lista.some(m => m.id === cfg.pensamento) ? cfg.pensamento : lista[0].id;
     cfg.producao = lista.some(m => m.id === cfg.producao) ? cfg.producao : (lista[1] || lista[0]).id;
-    cfg.maestro = lista.some(m => m.id === cfg.maestro) ? cfg.maestro : (lista[1] || lista[0]).id;
-    cfg.revisao = lista.some(m => m.id === cfg.revisao) ? cfg.revisao : lista[0].id;
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0; estado.esperaAtual = 0;
     return true;
   }
 
-  /* ---------- chamada ---------- */
+
+  function atingiuLimite(reserva=0) {
+    return usoHoje().tokens + Math.max(0, Number(reserva)||0) >= cfg.limiteTokensDia;
+  }
+  function limiteTokensDia() { return cfg.limiteTokensDia; }
+
+  /* Cada funcionário possui uma lane própria. Uma chamada em andamento não
+     torna a IA dos demais "indisponível". O único bloqueio compartilhado é um
+     limite real devolvido pelo provedor. */
   async function chamar(op) {
     const { sistema, pedido, agente, motivo } = op;
+    const agenteId = String(op.agenteId || op.idAgente || agente || 'estudio');
+    const l = lane(agenteId);
     const permitirFailover = op._failover !== false;
-    const tipo = op.tipo === 'conteudo' ? 'conteudo' : (op.tipo === 'maestro' ? 'maestro' : (op.tipo === 'revisao' ? 'revisao' : 'decisao'));
+    const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'pensamento';
+    const modelo = tipo === 'conteudo' ? cfg.producao : cfg.pensamento;
+    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : 420), 120, tipo === 'conteudo' ? 3600 : 900);
+
     if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
     if (Date.now() < estado.bloqueadaAte && !op.forcar) {
-      throw new Error(`Motor em espera por ${Math.ceil((estado.bloqueadaAte - Date.now()) / 1000)}s após uma falha.`);
+      throw new Error(`Provedor em espera por ${Math.ceil((estado.bloqueadaAte-Date.now())/1000)}s após um limite.`);
     }
-    const q = usoHoje();
-    const modelo = tipo === 'conteudo' ? cfg.producao : (tipo === 'maestro' ? cfg.maestro : (tipo === 'revisao' ? cfg.revisao : cfg.decisao));
-    const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : tipo === 'maestro' ? 700 : tipo === 'revisao' ? 420 : 360), 120, tipo === 'conteudo' ? 3600 : 1200);
-    // GPT-OSS na Groq responde melhor com tudo no papel "user".
-    const mensagens = [{ role: 'user', content: String(sistema || '').slice(0, 4500) + '\n\n' + String(pedido || '').slice(0, 4500) }];
+    if (Date.now() < l.bloqueadaAte && !op.forcar) {
+      throw new Error(`IA de ${agente || agenteId} em recuperação após uma falha temporária.`);
+    }
+    if (l.emVoo > 0 && !op.forcar && !op._recuperacao && !op._failover) {
+      throw new Error(`A IA própria de ${agente || agenteId} já está trabalhando.`);
+    }
 
-    estado.emVoo++;
-    situar('ocupada', 'IA trabalhando', `${modelo} · ${motivo || 'chamada'}`);
-    const inicio = Date.now();
+    const q = usoHoje();
+    const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
+    const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
+    if (!op.forcar && q.tokens + estimativa >= cfg.limiteTokensDia) {
+      const er = new Error(`Limite local de ${cfg.limiteTokensDia.toLocaleString('pt-BR')} tokens atingido; novas chamadas ficam bloqueadas até amanhã.`);
+      er.limiteLocal = true; throw er;
+    }
+
+    estado.emVoo++; l.emVoo++;
+    situar('ocupada','IA trabalhando',`${agente || agenteId} · ${modelo} · ${motivo || 'chamada'}`);
+    const inicio=Date.now();
     try {
-      const resp = await fetch(prov().url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + chave() },
-        body: JSON.stringify({
-          model: modelo, messages: mensagens,
-          max_completion_tokens: teto, temperature: tipo === 'conteudo' ? 0.55 : 0.2,
-          stream: false,
-          ...(cfg.provedor === 'openrouter'
-            ? { reasoning: { effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low'), exclude: true } }
-            : { reasoning_effort: op.reasoning_effort || (tipo === 'conteudo' ? 'medium' : 'low') })
+      const resp=await fetch(prov().url,{
+        method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+chave()},
+        body:JSON.stringify({
+          model:modelo,messages:mensagens,max_completion_tokens:teto,
+          temperature:tipo==='conteudo'?0.55:0.2,stream:false,
+          ...(cfg.provedor==='openrouter'
+            ? {reasoning:{effort:op.reasoning_effort || (tipo==='conteudo'?'medium':'low'),exclude:true}}
+            : {reasoning_effort:op.reasoning_effort || (tipo==='conteudo'?'medium':'low')})
         })
       });
-      let dados = null;
-      try { dados = await resp.json(); } catch (e) {}
+      let dados=null; try{dados=await resp.json();}catch(_){}
       lerHeaders(resp);
-      const ms = Date.now() - inicio;
-      // Só contabiliza o que o provedor realmente processou e devolveu como uso —
-      // uma resposta de erro não deve inflar o total gasto.
-      if (resp.ok && dados && dados.usage) contabilizar(modelo, dados, ms);
+      const ms=Date.now()-inicio;
+      if(resp.ok && dados && dados.usage) contabilizar(modelo,dados,ms);
 
-      if (!resp.ok) {
-        const msg = (dados && dados.error && dados.error.message) || `${prov().nome} respondeu HTTP ${resp.status}.`;
-        if (resp.status === 401) throw new Error(`Chave ${prov().rotulo} inválida ou expirada.`);
-        if (resp.status === 429) {
-          // A espera vem do cabeçalho da resposta, não de um chute. O ciclo
-          // do estúdio volta sozinho quando a janela reabre.
-          const espera = esperaDoProvedor(resp, dados);
-          estado.bloqueadaAte = Date.now() + espera;
-          estado.ultimo429 = Date.now();
-          estado.esperaAtual = espera;
-          const outro = permitirFailover ? provedorAlternativo() : null;
-          if (outro && ativarProvedor(outro)) {
-            S.state && S.state.registrar && S.state.registrar(`Limite do provedor anterior atingido. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`, 'alerta');
-            return chamar(Object.assign({}, op, { _failover: false, forcar: false }));
+      if(!resp.ok){
+        const msg=(dados&&dados.error&&dados.error.message)||`${prov().nome} respondeu HTTP ${resp.status}.`;
+        if(resp.status===401) throw new Error(`Chave ${prov().rotulo} inválida ou expirada.`);
+        if(resp.status===429){
+          const espera=esperaDoProvedor(resp,dados);
+          estado.bloqueadaAte=Date.now()+espera;
+          estado.ultimo429=Date.now(); estado.esperaAtual=espera;
+          const outro=permitirFailover?provedorAlternativo():null;
+          if(outro && ativarProvedor(outro)){
+            S.state && S.state.registrar && S.state.registrar(`Limite do provedor anterior atingido. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`,'alerta');
+            return chamar(Object.assign({},op,{_failover:false,forcar:false}));
           }
-          const e429 = new Error(`Limite ${prov().rotulo} atingido. A equipe entra em espera até a janela informada pelo provedor.`);
-          e429.cota = true;
-          throw e429;
+          const er=new Error(`Limite ${prov().rotulo} atingido. A equipe aguarda a janela do provedor.`);
+          er.cota=true; throw er;
         }
         throw new Error(msg);
       }
-      const escolha = (dados.choices || [])[0] || {};
-      const mensagem = escolha.message || {};
-      const texto = String(mensagem.content || escolha.text || '').trim();
 
-      /* GPT-OSS pode gastar todo o limite de completion em raciocínio e
-         terminar com finish_reason=length antes de emitir a resposta final.
-         Isso não é uma falha de conexão. Para decisões curtas, recuperamos
-         uma única vez com raciocínio baixo e um teto maior. O retry é limitado
-         para não transformar uma falha em uma espiral de consumo. */
-      if (!texto && escolha.finish_reason === 'length' && !op._recuperacao && tipo !== 'conteudo') {
-        return chamar(Object.assign({}, op, {
-          _recuperacao: true,
-          reasoning_effort: 'low',
-          tokens: Math.max(Number(op.tokens || 0) + 260, tipo === 'maestro' ? 900 : 760),
-          forcar: false
-        }));
+      const escolha=(dados.choices||[])[0]||{};
+      const mensagem=escolha.message||{};
+      const texto=String(mensagem.content||escolha.text||'').trim();
+
+      if(!texto && escolha.finish_reason==='length' && !op._recuperacao && tipo==='pensamento'){
+        return chamar(Object.assign({},op,{_recuperacao:true,reasoning_effort:'low',tokens:Math.max(Number(op.tokens||0)+180,560)}));
       }
-      if (!texto) {
-        const motivoVazio = escolha.finish_reason ? `finish_reason=${escolha.finish_reason}` : 'resposta vazia';
+      if(!texto){
+        const motivoVazio=escolha.finish_reason?`finish_reason=${escolha.finish_reason}`:'resposta vazia';
         throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
       }
 
-      estado.falhas = 0; estado.bloqueadaAte = 0;
-      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms, ok: true, tokens: (dados.usage || {}).total_tokens || 0, em: Date.now() });
-      situar('pronta', 'IA pronta', `respondeu em ${(ms / 1000).toFixed(1)}s`);
-      return { texto, usage: dados.usage || {}, ms, modelo };
-    } catch (err) {
-      const msg = String(err && err.message || err);
-      estado.falhas++;
-      if (err && err.cota) {
-        // bloqueadaAte já foi definido com o tempo real devolvido pela Groq.
-      } else {
-        estado.bloqueadaAte = Date.now() + (/401|inválida/i.test(msg) ? 90000 : Math.min(40000, 6000 * estado.falhas));
+      estado.falhas=0; l.falhas=0; l.bloqueadaAte=0;
+      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms,ok:true,tokens:(dados.usage||{}).total_tokens||0,em:Date.now()});
+      situar('pronta','IA pronta',`última resposta em ${(ms/1000).toFixed(1)}s`);
+      return {texto,usage:dados.usage||{},ms,modelo};
+    }catch(err){
+      const msg=String(err&&err.message||err);
+      estado.falhas++; l.falhas++;
+      if(err&&err.cota){
+        // bloqueio global já foi definido pelo cabeçalho do provedor.
+      }else if(!err.limiteLocal){
+        l.bloqueadaAte=Date.now() + (/401|inválida/i.test(msg)?90000:Math.min(30000,5000*l.falhas));
       }
-      registrarChamada({ quem: agente || 'estúdio', motivo: motivo || tipo, modelo, ms: Date.now() - inicio, ok: false, erro: msg, em: Date.now() });
-      situar('erro', 'Falha na IA', msg);
+      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms:Date.now()-inicio,ok:false,erro:msg,em:Date.now()});
+      situar(err.limiteLocal?'pronta':'erro',err.limiteLocal?'Limite local atingido':'Falha na IA',msg);
       throw err;
-    } finally {
-      estado.emVoo = Math.max(0, estado.emVoo - 1);
+    }finally{
+      estado.emVoo=Math.max(0,estado.emVoo-1);
+      l.emVoo=Math.max(0,l.emVoo-1);
       S.bus.emit('ia');
     }
   }
@@ -418,14 +416,10 @@
   async function deliberar(op) {
     const r = await chamar({
       sistema: String(op.sistema || '') + `\n\nVocê tem liberdade para escolher a melhor abordagem. Não siga uma árvore fixa de decisões. Analise o contexto, compare alternativas, identifique o que já existe e escolha uma direção coerente com o objetivo do projeto. Não revele seu raciocínio interno passo a passo. Retorne somente uma síntese operacional curta: DECISAO: <o que fará>\nABORDAGEM: <como pretende fazer>\nRISCOS: <o que precisa evitar>\nUSAR: <materiais existentes que devem ser preservados ou reutilizados>`,
-      pedido: op.pedido, tipo: 'decisao', tokens: op.tokens || 700, reasoning_effort: 'high', agente: op.agente, motivo: op.motivo || 'deliberação autônoma'
+      pedido: op.pedido, tipo: 'pensamento', tokens: op.tokens || 420, reasoning_effort: 'low', agente: op.agente, agenteId: op.agenteId, motivo: op.motivo || 'deliberação autônoma'
     });
     const c = campos(r.texto);
     return { texto: r.texto, campos: c, resumo: [c.decisao,c.abordagem,c.riscos,c.usar].filter(Boolean).join(' ') };
-  }
-
-  async function maestro(op) {
-    return chamar(Object.assign({}, op, { tipo: 'maestro', reasoning_effort: 'high', tokens: op.tokens || 650 }));
   }
 
   async function perguntar(op) {
@@ -449,16 +443,16 @@
   /* novaChave === undefined significa "mantenha a que já está salva".
      String vazia significa "remova". Sem essa distinção, salvar só para
      trocar o ritmo apagaria a chave do usuário. */
-  function salvarCfg(novaChave, decisao, producao, ritmo, revisao) {
+  function salvarCfg(novaChave, pensamento, producao, limiteTokensDia) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
       if (k && !prov().regex.test(k)) throw new Error(`A chave ${prov().rotulo} começa com ${prov().prefixo} e é bem mais longa. Confira o que foi colado.`);
       chaves[cfg.provedor] = k;
     }
     const lista = MODELOS_DE(cfg.provedor);
-    if (lista.some(m => m.id === decisao)) cfg.decisao = decisao;
+    if (lista.some(m => m.id === pensamento)) cfg.pensamento = pensamento;
     if (lista.some(m => m.id === producao)) cfg.producao = producao;
-    if (lista.some(m => m.id === revisao)) cfg.revisao = revisao;
+    if (limiteTokensDia !== undefined) cfg.limiteTokensDia = Math.max(10000, Math.min(500000, Number(limiteTokensDia) || cfg.limiteTokensDia));
     const kk = cfg.provedor === 'openrouter' ? K_CHAVE_OR : K_CHAVE;
     if (chave()) S.local.set(kk, chave()); else S.local.del(kk);
     S.local.setJson(K_CFG, cfg);
@@ -466,7 +460,7 @@
     situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada', chave() ? `configuração salva · ${prov().nome}` : 'sem chave');
   }
 
-  /* Custo do dia em dólar, calculado sobre o que a Groq contabilizou.
+  /* Custo do dia em dólar, calculado sobre o uso que o provedor contabilizou.
      É estimativa de acompanhamento, não fatura. */
   function custoDoDia() {
     const q = usoHoje();
@@ -491,14 +485,14 @@
     const temTok = h && Number.isFinite(h.limiteTok) && h.limiteTok > 0;
     const temReq = h && Number.isFinite(h.limiteReq) && h.limiteReq > 0;
     // Nunca inventa uma cota local. Antes da primeira resposta, ainda não
-    // sabemos a janela real da organização; depois dela, usamos os headers da Groq.
+    // sabemos a janela real da organização; depois dela, usamos os headers do provedor ativo.
     const pctTokens = temTok ? clamp(((h.limiteTok - (Number.isFinite(h.restaTok) ? h.restaTok : h.limiteTok)) / h.limiteTok) * 100, 0, 100) : null;
     const pctReq = temReq ? clamp(((h.limiteReq - (Number.isFinite(h.restaReq) ? h.restaReq : h.limiteReq)) / h.limiteReq) * 100, 0, 100) : null;
     return {
       requisicoes: q.requisicoes, tokens: q.tokens, entrada: q.entrada, saida: q.saida,
       pctTokens, pctReq, fonte: (temTok || temReq) ? cfg.provedor : 'aguardando headers', provedor: cfg.provedor,
       ref: null, headers: h, porModelo: q.porModelo,
-      custo: custoDoDia(), tier: cfg.tier
+      custo: custoDoDia(), tier: cfg.tier, limiteTokensDia: cfg.limiteTokensDia
     };
   }
 
@@ -512,17 +506,13 @@
       // Modelos são identificados de forma diferente em cada provedor:
       // ao trocar, cai no padrão da nova lista em vez de mandar um id inválido.
       const lista = MODELOS_DE(p);
-      cfg.decisao = lista[0].id;
+      cfg.pensamento = lista[0].id;
       cfg.producao = (lista[1] || lista[0]).id;
-      cfg.maestro = (lista[1] || lista[0]).id;
-      cfg.revisao = lista[0].id;
-      cfg.maestro = (lista[1] || lista[0]).id;
       S.local.setJson(K_CFG, cfg);
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
-    },
-    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg,
+    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, limiteTokensDia,
     orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR,
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';

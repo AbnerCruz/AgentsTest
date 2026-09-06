@@ -127,15 +127,9 @@ window.S = window.S || {};
       f.energia = Number.isFinite(f.energia) ? f.energia : 80;
       f.humor = Number.isFinite(f.humor) ? f.humor : 68;
       f.entregas = Number(f.entregas) || 0;
-      f.comissaoTotal = Number(f.comissaoTotal) || 0;
-      f.comissoes = Number(f.comissoes) || 0;
       f.memoria = Array.isArray(f.memoria) ? f.memoria.slice(-24) : [];
       f.pensamento = String(f.pensamento || 'Observando o que posso fazer para contribuir com o produto final e com a equipe.').slice(0, 240);
       f.foco = String(f.foco || '').slice(0, 180);
-      f.contribuicaoAcervo = f.contribuicaoAcervo && typeof f.contribuicaoAcervo === 'object' ? f.contribuicaoAcervo : {};
-      f.contribuicaoAcervo.nivel = Number.isFinite(f.contribuicaoAcervo.nivel) ? clamp(f.contribuicaoAcervo.nivel, 0, 100) : 70;
-      f.contribuicaoAcervo.ultima = String(f.contribuicaoAcervo.ultima || 'Ainda não avaliada.').slice(0, 220);
-      f.contribuicaoAcervo.atualizadoEm = Number(f.contribuicaoAcervo.atualizadoEm) || 0;
       // Ficha persistente: a personalidade orienta comportamento, comunicação e colaboração.
       f.personalidade = f.personalidade && typeof f.personalidade === 'object' ? f.personalidade : {};
       f.personalidade.tracos = Array.isArray(f.personalidade.tracos) && f.personalidade.tracos.length
@@ -152,7 +146,6 @@ window.S = window.S || {};
       f.cuidados.ultimo = f.cuidados.ultimo || 0;
       f.cuidados.agua = Number.isFinite(f.cuidados.agua) ? f.cuidados.agua : 0;
       f.cuidados.pausa = Number.isFinite(f.cuidados.pausa) ? f.cuidados.pausa : 0;
-      f.comissaoHistorico = Array.isArray(f.comissaoHistorico) ? f.comissaoHistorico.slice(-60) : [];
       f.ambiente = f.ambiente && typeof f.ambiente === 'object' ? f.ambiente : {};
       f.ambiente.preferencias = Array.isArray(f.ambiente.preferencias) ? f.ambiente.preferencias.slice(0,8) : [];
       f.ambiente.ultimaAcao = Number(f.ambiente.ultimaAcao) || 0;
@@ -171,7 +164,10 @@ window.S = window.S || {};
       pr.arquivoIds = Array.isArray(pr.arquivoIds) ? pr.arquivoIds : [];
       pr.atividade = Array.isArray(pr.atividade) ? pr.atividade.slice(-40) : [];
     });
-    e.contratos = []; // contratos/encomendas pertencem ao modo antigo e não participam mais da simulação.
+    e.contratos = [];
+    // O simulador não possui mercado, vendas ou caixa fictícios. Interações externas ficam com o dono.
+    delete e.negocio;
+    delete e.recompensas;
 
     e.arquivos = Array.isArray(e.arquivos) ? e.arquivos : [];
     e.tarefas.forEach(t => {
@@ -181,8 +177,8 @@ window.S = window.S || {};
     });
     e.arquivos.forEach(a => {
       a.classe = ['esboco', 'prototipo', 'candidato', 'produto'].includes(a.classe) ? a.classe : 'esboco';
+      delete a.qualidade;
       a.versao = Number(a.versao) || 1;
-      a.qualidade = Number.isFinite(a.qualidade) ? a.qualidade : 55;
       a.linhagem = a.linhagem || slug(a.nome);
     });
     e.projetos.forEach(pr => {
@@ -200,8 +196,6 @@ window.S = window.S || {};
     e.reuniao.reunioes = Array.isArray(e.reuniao.reunioes) ? e.reuniao.reunioes.slice(-30) : [];
     e.log = Array.isArray(e.log) ? e.log.slice(-160) : [];
     e.uso = e.uso || { chamadas: 0, tokens: 0, entrada: 0, saida: 0, ms: 0 };
-    e.comissoes = Array.isArray(e.comissoes) ? e.comissoes.slice(-120) : [];
-    e.recompensas = Array.isArray(e.recompensas) ? e.recompensas.slice(-80) : [];
     return e;
   }
 
@@ -214,7 +208,6 @@ window.S = window.S || {};
       migrarV1();
     }
     if (DB.atual && !DB.estudios.some(e => e.id === DB.atual)) DB.atual = DB.estudios[0] ? DB.estudios[0].id : null;
-    DB.estudios.forEach(e => S.market && S.market.normalizar(e));
     return DB;
   }
 
@@ -237,7 +230,7 @@ window.S = window.S || {};
         id: a.id, nome: a.nome, tipo: a.tipo, conteudo: a.conteudo,
         classe: a.escopo === 'produto' ? 'produto' : (a.classe === 'candidato-final' ? 'candidato' : (a.classe || 'esboco')),
         versao: a.versao || 1, autor: a.autor, quando: a.quando, criadoEm: Date.now(),
-        linhagem: a.linhagem, qualidade: 60, kit: 'legado'
+        linhagem: a.linhagem, kit: 'legado'
       })),
       negocio: emp.negocio || null,
       log: (emp.log || []).slice(-40).map(l => ({ t: Date.now(), texto: l.text || l.texto || '', tag: 'info' }))

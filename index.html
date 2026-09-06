@@ -122,7 +122,6 @@
         <div class="environment-bar" id="environmentBar"></div>
         <p class="panel-foot" id="floorFoot">Os agentes podem reorganizar o espaço quando uma mudança tiver utilidade real. Móveis e decoração permanecem salvos.</p>
       </div>
-      <div class="panel" id="economiaPanel"></div>
       <div class="panel">
         <div class="panel-head"><span class="panel-label">Equipe e acompanhamento individual</span><button class="btn btn-mini" id="contratarBtn" type="button">Contratar</button></div>
         <div class="team" id="teamList"></div>
@@ -231,18 +230,25 @@
           <p class="hint">O Developer é liberado só cadastrando um cartão em console.groq.com, sem mínimo de gasto: você paga apenas os tokens que usar. Esta escolha ajusta a estimativa de custo abaixo.</p>
         </div>
         <div class="field">
-          <label for="modeloDecisaoSel">Modelo de decisão <span class="tag tag-real">barato</span></label>
-          <select id="modeloDecisaoSel"></select>
+          <label for="modeloPensamentoSel">IA de pensamento <span class="tag tag-real">barata</span></label>
+          <select id="modeloPensamentoSel"></select>
         </div>
         <div class="field">
-          <label for="modeloProducaoSel">Modelo de produção <span class="tag">forte</span></label>
+          <label for="modeloProducaoSel">IA de produção <span class="tag">forte</span></label>
           <select id="modeloProducaoSel"></select>
         </div>
         <div class="field">
-          <label for="modeloRevisaoSel">Modelo de revisão <span class="tag tag-real">barato</span></label>
-          <select id="modeloRevisaoSel"></select>
+          <label for="limiteTokensSel">Limite local de uso diário</label>
+          <select id="limiteTokensSel">
+            <option value="30000">30 mil tokens</option>
+            <option value="50000">50 mil tokens</option>
+            <option value="80000">80 mil tokens</option>
+            <option value="120000">120 mil tokens</option>
+            <option value="200000">200 mil tokens</option>
+          </select>
+          <p class="hint">Freio local para impedir que a equipe continue consumindo sua chave indefinidamente. O limite real do provedor continua valendo.</p>
         </div>
-        <div class="row-actions">
+<div class="row-actions">
           <button class="btn btn-primary" id="salvarIABtn" type="button">Salvar e ativar</button>
           <button class="btn" id="testarIABtn" type="button">Testar</button>
           <button class="btn btn-ghost" id="pausarBtn" type="button">Pausar equipe</button>
@@ -280,7 +286,6 @@
 
 <script src="./core.js"></script>
 <script src="./ai.js"></script>
-<script src="./market.js"></script>
 <script src="./factory.js"></script>
 <script src="./agency.js"></script>
 <script src="./studio.js"></script>

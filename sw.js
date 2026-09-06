@@ -1,11 +1,11 @@
 /* Service worker do Estúdio.
    Só o shell é cacheado. A IA é remota (OpenRouter/Groq) e nunca passa por aqui:
    requisições para outras origens são ignoradas de propósito. */
-const CACHE = 'estudio-v41.1-sem-nota-artificial-ponte-execucao';
+const CACHE = 'estudio-v43-agentes-autonomos-producao-real';
 const SHELL = [
   './', './index.html', './manifest.webmanifest',
   './app.css',
-  './core.js', './ai.js', './market.js',
+  './core.js', './ai.js',
   './factory.js', './agency.js', './studio.js', './ui.js'
 ];
 

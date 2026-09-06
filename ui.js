@@ -37,7 +37,7 @@
     $$('.view').forEach(v => v.classList.toggle('is-on', v.id === 'v-' + view));
     $$('.nav-item').forEach(b => b.classList.toggle('is-on', b.dataset.view === view));
     $('#nav').style.visibility = e ? 'visible' : 'hidden';
-    if (view === 'estudio') { S.studio.ajustarCanvas(); pintarEconomia(); pintarAmbienteBar(); }
+    if (view === 'estudio') { S.studio.ajustarCanvas(); pintarAmbienteBar(); }
     if (view === 'motor') pintarMotor();
     if (view === 'entregas') { pintarArquivos(); }
     if (view === 'trabalho') pintarTrabalho();
@@ -85,6 +85,8 @@
     const pessoas = S.studio.pessoas();
     $('#teamList').innerHTML = pessoas.map(p => {
       const f = p.ref || {};
+      const lane = S.ai.estado && S.ai.estado.agentes ? S.ai.estado.agentes[p.id] : null;
+      const iaEstado = lane && lane.emVoo ? 'IA própria trabalhando' : (S.ai.disponivel(p.id) ? 'IA própria pronta' : 'IA própria aguardando');
       const estado = p.ocupado ? (p.tarefa || 'trabalhando')
         : p.estado === 'pausa' ? 'em pausa'
           : p.estado === 'andando' ? 'andando pelo estúdio' : 'disponível';
@@ -94,7 +96,7 @@
           <span class="member-name">${esc(p.nome)} ${p.ocupado ? '<i class="thinking">trabalhando</i>' : ''}</span>
           <span class="member-role">${esc(p.cargo)}${p.papel === 'gerente' ? ' · coordena e remove bloqueios' : ''}</span>
           <span class="member-personality">${esc((((f.personalidade&&f.personalidade.tracos)||[]).slice(0,2).join(' · ')) || 'perfil em formação')}</span>
-          <span class="member-status">${esc(estado)} · comissão ${esc(F.brl(f.comissaoTotal||0))}</span>
+          <span class="member-status">${esc(estado)} · ${esc(iaEstado)}</span>
         </span>
         <span class="bars">
           ${barra('energia', f.energia)}
@@ -105,21 +107,6 @@
     $$('#teamList [data-pessoa]').forEach(b => b.onclick = () => painelPessoa(b.dataset.pessoa));
     pintarGerencia();
   }
-
-  function pintarEconomia() {
-    const e=S.state.atual(); const box=$('#economiaPanel'); if(!e||!box) return;
-    const n=S.market.normalizar(e), i=S.market.indicadores(e), objs=(e.ambiente&&e.ambiente.objetos)||[];
-    const com=(e.comissoes||[]).reduce((a,x)=>a+Number(x.valor||0),0);
-    box.innerHTML=`<div class="panel-head"><div><span class="panel-label">Economia real da simulação</span><span class="panel-subtitle">produto final gera receita; comissão só existe quando há contribuição registrada</span></div><span class="chip">${esc(F.brl(n.caixa))} em caixa</span></div>
-      <div class="economy-grid">
-        <div class="economy-card"><b>${esc(F.brl(n.caixa))}</b><span>caixa atual</span></div>
-        <div class="economy-card"><b>${esc(F.brl(n.receitaMercado))}</b><span>receita acumulada</span></div>
-        <div class="economy-card"><b>${esc(F.brl(com))}</b><span>comissões pagas</span></div>
-        <div class="economy-card"><b>${esc(F.num(n.pedidos||0))}</b><span>vendas concluídas</span></div>
-      </div>
-      <p class="panel-foot">Mercado: ${F.num(n.visitas||0)} visitas · ${F.num(n.leads||0)} leads · ${F.num(n.pedidos||0)} vendas · ${F.num(objs.length)} objetos no escritório · lucro operacional ${F.brl(i.lucroOperacional)}.</p>`;
-  }
-
   function pintarAmbienteBar(){
     const e=S.state.atual(), box=$('#environmentBar'); if(!e||!box) return;
     const a=e.ambiente||{}, objs=a.objetos||[];
@@ -149,15 +136,11 @@
   function pintarXP() {
     const e = S.state.atual(); if (!e) return;
     const pr = S.state.progressoNivel(e.xp);
-    const kits = (S.factory && Array.isArray(S.factory.KITS)) ? S.factory.KITS : [];
-    const liberados = kits.filter(k => k.nivel <= pr.nivel).length;
-    const proximo = kits.filter(k => k.nivel === pr.nivel + 1);
     $('#xpPanel').innerHTML = `
-      <div class="panel-head"><span class="panel-label">Progresso do estúdio</span><span class="chip">nível ${pr.nivel}</span></div>
+      <div class="panel-head"><span class="panel-label">Experiência do estúdio</span><span class="chip">nível ${pr.nivel}</span></div>
       <div class="meter"><i style="width:${pr.pct}%"></i></div>
-      <div class="stat"><span>${F.num(e.xp)} XP acumulado</span><b>${pr.falta > 0 ? 'faltam ' + F.num(pr.falta) : 'nível máximo'}</b></div>
-      <div class="stat"><span>Tipos de entrega liberados</span><b>${liberados}/${kits.length}</b></div>
-      <p class="panel-foot">XP representa experiência acumulada por entregas concluídas e evolução do projeto. ${proximo.length ? 'No próximo nível: ' + proximo.map(k => k.nome).join(', ') + '.' : 'Tudo liberado.'}</p>`;
+      <div class="stat"><span>${F.num(e.xp)} experiência acumulada</span><b>${pr.falta > 0 ? 'próximo marco em ' + F.num(pr.falta) : 'marco máximo'}</b></div>
+      <p class="panel-foot">A experiência é apenas um registro histórico do trabalho realizado; não libera templates nem determina o que a equipe deve produzir.</p>`;
   }
 
   function painelPessoa(id) {
@@ -186,7 +169,7 @@
         <div class="stat"><span>Entregas assinadas</span><b>${f.entregas || 0}</b></div>
         <div class="stat"><span>Tarefas concluídas</span><b>${feitas}</b></div>
         <div class="stat"><span>Agora</span><b>${esc(p.ocupado ? (p.tarefa || 'trabalhando') : p.estado)}</b></div>
-        <div class="stat"><span>Contribuição ao acervo</span><b>${Math.round((p.ref.contribuicaoAcervo && p.ref.contribuicaoAcervo.nivel) || 0)}/100</b></div>
+        <div class="stat"><span>Última contribuição</span><b>${esc((p.ref.contribuicaoAcervo && p.ref.contribuicaoAcervo.ultima) || '—')}</b></div>
       </div>
       ${mem.length ? `<div class="panel" style="margin-top:12px;padding:12px"><div class="panel-label">Memória relevante</div>${mem.map(x => `<p class="panel-foot" style="margin:6px 0">${esc(x)}</p>`).join('')}</div>` : ''}
       <div class="panel" style="margin-top:12px;padding:12px"><div class="panel-head"><span class="panel-label">Log individual</span><span class="chip">últimos eventos</span></div><div class="logbox person-log">${((f.log||[]).slice(-30).reverse()).map(l=>`<div class="log-line ${esc(l.tag||'info')}"><span class="log-ts">${F.hora(l.t)}</span><span class="log-txt">${esc(l.texto)}</span></div>`).join('') || '<div class="empty">Ainda não há eventos individuais.</div>'}</div></div>
@@ -401,7 +384,7 @@
       nome: `${pasta}/LEIA-ME.md`,
       conteudo: `# ${e.nome}\n\n${e.missao}\n\nRamo: ${e.ramo}\nPúblico: ${e.publico}\nExportado em ${new Date().toLocaleString('pt-BR')}\n\n## Arquivos\n\n` +
         e.arquivos.map(a => `- \`${a.classe}/${a.nome}\` — ${a.validacao?.pronto ? 'entrega estruturalmente completa' : 'entrega ainda em trabalho'}, por ${a.autor}`).join('\n') +
-        `\n\nOs arquivos deste pacote são reais e podem ser usados, editados e vendidos livremente. Os números de vendas, caixa e reputação vistos no aplicativo são simulação.\n`
+        `\n\nOs arquivos deste pacote são reais e podem ser usados, editados e vendidos livremente. O aplicativo não simula vendas, caixa ou clientes. A interação com o mundo real fica com você.\n`
     });
     S.arquivo.baixarBlob(S.arquivo.zip(arquivos), pasta + '.zip');
     toast(`${arquivos.length} arquivos exportados.`, 'ok');
@@ -462,12 +445,12 @@
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
-    const decisao = $('#modeloDecisaoSel');
+    const pensamento = $('#modeloPensamentoSel');
     const producao = $('#modeloProducaoSel');
-    const revisao = $('#modeloRevisaoSel');
-    if (decisao) decisao.innerHTML = opcoes('decisao');
+    if (pensamento) pensamento.innerHTML = opcoes('pensamento');
     if (producao) producao.innerHTML = opcoes('producao');
-    if (revisao) revisao.innerHTML = opcoes('revisao');
+    const limite = $('#limiteTokensSel');
+    if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 80000);
 
     const o = S.ai.orcamento();
     const h = o.headers;
@@ -479,19 +462,20 @@
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
         <div class="stat"><span>Tokens usados (soma exata das respostas)</span><b>${F.num(o.tokens)}</b></div>
+        <div class="stat"><span>Limite local diário</span><b>${F.num(o.limiteTokensDia || 80000)}</b></div>
         <div class="stat"><span>Chamadas feitas</span><b>${F.num(o.requisicoes)}</b></div>
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
-        <div class="stat"><span>Autonomia</span><b>${S.ai.disponivel() ? 'disponível' : st.emVoo ? 'em execução' : st.pausado ? 'pausada' : 'aguardando'}</b></div>
+        <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
         ${o.custo != null ? `<div class="stat"><span>Custo estimado hoje${o.tier === 'dev' ? ' (com desconto Developer)' : ''}</span><b>US$ ${o.custo < 0.01 ? o.custo.toFixed(4) : o.custo.toFixed(3)}</b></div>` : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
       ${st.ultimo429 && o.provedor === 'groq' ? `<p class="panel-foot" style="color:#E4A03E">A o provedor ativo atingiu um limite. Se houver outro provedor configurado, o motor tenta fazer failover automaticamente.</p>` : ''}
       <p class="panel-foot">${o.fonte === 'groq'
-        ? 'Os limites de janela vêm dos cabeçalhos devolvidos pelo provedor ativo. O Estúdio não impõe uma cota diária artificial.'
-        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão assim que a primeira chamada retornar seus cabeçalhos.'}</p>`;
+        ? 'Os limites de janela vêm dos cabeçalhos do provedor. O limite local acima é um freio de segurança escolhido no aparelho.'
+        : 'Ainda sem resposta do provedor nesta sessão: os limites reais aparecerão após a primeira chamada.'}</p>`;
 
     $('#callsList').innerHTML = st.chamadas.length ? st.chamadas.map(c => `
       <div class="call">
@@ -510,7 +494,7 @@
         <div class="field"><label for="cfgMissao">Missão</label><input id="cfgMissao" type="text" value="${esc(e.missao)}"></div>
         <div class="field"><label for="cfgTom">Tom da marca</label><input id="cfgTom" type="text" value="${esc(e.tom)}"></div>
         <div class="row-actions"><button class="btn btn-primary" id="salvarCfgBtn" type="button">Salvar</button></div>
-        <p class="hint">Esses campos entram em toda instrução mandada para a IA. Quanto mais específicos, melhor a entrega — e sem custo extra de token.</p>`;
+        <p class="hint">Esses campos entram em toda instrução mandada para a IA. Quanto mais específicos, melhor a entrega; o contexto também consome tokens.</p>`;
       $('#salvarCfgBtn').onclick = () => {
         e.nome = $('#cfgNome').value.trim() || e.nome;
         e.ramo = $('#cfgRamo').value.trim() || e.ramo;
@@ -559,10 +543,9 @@
 
   function dialogoContratar() {
     const e = S.state.atual(); if (!e) return;
-    const custo = S.studio.custoContratacao(e);
     folha(`
       <h2>Contratar</h2>
-      <p class="sub">Custa ${F.brl(custo)} do caixa e aumenta a folha por hora. A especialidade dá bônus de qualidade nas entregas do tipo certo.</p>
+      <p class="sub">A contratação altera a composição da equipe. O Estúdio não simula salários, caixa ou mercado.</p>
       <div class="field"><label for="cNome">Nome</label><input id="cNome" type="text" placeholder="deixe vazio para sortear"></div>
       <div id="listaEsp">
         ${S.studio.ESPECIALIDADES.map((x, i) => `<button class="pick ${i === 0 ? 'is-on' : ''}" data-esp="${x.id}" type="button">
@@ -582,7 +565,7 @@
       box.querySelector('#okCont').onclick = () => {
         const r = S.studio.contratar(box.querySelector('#cNome').value.trim(), esp);
         fecharFolha();
-        toast(r === 'sem-caixa' ? 'Caixa insuficiente para contratar agora.' : 'Contratação feita.', r === 'sem-caixa' ? 'erro' : 'ok');
+        toast('Contratação feita.', 'ok');
       };
     });
   }
@@ -690,11 +673,11 @@
     if (salvarIABtn) salvarIABtn.onclick = () => {
       try {
         const key = $('#apiKeyInput');
-        const decisao = $('#modeloDecisaoSel');
+        const pensamento = $('#modeloPensamentoSel');
         const producao = $('#modeloProducaoSel');
-        const revisao = $('#modeloRevisaoSel');
+        const limite = $('#limiteTokensSel');
         const digitada = key ? key.value.trim() : '';
-        S.ai.salvarCfg(digitada ? digitada : undefined, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
+        S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined);
         if (key) key.value = ''; 
         toast('Configuração salva.', 'ok');
         pintarMotor();
@@ -705,10 +688,10 @@
       const b = testarIABtn; b.disabled = true; b.textContent = 'testando…';
       try {
         const key = $('#apiKeyInput');
-        const decisao = $('#modeloDecisaoSel');
+        const pensamento = $('#modeloPensamentoSel');
         const producao = $('#modeloProducaoSel');
-        const revisao = $('#modeloRevisaoSel');
-        if (key && key.value.trim()) S.ai.salvarCfg(key.value, decisao ? decisao.value : undefined, producao ? producao.value : undefined, undefined, revisao ? revisao.value : undefined);
+        const limite = $('#limiteTokensSel');
+        if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
@@ -750,24 +733,23 @@
     S.bus.on('gerencia', () => pintarGerencia());
     S.bus.on('equipe', () => pintarGerencia());
     S.bus.on('equipe', () => { if (viewAtual === 'estudio') pintarEquipe(); });
-    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); pintarEconomia(); pintarAmbienteBar(); S.studio.ajustarCanvas(); } });
+    S.bus.on('estudio', () => { pintarTopo(); if (viewAtual === 'estudio') { pintarEquipe(); pintarXP(); pintarAmbienteBar(); S.studio.ajustarCanvas(); } });
     S.bus.on('trabalho', () => { pintarBadges(); if (viewAtual === 'trabalho') pintarTrabalho(); });
     S.bus.on('arquivos', () => { pintarBadges(); if (viewAtual === 'entregas') pintarArquivos(); if (viewAtual === 'trabalho') pintarPendencias(); });
     S.bus.on('log', () => { if (viewAtual === 'trabalho') pintarLog(); });
     S.bus.on('reuniao', () => { if (viewAtual === 'reuniao') pintarReuniao(); });
-    S.bus.on('negocio', () => { if (viewAtual === 'estudio') pintarEconomia(); });
-    S.bus.on('ambiente', () => { if (viewAtual === 'estudio') pintarAmbienteBar(); });
+        S.bus.on('ambiente', () => { if (viewAtual === 'estudio') pintarAmbienteBar(); });
   S.bus.on('ideias', () => { if (viewAtual === 'trabalho') pintarIdeias(); });
     S.bus.on('relogio', () => { pintarRelogio(); });
-    S.bus.on('nivel', n => { toast('Nível ' + n + '! Novos tipos de entrega liberados.', 'ok'); pintarXP(); pintarKits(); });
+    S.bus.on('nivel', n => { toast('Experiência do estúdio: nível ' + n + '.', 'ok'); pintarXP(); pintarKits(); });
     S.bus.on('trocou', () => { S.studio.montar(); pintarTopo(); mostrar(S.state.atual() ? (viewAtual === 'vazio' ? 'estudio' : viewAtual) : 'vazio'); pintarTudo(); });
-    S.bus.on('storage-falhou', () => toast('O navegador bloqueou o salvamento. O jogo roda, mas não guarda ao fechar.', 'erro'));
+    S.bus.on('storage-falhou', () => toast('O navegador bloqueou o salvamento. A simulação roda, mas não guarda ao fechar.', 'erro'));
   }
 
   function pintarTudo() {
     pintarTopo(); pintarRelogio();
     if (!S.state.atual()) return;
-    pintarEquipe(); pintarEconomia(); pintarAmbienteBar(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
+    pintarEquipe(); pintarAmbienteBar(); pintarXP(); pintarTrabalho(); pintarArquivos(); pintarMotor(); pintarReuniao();
   }
 
   /* ---------- início ---------- */

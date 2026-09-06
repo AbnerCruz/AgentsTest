@@ -1,4 +1,23 @@
-## Correção v39 — OpenRouter + GPT-OSS
+# Estúdio — simulação de equipe com produção real
+
+## Arquitetura atual (v42)
+
+- **Cada pessoa possui uma IA própria:** uma lane independente de pensamento e produção, com memória e contexto do funcionário.
+- A configuração tem somente **IA de pensamento** e **IA de produção**. A gerente usa a mesma IA de pensamento; não existe maestro separado.
+- Uma chamada em andamento de um funcionário **não torna a IA dos demais indisponível**. Apenas um limite real do provedor pode bloquear todas as lanes.
+- Pensar e produzir são etapas distintas: o pensamento escolhe a abordagem e a produção precisa materializar um arquivo real.
+- Se a camada de pensamento falhar, a tarefa não é transformada em “estudo”: o briefing persistente ainda pode ser enviado à IA de produção.
+- Sem IA, não há produção fictícia nem logs repetitivos de “estudo”. O agente aguarda e retoma automaticamente.
+- A gerente tem sua própria cadência operacional e é responsável por fazer a roda girar; não há um agente “maestro”.
+- Ordens dadas na sala de reuniões não terminam na conversa: a gerente precisa convertê-las em tarefa e despachar um funcionário. Se a resposta estruturada falhar, a ordem original vira briefing diretamente, sem uma segunda chamada.
+- Não existe mercado, vendas, caixa, clientes ou comissão simulados. O aplicativo produz arquivos; a interação com o mundo real e a venda desses arquivos ficam com o dono.
+- Não existe nota numérica artificial de qualidade. A validação local só verifica evidências estruturais (campos essenciais, conteúdo e placeholders).
+- Há um **limite local diário de tokens**, configurável, para impedir consumo indefinido da chave.
+- Projetos e artefatos permanecem persistentes e novas versões podem partir explicitamente de artefatos anteriores.
+
+## Objetivo
+
+O Estúdio deve funcionar como uma pequena equipe autônoma: observar o projeto, pensar, decidir, executar e deixar um resultado concreto no acervo. A interface visualiza esse processo, mas não substitui a produção.
 
 - Corrigido o diagnóstico incorreto que dizia “A Groq não devolveu texto” mesmo quando o provedor ativo era o OpenRouter.
 - O GPT-OSS pode terminar uma resposta com `finish_reason=length` quando o orçamento de completion é consumido pelo raciocínio antes da resposta final. O motor agora faz **uma única recuperação automática**, reduzindo o esforço de raciocínio e aumentando o teto apenas para decisões/coordenação.
@@ -209,3 +228,12 @@ A versão estática inclui `agency.js` no Service Worker e usa o cache `estudio-
 
 ## v41 — sem qualidade artificial
 A nota numérica de qualidade foi removida do fluxo de produção, publicação e mercado. O sistema agora usa validação objetiva de entrega (completude estrutural, campos essenciais e ausência de placeholders). Receita entra somente por vendas no mercado simulado; publicar um arquivo não gera prêmio automático. O produto principal da editora é uma obra vendável completa, enquanto site, catálogo e anúncios são derivados dela.
+
+
+## v43 — princípio operacional
+
+A unidade de autonomia é o funcionário. Cada funcionário possui sua própria lane de IA e recebe duas funções: pensamento e produção. O pensamento decide; a produção executa a decisão em arquivos reais.
+
+Não existe catálogo obrigatório de produtos, roteiro de marketing, mercado simulado ou maestro. A gerente é a autoridade final e lê o conteúdo produzido antes de decidir seu destino. Funcionários podem iniciar conversas, colaborar e convocar reuniões quando uma decisão conjunta for necessária.
+
+Ao fundar uma empresa, a equipe realiza uma primeira reunião de planejamento assim que a IA estiver disponível. O resultado da reunião é convertido em trabalho persistente.
