@@ -224,7 +224,11 @@
         id: uid('f'), nome: a.nome, tipo: a.tipo, conteudo: String(a.conteudo),
         classe: meta.classe || 'esboco', kit: meta.kit || 'legado', projectId: meta.projectId || (e.projetos[0] && e.projetos[0].id),
         qualidade: meta.qualidade == null ? 50 : meta.qualidade,
-        viaIA: Boolean(meta.viaIA), versao: 1, linhagem: slug(a.nome.replace(/\.[a-z0-9]+$/i, '').replace(/-v\d+$/i, '')),
+        // A linhagem identifica O QUE é o produto, não como o arquivo foi
+        // batizado. Derivar do nome permitia que a IA escolhesse outro nome
+        // e o mesmo produto fosse publicado de novo como v1.
+        viaIA: Boolean(meta.viaIA), versao: 1,
+        linhagem: 'k:' + (meta.projectId || (e.projetos[0] && e.projetos[0].id) || '') + ':' + (meta.kit || 'legado'),
         autor: p ? p.nome : 'equipe', criadoEm: Date.now(), quando: S.fmt.dataHora(),
         taskId: meta.taskId || null, baseArquivoId: meta.baseArquivoId || null,
         briefing: String(meta.briefing || '').slice(0, 500), liberadoPublicacao: false
@@ -279,11 +283,32 @@
     if (base.classe === 'produto') return null;
 
     const projeto = e.projetos.find(x => x.id === (base.projectId || '')) || e.projetos.find(x => x.status === 'ativo') || e.projetos[0];
-    const produtosDoMesmoKit = e.arquivos.filter(a => a.classe === 'produto' && a.projectId === (projeto && projeto.id) && a.kit === base.kit)
-      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
-    const anteriores = e.arquivos.filter(a => a.classe === 'produto' && a.linhagem === base.linhagem)
-      .sort((a,b) => (b.versao || 1) - (a.versao || 1));
+    const projId = (projeto && projeto.id) || base.projectId || '';
+    const normal = x => String(x || '').replace(/\s+/g, ' ').trim();
+
+    // Identidade por projeto + kit, com o projeto resolvido dos dois lados.
+    // Comparar projectId cru deixava passar arquivos sem projeto definido.
+    const doMesmoKit = a => a.classe === 'produto' && a.kit === base.kit &&
+      ((a.projectId || '') === projId || !a.projectId);
+    const produtosDoMesmoKit = e.arquivos.filter(doMesmoKit)
+      .sort((a, b) => (b.versao || 1) - (a.versao || 1));
+    // A linhagem antiga vinha do nome do arquivo; para acervos gravados antes
+    // desta correção, o kit continua sendo a identidade confiável.
+    const anteriores = produtosDoMesmoKit.slice();
     const ultima = anteriores[0] || null;
+
+    // Rede de segurança final: nenhum conteúdo já publicado neste projeto
+    // volta a ser publicado, com qualquer nome, kit ou linhagem.
+    const alvoNormal = normal(base.conteudo);
+    const clone = e.arquivos.find(a => a.classe === 'produto' &&
+      ((a.projectId || '') === projId || !a.projectId) && normal(a.conteudo) === alvoNormal);
+    if (clone) {
+      S.state.registrar(`Release bloqueado para ${base.nome}: conteúdo idêntico a ${clone.nome}, já publicado.`, 'alerta');
+      base.avaliado = true;
+      base.liberadoPublicacao = false;
+      S.state.gravar();
+      return null;
+    }
 
     // Identidade de produto é projeto + kit, não o nome do arquivo. Isso evita
     // que uma IA mude "index.html" para outro nome e consiga republicar
@@ -309,7 +334,6 @@
         S.state.registrar(`Release bloqueado para ${base.nome}: não é uma evolução explícita de ${ultima.nome}.`, 'alerta');
         return null;
       }
-      const normal = x => String(x || '').replace(/\s+/g, ' ').trim();
       if (normal(base.conteudo) === normal(ultima.conteudo)) {
         S.state.registrar(`Release bloqueado para ${base.nome}: conteúdo idêntico à versão publicada.`, 'alerta');
         return null;
@@ -323,6 +347,7 @@
       id: uid('p'), classe: 'produto', versao,
       nome: raiz + '-v' + versao + ext,
       publicadoPor: quem || 'equipe', motivo: motivo || '', quando: S.fmt.dataHora(), publicadoEm: Date.now(),
+      projectId: projId, linhagem: 'k:' + projId + ':' + (base.kit || 'legado'),
       liberadoPublicacao: true
     });
     e.arquivos.unshift(produto);
@@ -622,7 +647,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
     if (!r) { cand.avaliado = false; S.state.gravar(); return; }
     cand.avaliado = true;
     const tarefaOrigem = cand.taskId ? e.tarefas.find(t => t.id === cand.taskId) : null;
-    const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.projectId === cand.projectId && a.kit === cand.kit);
+    const produtoExistente = e.arquivos.find(a => a.classe === 'produto' && a.kit === cand.kit &&
+      ((a.projectId || '') === (cand.projectId || '') || !a.projectId));
     const evolucaoValida = !produtoExistente || (tarefaOrigem && tarefaOrigem.baseArquivoId === produtoExistente.id);
     if (r.campos.publicar === true && cand.qualidade >= 82 && evolucaoValida) {
       cand.liberadoPublicacao = true;
@@ -635,7 +661,8 @@ CORRECAO: <o que falta, até 14 palavras, ou vazio>`,
       e.decisoes.unshift({ t: Date.now(), tipo: 'segurou', quem: g.nome, texto: `${cand.nome}: ${correcao}` });
       if (correcao) {
         const ultima = e.arquivos
-          .filter(a => a.classe === 'produto' && a.linhagem === cand.linhagem)
+          .filter(a => a.classe === 'produto' && a.kit === cand.kit &&
+            ((a.projectId || '') === (cand.projectId || '') || !a.projectId))
           .sort((a,b) => (b.versao || 1) - (a.versao || 1))[0] || null;
         novaTarefa({
           titulo: `Corrigir ${cand.nome}: ${correcao}`,

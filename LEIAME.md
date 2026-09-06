@@ -97,3 +97,23 @@ A versão atual mantém uma sala persistente para conversa direta com a equipe. 
 Quando a Groq devolve 429, o Estúdio lê o tempo de reabertura no cabeçalho da própria resposta e espera exatamente esse tempo, em vez de chutar um intervalo fixo. O ciclo retoma sozinho assim que a janela abre, sem nenhuma ação sua.
 
 O painel Motor mostra o custo estimado do dia (calculado sobre os tokens que a Groq contabilizou) e, quando a cota gratuita barra a equipe, o aviso sobre o tier Developer.
+
+
+## Correção de republicação (v30)
+
+A identidade de um produto passou a ser **projeto + kit**, não o nome do arquivo. Antes, a `linhagem` era derivada do nome: bastava a IA batizar a entrega de outro jeito para o Estúdio achar que era um produto inédito e publicar como v1 de novo, indefinidamente.
+
+Três barreiras agora, em ordem:
+
+1. Conteúdo idêntico a qualquer produto já publicado no projeto é bloqueado, com qualquer nome ou kit.
+2. Um kit que já tem versão publicada exige que o candidato aponte explicitamente para ela (`baseArquivoId`).
+3. Uma nova versão precisa ter conteúdo diferente da anterior.
+
+Acervos gravados antes desta versão continuam funcionando: como a linhagem antiga era pouco confiável, o kit passou a ser a chave usada também para os arquivos já existentes.
+
+## Ajustes de layout no celular
+
+- O painel de diagnóstico de erro deixou de cobrir a barra inferior: agora é um cartão flutuante acima da navegação, com botão de fechar e altura limitada.
+- Campos de formulário usam 16px em telas pequenas, evitando o zoom automático do navegador ao focar.
+- Rótulos longos em `select` ganharam reticência; estatísticas, chamadas e nomes de arquivo quebram linha em vez de estourar o painel.
+- Botões de ação empilham em duas colunas quando não cabem lado a lado.

@@ -507,3 +507,28 @@ select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='ht
 .idea-item { border-left: 3px solid var(--accent, #E4703E); }
 .idea-item .panel-foot { margin: 6px 0; }
 .member-personality{display:block;color:var(--ink-3);font-size:11px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+
+
+/* ─────────── correções de layout no celular ───────────
+   Rótulos longos em select cortavam sem reticência, valores longos
+   estouravam a linha do painel e o teclado do iOS dava zoom em campos
+   com fonte menor que 16px. */
+select{text-overflow:ellipsis;}
+input[type=text],input[type=password],select,textarea{max-width:100%;}
+
+@media (max-width:899px){
+  input[type=text],input[type=password],select,textarea{font-size:16px;}
+  .row-actions{display:flex;flex-wrap:wrap;gap:8px;}
+  .row-actions .btn{flex:1 1 auto;min-width:44%;justify-content:center;}
+  .hint,.panel-foot,.sub{overflow-wrap:anywhere;}
+}
+
+/* Uma estatística com rótulo comprido deve quebrar em duas linhas em vez
+   de empurrar o número para fora do painel. */
+.stats .stat{gap:10px;align-items:baseline;}
+.stats .stat span{min-width:0;overflow-wrap:anywhere;}
+.stats .stat b{white-space:nowrap;flex-shrink:0;}
+
+.call-head,.call-meta{min-width:0;overflow-wrap:anywhere;}
+.panel{overflow-wrap:break-word;}
+.file-info b,.item-body b{overflow-wrap:anywhere;}

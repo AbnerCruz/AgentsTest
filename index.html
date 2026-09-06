@@ -15,9 +15,14 @@
   function mostra(txt){
     var d=document.getElementById('erroFatal');
     if(!d){ d=document.createElement('pre'); d.id='erroFatal';
-      d.style.cssText='position:fixed;left:0;right:0;bottom:0;z-index:9999;margin:0;padding:12px;max-height:45vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;border-top:2px solid #E4703E';
+      d.style.cssText='position:fixed;left:8px;right:8px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:9999;margin:0;padding:34px 12px 12px;max-height:32vh;overflow:auto;background:#2A1210;color:#FFC9BC;font:12px/1.45 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;border:1px solid #E4703E;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,.5)';
+      var x=document.createElement('button');
+      x.textContent='fechar';
+      x.style.cssText='position:absolute;top:6px;right:8px;background:#E4703E;color:#1A0B08;border:0;border-radius:99px;padding:4px 12px;font:600 11px/1 system-ui;cursor:pointer';
+      x.onclick=function(){d.remove();};
+      d.appendChild(x);
       (document.body||document.documentElement).appendChild(d); }
-    d.textContent += txt + '\n';
+    d.insertBefore(document.createTextNode(txt + '\n'), d.firstChild);
   }
   window.addEventListener('error', function(e){
     if (e.target && e.target.tagName === 'SCRIPT') mostra('Não carregou o arquivo: ' + (e.target.src||'?'));
@@ -204,8 +209,8 @@
         <div class="field">
           <label for="provedorSel">Provedor</label>
           <select id="provedorSel">
-            <option value="groq">Groq — rápida, com teto diário no plano gratuito</option>
-            <option value="openrouter">OpenRouter — sem teto, crédito pré-pago</option>
+            <option value="groq">Groq — teto diário no gratuito</option>
+            <option value="openrouter">OpenRouter — sem teto</option>
           </select>
           <p class="hint" id="provedorHint"></p>
         </div>
@@ -217,8 +222,8 @@
         <div class="field" id="tierField">
           <label for="tierSel">Plano da sua conta Groq</label>
           <select id="tierSel">
-            <option value="free">Gratuito — tem teto diário de requisições</option>
-            <option value="dev">Developer — sem teto diário, 25% mais barato</option>
+            <option value="free">Gratuito — com teto diário</option>
+            <option value="dev">Developer — sem teto diário</option>
           </select>
           <p class="hint">O Developer é liberado só cadastrando um cartão em console.groq.com, sem mínimo de gasto: você paga apenas os tokens que usar. Esta escolha ajusta a estimativa de custo abaixo.</p>
         </div>
