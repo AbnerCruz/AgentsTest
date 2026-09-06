@@ -149,7 +149,7 @@
   function pintarXP() {
     const e = S.state.atual(); if (!e) return;
     const pr = S.state.progressoNivel(e.xp);
-    const kits = S.factory.KITS;
+    const kits = (S.factory && Array.isArray(S.factory.KITS)) ? S.factory.KITS : [];
     const liberados = kits.filter(k => k.nivel <= pr.nivel).length;
     const proximo = kits.filter(k => k.nivel === pr.nivel + 1);
     $('#xpPanel').innerHTML = `

@@ -576,7 +576,8 @@ input[type=text],input[type=password],select,textarea{max-width:100%;}
 @media(max-width:600px){.economy-grid{grid-template-columns:repeat(2,1fr)}}
 
 </style>
-<script>/* ============================================================
+<script>
+/* ============================================================
    CORE — utilidades, estado e persistência.
    Carregado primeiro; todos os módulos penduram-se em window.S.
    ============================================================ */
@@ -1207,7 +1208,8 @@ window.S = window.S || {};
 </div>
 <div id="toasts" class="toasts" aria-live="polite"></div>
 
-<script>/* ============================================================
+<script>
+/* ============================================================
    IA — porta única para o provedor configurado.
    Princípio do projeto: economia de tokens. Toda chamada tem teto,
    contexto enxuto e formato de resposta fixo em linhas CHAVE: valor,
@@ -1747,7 +1749,8 @@ window.S = window.S || {};
 })(window.S);
 
 </script>
-<script>/* ============================================================
+<script>
+/* ============================================================
    MERCADO — economia causal.
    Nenhuma venda, visita ou seguidor é sorteado nem inventado pela IA.
    Tudo sai de causas verificáveis: tempo de operação, composição real
@@ -1998,7 +2001,8 @@ window.S = window.S || {};
 })(window.S);
 
 </script>
-<script>/* ============================================================
+<script>
+/* ============================================================
    FÁBRICA — onde nasce o produto de verdade.
 
    Decisão central do projeto: o modelo NÃO escreve o arquivo inteiro.
@@ -2687,6 +2691,10 @@ Sem numeração, sem markdown.`;
     return { pronto, faltantes, placeholders, palavras, problemas };
   }
 
+  // Compatibilidade interna: versões anteriores expunham `aferir`.
+  // Não é uma nota de qualidade; devolve apenas evidências objetivas.
+  const aferir = validar;
+
   /* ============================================================
      Produção — uma chamada de IA por entrega. Sem IA não há produção.
      ============================================================ */
@@ -2817,7 +2825,8 @@ Sem numeração, sem markdown.`;
 })(window.S);
 
 </script>
-<script>/* ============================================================
+<script>
+/* ============================================================
    AGENCY — camada de autonomia organizacional.
    O funcionário não recebe uma sequência de produção. Ele observa o estado
    da empresa, delibera sobre o que seria útil agora e escolhe uma ação.
@@ -3028,7 +3037,8 @@ Faça uma revisão curta do sistema. Não dê uma lista de ordens artificiais. I
 })(window.S);
 
 </script>
-<script>/* ============================================================
+<script>
+/* ============================================================
    ESTÚDIO — o simulador propriamente dito.
    Um único motor assíncrono decide, no máximo, UMA ação de IA por
    ciclo. Isso mantém o consumo previsível e evita várias pessoas
@@ -4841,7 +4851,8 @@ BRIEF: <entrega concreta em até 45 palavras>`,
 })(window.S);
 
 </script>
-<script>/* ============================================================
+<script>
+/* ============================================================
    UI — desenho dos painéis e ligações de evento.
    Cada painel se redesenha sozinho quando o escopo dele muda.
    ============================================================ */
@@ -4992,7 +5003,7 @@ BRIEF: <entrega concreta em até 45 palavras>`,
   function pintarXP() {
     const e = S.state.atual(); if (!e) return;
     const pr = S.state.progressoNivel(e.xp);
-    const kits = S.factory.KITS;
+    const kits = (S.factory && Array.isArray(S.factory.KITS)) ? S.factory.KITS : [];
     const liberados = kits.filter(k => k.nivel <= pr.nivel).length;
     const proximo = kits.filter(k => k.nivel === pr.nivel + 1);
     $('#xpPanel').innerHTML = `

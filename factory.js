@@ -687,6 +687,10 @@ Sem numeração, sem markdown.`;
     return { pronto, faltantes, placeholders, palavras, problemas };
   }
 
+  // Compatibilidade interna: versões anteriores expunham `aferir`.
+  // Não é uma nota de qualidade; devolve apenas evidências objetivas.
+  const aferir = validar;
+
   /* ============================================================
      Produção — uma chamada de IA por entrega. Sem IA não há produção.
      ============================================================ */
