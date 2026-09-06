@@ -101,12 +101,13 @@
      configuração precisam existir antes de qualquer chamada a
      migrarModelo — daí a ordem: MODELOS_DE, cfg, migração. */
   const cfg = Object.assign(
-    { provedor: 'openrouter', tier: 'free', providerSelecionadoEm: 0,
+    { provedor: 'groq', roteamento: 'automatico', tier: 'free', providerSelecionadoEm: 0,
       pensamento: 'openai/gpt-oss-20b', producao: 'openai/gpt-oss-120b', limiteTokensDia: 120000,
-      orcamentoUSD: 3, periodoDias: 30, margemSegurancaUSD: 0.10 },
+      orcamentoUSD: 3, periodoDias: 30, limiteDiarioUSD: 0.10, diarioAutomatico: true, modoOrcamento: 'normal', margemSegurancaUSD: 0 },
     S.local.json(K_CFG, {})
   );
-  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'openrouter';
+  if (!PROVEDORES[cfg.provedor]) cfg.provedor = 'groq';
+  cfg.roteamento = cfg.roteamento === 'manual' ? 'manual' : 'automatico';
 
   function migrarModelo(id) {
     const lista = MODELOS_DE(cfg.provedor);
@@ -116,7 +117,12 @@
   cfg.pensamento = migrarModelo(cfg.pensamento || cfg.decisao || cfg.revisao);
   cfg.producao = migrarModelo(cfg.producao);
   cfg.limiteTokensDia = Math.max(30000, Math.min(500000, Number(cfg.limiteTokensDia) || 120000));
-  cfg.orcamentoUSD = 3; cfg.periodoDias = 30; cfg.margemSegurancaUSD = 0.10;
+  cfg.orcamentoUSD = Math.max(0.10, Math.min(1000, Number(cfg.orcamentoUSD) || 3));
+  cfg.periodoDias = 30;
+  cfg.limiteDiarioUSD = Math.max(0.01, Math.min(100, Number(cfg.limiteDiarioUSD) || cfg.orcamentoUSD / 30));
+  cfg.diarioAutomatico = cfg.diarioAutomatico !== false;
+  cfg.modoOrcamento = cfg.modoOrcamento === 'intensivo' ? 'intensivo' : 'normal';
+  cfg.margemSegurancaUSD = 0;
   delete cfg.decisao; delete cfg.revisao; delete cfg.maestro;
   S.local.setJson(K_CFG, cfg);
 
@@ -126,21 +132,15 @@
     groq: S.local.get(K_CHAVE, '') || '',
     openrouter: S.local.get(K_CHAVE_OR, '') || ''
   };
-  if (chaves.openrouter && cfg.provedor === 'groq' && !cfg.providerSelecionadoEm) {
-    cfg.provedor = 'openrouter';
-    cfg.pensamento = 'openai/gpt-oss-20b';
-    cfg.producao = 'openai/gpt-oss-120b';
-    S.local.setJson(K_CFG, cfg);
-  }
   const prov = () => PROVEDORES[cfg.provedor];
 
 
   let uso = Object.assign(
-    { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} },
+    { dia: '', requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {}, limiteUSD: 0 },
     S.local.json(K_USO, {})
   );
   let periodo = Object.assign(
-    { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} },
+    { inicio: Date.now(), dias: 30, limiteUSD: cfg.orcamentoUSD, margemUSD: 0, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} },
     S.local.json(K_ORCAMENTO, {})
   );
   function salvarPeriodo(){ S.local.setJson(K_ORCAMENTO, periodo); }
@@ -148,8 +148,14 @@
     const inicio = Number(periodo.inicio) || 0;
     const dias = Number(periodo.dias) || 30;
     if (!inicio || Date.now() - inicio >= dias * 86400000) {
-      periodo = { inicio: Date.now(), dias: 30, limiteUSD: 3, margemUSD: 0.10, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} };
+      periodo = { inicio: Date.now(), dias: 30, limiteUSD: cfg.orcamentoUSD, margemUSD: 0, gastoUSD: 0, requisicoes: 0, tokens: 0, porModelo: {} };
       salvarPeriodo();
+      uso.dia = '';
+    } else {
+      const novoLimite = Math.max(0.10, Number(cfg.orcamentoUSD) || Number(periodo.limiteUSD) || 3);
+      if (periodo.dias !== 30 || periodo.limiteUSD !== novoLimite || Number(periodo.margemUSD||0) !== 0) {
+        periodo.dias = 30; periodo.limiteUSD = novoLimite; periodo.margemUSD = 0; salvarPeriodo();
+      }
     }
     return periodo;
   }
@@ -158,21 +164,39 @@
     return ((PRECOS_POR_PROVEDOR[provedor || cfg.provedor] || {})[modelo]) || null;
   }
   function estimarCusto(provedor, modelo, promptTokens, completionTokens){
+    if (provedor==='groq' && cfg.tier==='free') return 0;
     const p=preco(modelo, provedor); if(!p) return 0;
     const base=(Number(promptTokens)||0)/1e6*p.entrada + (Number(completionTokens)||0)/1e6*p.saida;
     return (provedor==='groq' && cfg.tier==='dev') ? base*DESCONTO_DEV : base;
   }
   function custoPeriodo(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD)||0; }
-  function restanteUSD(){ renovarPeriodoSeNecessario(); return Math.max(0, Number(periodo.limiteUSD)-Number(periodo.margemUSD||0)-Number(periodo.gastoUSD||0)); }
-  function orcamentoEsgotado(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD||0) >= Number(periodo.limiteUSD||3)-Number(periodo.margemUSD||0); }
-  function orcamentoIndisponivel(){ return orcamentoEsgotado() || estado.orcamentoPreventivo; }
+  function restanteUSD(){ renovarPeriodoSeNecessario(); return Math.max(0, Number(periodo.limiteUSD)-Number(periodo.gastoUSD||0)); }
+  function diasRestantesPeriodo(){ renovarPeriodoSeNecessario(); return Math.max(1, Math.ceil((periodo.inicio + periodo.dias*86400000 - Date.now()) / 86400000)); }
+  function limiteDiarioCalculado(){
+    const manual=Math.max(0.01, Math.min(100, Number(cfg.limiteDiarioUSD)||0.01));
+    if(!cfg.diarioAutomatico) return manual;
+    return Math.max(0, restanteUSD()/diasRestantesPeriodo());
+  }
   function usoHoje() {
+    renovarPeriodoSeNecessario();
     const d = new Date().toISOString().slice(0, 10);
     if (uso.dia !== d) {
-      uso = { dia: d, requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {} };
+      uso = { dia: d, requisicoes: 0, entrada: 0, saida: 0, tokens: 0, headers: null, porModelo: {}, limiteUSD: limiteDiarioCalculado() };
       salvarUso();
+    } else if (!Number.isFinite(Number(uso.limiteUSD)) || Number(uso.limiteUSD) <= 0) {
+      uso.limiteUSD = limiteDiarioCalculado(); salvarUso();
     }
     return uso;
+  }
+  function custoDoDia(){ const q=usoHoje(); return Object.values(q.porModelo||{}).reduce((n,m)=>n+Number(m.custo||0),0) || 0; }
+  function restanteDiaUSD(){ return Math.max(0, Number(usoHoje().limiteUSD||0) - custoDoDia()); }
+  function orcamentoDiarioEsgotado(){ return custoDoDia() >= Number(usoHoje().limiteUSD||0); }
+  function orcamentoEsgotado(){ renovarPeriodoSeNecessario(); return Number(periodo.gastoUSD||0) >= Number(periodo.limiteUSD||3); }
+  function orcamentoIndisponivel(){
+    const rota=provedorAtualDeRota();
+    const gratuito=(rota==='groq' && cfg.tier==='free');
+    if(gratuito) return false;
+    return orcamentoEsgotado() || (cfg.modoOrcamento !== 'intensivo' && (orcamentoDiarioEsgotado() || estado.orcamentoPreventivo));
   }
   function salvarUso() { S.local.setJson(K_USO, uso); }
 
@@ -190,7 +214,8 @@
     esperaAtual: 0,
     ultimaAutonoma: 0,
     chamadas: [],
-    agentes: Object.create(null)
+    agentes: Object.create(null),
+    provedores: { groq: { bloqueadaAte: 0, ultimo429: 0, headers: null, status: 'aguardando' }, openrouter: { bloqueadaAte: 0, ultimoSync: 0, status: 'aguardando', limiteRestante: null, uso: null, usoDiario: null, usoMensal: null } }
   };
   function lane(id) {
     const k = String(id || 'estudio');
@@ -205,10 +230,11 @@
   }
 
   const chave = () => chaves[cfg.provedor];
-  function pronta() { return Boolean(chave()) && !estado.pausado; }
+  function pronta() { return Boolean(cfg.roteamento === 'automatico' ? (chaves.groq || chaves.openrouter) : chaves[cfg.provedor]) && !estado.pausado; }
   function disponivel(agenteId) {
     const l = lane(agenteId);
-    return pronta() && Date.now() >= estado.bloqueadaAte && Date.now() >= l.bloqueadaAte && l.emVoo === 0 && !atingiuLimite();
+    const p = provedorAtualDeRota(); const sp = stateProvedor(p);
+    return pronta() && Date.now() >= Number(sp.bloqueadaAte||0) && Date.now() >= l.bloqueadaAte && l.emVoo === 0 && !atingiuLimite() && !orcamentoIndisponivel();
   }
   function reservarAutonomia(agenteId) {
     return disponivel(agenteId);
@@ -229,7 +255,7 @@
     const n = Number(s.replace(',', '.'));
     return Number.isFinite(n) ? n * 1000 : null;
   }
-  function lerHeaders(resp) {
+  function lerHeaders(resp, provedorUsado) {
     const h = n => resp.headers.get(n);
     const q = usoHoje();
     q.headers = {
@@ -246,19 +272,52 @@
     if (!Number.isFinite(q.headers.restaTok)) q.headers.restaTok = null;
     salvarUso();
   }
-  function contabilizar(modelo, dados, ms) {
+  function provedorAtualDeRota() {
+    if (cfg.roteamento !== 'automatico') return cfg.provedor;
+    const g = stateProvedor('groq');
+    if (chaves.groq && Date.now() >= Number(g.bloqueadaAte || 0)) return 'groq';
+    if (chaves.openrouter) return 'openrouter';
+    return 'groq';
+  }
+  function stateProvedor(p) { return estado.provedores[p] || (estado.provedores[p] = { bloqueadaAte:0, ultimo429:0, headers:null, status:'aguardando' }); }
+  function sincronizarGroqHeaders(resp) {
+    const g=stateProvedor('groq');
+    const h=n=>resp.headers.get(n);
+    g.headers={ limiteReq:Number(h('x-ratelimit-limit-requests'))||null, restaReq:Number(h('x-ratelimit-remaining-requests')), resetReq:msDeHeader(h('x-ratelimit-reset-requests')), limiteTok:Number(h('x-ratelimit-limit-tokens'))||null, restaTok:Number(h('x-ratelimit-remaining-tokens')), resetTok:msDeHeader(h('x-ratelimit-reset-tokens')), retryAfter:h('retry-after')||null, em:Date.now() };
+    if(!Number.isFinite(g.headers.restaReq)) g.headers.restaReq=null; if(!Number.isFinite(g.headers.restaTok)) g.headers.restaTok=null;
+    g.status=(g.headers.restaReq===0 || g.headers.restaTok===0)?'esgotado':'disponivel';
+    return g.headers;
+  }
+  async function sincronizarOpenRouter() {
+    if(!chaves.openrouter) return null;
+    const o=stateProvedor('openrouter');
+    try {
+      const r=await fetch('https://openrouter.ai/api/v1/key',{headers:{Authorization:'Bearer '+chaves.openrouter}});
+      const d=await r.json().catch(()=>null);
+      if(!r.ok) throw new Error((d&&d.error&&d.error.message)||('HTTP '+r.status));
+      const x=d&&d.data||d||{};
+      o.ultimoSync=Date.now(); o.status='disponivel'; o.limiteRestante=Number.isFinite(Number(x.limit_remaining))?Number(x.limit_remaining):null;
+      o.uso=Number.isFinite(Number(x.usage))?Number(x.usage):null; o.usoDiario=Number.isFinite(Number(x.usage_daily))?Number(x.usage_daily):null; o.usoMensal=Number.isFinite(Number(x.usage_monthly))?Number(x.usage_monthly):null;
+      if(x.limit===null || x.limit===undefined) o.limite= null; else o.limite=Number(x.limit);
+      if(o.limiteRestante !== null && o.limiteRestante <= 0) o.status='esgotado';
+      return x;
+    } catch(e) { o.status='indisponivel'; o.erro=String(e.message||e); return null; }
+  }
+
+  function contabilizar(modelo, dados, ms, provedorUsado) {
     const q = usoHoje();
     const u = (dados && dados.usage) || {};
     const pin=Number(u.prompt_tokens || 0), pout=Number(u.completion_tokens || 0), total=Number(u.total_tokens || pin+pout);
-    const custo=estimarCusto(cfg.provedor,modelo,pin,pout);
+    const pvr=provedorUsado || cfg.provedor;
+    const custo=estimarCusto(pvr,modelo,pin,pout);
     q.requisicoes += 1; q.entrada += pin; q.saida += pout; q.tokens += total;
     const m = q.porModelo[modelo] = q.porModelo[modelo] || { requisicoes: 0, tokens: 0, entrada:0, saida:0, custo:0 };
     m.requisicoes += 1; m.tokens += total; m.entrada += pin; m.saida += pout; m.custo += custo;
     q.ultimoModelo = modelo; salvarUso();
     renovarPeriodoSeNecessario();
     periodo.requisicoes += 1; periodo.tokens += total; periodo.gastoUSD += custo;
-    const pmKey=cfg.provedor+':'+modelo;
-    const pm=periodo.porModelo[pmKey]=periodo.porModelo[pmKey]||{provedor:cfg.provedor,modelo,requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
+    const pmKey=pvr+':'+modelo;
+    const pm=periodo.porModelo[pmKey]=periodo.porModelo[pmKey]||{provedor:pvr,modelo,requisicoes:0,tokens:0,entrada:0,saida:0,custo:0};
     pm.requisicoes += 1; pm.tokens += total; pm.entrada += pin; pm.saida += pout; pm.custo += custo;
     salvarPeriodo();
 
@@ -329,11 +388,26 @@
     const tipo = op.tipo === 'conteudo' ? 'conteudo' : 'pensamento';
     const modelo = tipo === 'conteudo' ? cfg.producao : cfg.pensamento;
     const teto = clamp(op.tokens || (tipo === 'conteudo' ? 1700 : 420), 120, tipo === 'conteudo' ? 3600 : 900);
+    const provedorUsado = op._provedor || provedorAtualDeRota();
+    const provInfo = PROVEDORES[provedorUsado];
+    const chaveUsada = chaves[provedorUsado];
+    const sp = stateProvedor(provedorUsado);
 
-    if (!chave()) throw new Error(`Nenhuma chave ${prov().rotulo} configurada.`);
+    if (!chaveUsada) {
+      const alt = cfg.roteamento === 'automatico' && permitirFailover ? (provedorUsado === 'groq' ? 'openrouter' : 'groq') : null;
+      if (alt && chaves[alt]) return chamar(Object.assign({},op,{_failover:false,_provedor:alt,forcar:false}));
+      throw new Error(`Nenhuma chave ${provInfo.rotulo} configurada.`);
+    }
     if (estado.pausado && !op.forcar) throw new Error('A equipe está pausada.');
-    if (Date.now() < estado.bloqueadaAte && !op.forcar) {
-      throw new Error(`Provedor em espera por ${Math.ceil((estado.bloqueadaAte-Date.now())/1000)}s após um limite.`);
+    if (Date.now() < Number(sp.bloqueadaAte||0) && !op.forcar) {
+      const alt = cfg.roteamento === 'automatico' && permitirFailover ? (provedorUsado === 'groq' ? 'openrouter' : 'groq') : null;
+      if (alt && chaves[alt] && Date.now() >= Number(stateProvedor(alt).bloqueadaAte||0)) return chamar(Object.assign({},op,{_failover:false,_provedor:alt,forcar:false}));
+      throw new Error(`Provedor em espera por ${Math.ceil((sp.bloqueadaAte-Date.now())/1000)}s após um limite.`);
+    }
+    if (provedorUsado === 'openrouter' && !op._failover) await sincronizarOpenRouter();
+    const orStatus = stateProvedor('openrouter');
+    if (provedorUsado === 'openrouter' && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) <= 0) {
+      const er=new Error('Limite real da chave OpenRouter esgotado. A equipe não fará novas chamadas pagas até a renovação ou aumento do limite.'); er.cota=true; throw er;
     }
     if (Date.now() < l.bloqueadaAte && !op.forcar) {
       throw new Error(`IA de ${agente || agenteId} em recuperação após uma falha temporária.`);
@@ -344,52 +418,57 @@
 
     const q = usoHoje();
     renovarPeriodoSeNecessario();
-    if (orcamentoEsgotado() || estado.orcamentoPreventivo) {
-      const er = new Error('Orçamento de IA do período de 30 dias esgotado. A equipe entra em rotina de descanso até a renovação.');
-      er.orcamento = true; throw er;
-    }
     const mensagens = [{ role:'user', content:String(sistema||'').slice(0,4500)+'\n\n'+String(pedido||'').slice(0,4500) }];
     const estimativa = Math.min(10000, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4) + teto);
-    const custoEstimado = estimarCusto(cfg.provedor, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
-    if ((custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
+    const custoEstimado = estimarCusto(provedorUsado, modelo, Math.ceil((String(sistema||'').length + String(pedido||'').length)/4), teto);
+    if (provedorUsado === 'openrouter' && Number.isFinite(Number(orStatus.limiteRestante)) && Number(orStatus.limiteRestante) < custoEstimado) {
+      const er=new Error(`Saldo/limite real do OpenRouter insuficiente para esta chamada (restante ~US$ ${Number(orStatus.limiteRestante).toFixed(4)}).`); er.cota=true; throw er;
+    }
+    if (custoEstimado > 0 && (custoPeriodo() + custoEstimado) > (Number(periodo.limiteUSD)-Number(periodo.margemUSD||0))) {
       estado.orcamentoPreventivo=true;
       const er = new Error(`Orçamento de IA do período de 30 dias quase esgotado; chamada não iniciada para preservar o limite.`);
       er.limiteLocal = true; throw er;
+    }
+    if (custoEstimado > 0 && cfg.modoOrcamento !== 'intensivo' && (custoDoDia() + custoEstimado) > Number(usoHoje().limiteUSD||0)) {
+      estado.orcamentoPreventivo=true;
+      const er = new Error(`Limite diário de IA atingido (US$ ${Number(usoHoje().limiteUSD||0).toFixed(4)}). A equipe entra em rotina Sims-like até o próximo dia. Ative Trabalho intensivo para usar o saldo mensal sem o teto diário.`);
+      er.limiteLocal = true; er.diario = true; throw er;
     }
 
     estado.emVoo++; l.emVoo++;
     situar('ocupada','IA trabalhando',`${agente || agenteId} · ${modelo} · ${motivo || 'chamada'}`);
     const inicio=Date.now();
     try {
-      const resp=await fetch(prov().url,{
+      const resp=await fetch(provInfo.url,{
         method:'POST',
-        headers:{'Content-Type':'application/json',Authorization:'Bearer '+chave()},
+        headers:{'Content-Type':'application/json',Authorization:'Bearer '+chaveUsada},
         body:JSON.stringify({
           model:modelo,messages:mensagens,max_completion_tokens:teto,
           temperature:tipo==='conteudo'?0.55:0.2,stream:false,
-          ...(cfg.provedor==='openrouter'
+          ...(provedorUsado==='openrouter'
             ? {reasoning:{effort:op.reasoning_effort || (tipo==='conteudo'?'medium':'low'),exclude:true}}
             : {reasoning_effort:op.reasoning_effort || (tipo==='conteudo'?'medium':'low')})
         })
       });
       let dados=null; try{dados=await resp.json();}catch(_){}
-      lerHeaders(resp);
+      lerHeaders(resp, provedorUsado);
       const ms=Date.now()-inicio;
-      if(resp.ok && dados && dados.usage) contabilizar(modelo,dados,ms);
+      if(resp.ok && dados && dados.usage) contabilizar(modelo,dados,ms,provedorUsado);
 
       if(!resp.ok){
-        const msg=(dados&&dados.error&&dados.error.message)||`${prov().nome} respondeu HTTP ${resp.status}.`;
-        if(resp.status===401) throw new Error(`Chave ${prov().rotulo} inválida ou expirada.`);
+        const msg=(dados&&dados.error&&dados.error.message)||`${provInfo.nome} respondeu HTTP ${resp.status}.`;
+        if(resp.status===401) throw new Error(`Chave ${provInfo.rotulo} inválida ou expirada.`);
         if(resp.status===429){
           const espera=esperaDoProvedor(resp,dados);
-          estado.bloqueadaAte=Date.now()+espera;
-          estado.ultimo429=Date.now(); estado.esperaAtual=espera;
-          const outro=permitirFailover?provedorAlternativo():null;
-          if(outro && ativarProvedor(outro)){
-            S.state && S.state.registrar && S.state.registrar(`Limite do provedor anterior atingido. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`,'alerta');
-            return chamar(Object.assign({},op,{_failover:false,forcar:false}));
+          sp.bloqueadaAte=Date.now()+espera;
+          sp.ultimo429=Date.now(); sp.status='esgotado';
+          if(provedorUsado==='groq') { estado.bloqueadaAte=sp.bloqueadaAte; estado.ultimo429=Date.now(); estado.esperaAtual=espera; }
+          const outro=(cfg.roteamento==='automatico' && permitirFailover) ? (provedorUsado==='groq'?'openrouter':'groq') : (permitirFailover?provedorAlternativo():null);
+          if(outro && chaves[outro] && Date.now() >= Number(stateProvedor(outro).bloqueadaAte||0)){
+            S.state && S.state.registrar && S.state.registrar(`Cota de ${PROVEDORES[provedorUsado].nome} atingida. Motor mudou automaticamente para ${PROVEDORES[outro].nome}.`,'alerta');
+            return chamar(Object.assign({},op,{_failover:false,_provedor:outro,forcar:false}));
           }
-          const er=new Error(`Limite ${prov().rotulo} atingido. A equipe aguarda a janela do provedor.`);
+          const er=new Error(`Limite ${provInfo.rotulo} atingido. A equipe aguarda a janela do provedor.`);
           er.cota=true; throw er;
         }
         throw new Error(msg);
@@ -404,11 +483,11 @@
       }
       if(!texto){
         const motivoVazio=escolha.finish_reason?`finish_reason=${escolha.finish_reason}`:'resposta vazia';
-        throw new Error(`${prov().nome} não devolveu texto utilizável (${motivoVazio}).`);
+        throw new Error(`${provInfo.nome} não devolveu texto utilizável (${motivoVazio}).`);
       }
 
-      estado.falhas=0; estado.orcamentoPreventivo=false; l.falhas=0; l.bloqueadaAte=0;
-      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms,ok:true,tokens:(dados.usage||{}).total_tokens||0,em:Date.now()});
+      estado.falhas=0; estado.orcamentoPreventivo=false; l.falhas=0; l.bloqueadaAte=0; sp.status='disponivel';
+      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,provedor:provedorUsado,ms,ok:true,tokens:(dados.usage||{}).total_tokens||0,em:Date.now()});
       situar('pronta','IA pronta',`última resposta em ${(ms/1000).toFixed(1)}s`);
       return {texto,usage:dados.usage||{},ms,modelo};
     }catch(err){
@@ -421,8 +500,8 @@
       }else if(!err.limiteLocal){
         l.bloqueadaAte=Date.now() + (/401|inválida/i.test(msg)?90000:Math.min(30000,5000*l.falhas));
       }
-      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,ms:Date.now()-inicio,ok:false,erro:msg,em:Date.now()});
-      situar((err.limiteLocal||err.orcamento)?'pronta':'erro',(err.orcamento?'Orçamento do período atingido':err.limiteLocal?'Limite local atingido':'Falha na IA'),msg);
+      registrarChamada({quem:agente||agenteId,motivo:motivo||tipo,modelo,provedor:provedorUsado,ms:Date.now()-inicio,ok:false,erro:msg,em:Date.now()});
+      situar((err.limiteLocal||err.orcamento)?'pronta':'erro',(err.orcamento?'Orçamento do período atingido':err.diario?'Limite diário atingido':err.limiteLocal?'Limite local atingido':'Falha na IA'),msg);
       throw err;
     }finally{
       estado.emVoo=Math.max(0,estado.emVoo-1);
@@ -487,7 +566,20 @@
   /* novaChave === undefined significa "mantenha a que já está salva".
      String vazia significa "remova". Sem essa distinção, salvar só para
      trocar o ritmo apagaria a chave do usuário. */
-  function salvarCfg(novaChave, pensamento, producao, limiteTokensDia) {
+  function salvarChaves(groq, openrouter) {
+    for (const [p,k0] of [['groq',groq],['openrouter',openrouter]]) {
+      if (k0 === undefined) continue;
+      const k=String(k0||'').trim();
+      if (k && !PROVEDORES[p].regex.test(k)) throw new Error(`A chave ${PROVEDORES[p].rotulo} parece inválida.`);
+      chaves[p]=k; const kk=p==='openrouter'?K_CHAVE_OR:K_CHAVE; if(k) S.local.set(kk,k); else S.local.del(kk);
+    }
+    if (cfg.roteamento==='automatico') cfg.provedor = chaves.groq ? 'groq' : (chaves.openrouter ? 'openrouter' : 'groq');
+    S.local.setJson(K_CFG,cfg);
+    estado.bloqueadaAte=0; estado.falhas=0;
+    situar(pronta()?'pronta':'off', pronta()?'IA pronta':'IA desligada', pronta()?'roteamento automático · Groq grátis → OpenRouter':'configure Groq e/ou OpenRouter');
+  }
+
+  function salvarCfg(novaChave, pensamento, producao, limiteTokensDia, orcamentoUSD, limiteDiarioUSD, diarioAutomatico, modoOrcamento, roteamento) {
     if (novaChave !== undefined) {
       const k = String(novaChave).trim();
       if (k && !prov().regex.test(k)) throw new Error(`A chave ${prov().rotulo} começa com ${prov().prefixo} e é bem mais longa. Confira o que foi colado.`);
@@ -497,20 +589,22 @@
     if (lista.some(m => m.id === pensamento)) cfg.pensamento = pensamento;
     if (lista.some(m => m.id === producao)) cfg.producao = producao;
     if (limiteTokensDia !== undefined) cfg.limiteTokensDia = Math.max(10000, Math.min(500000, Number(limiteTokensDia) || cfg.limiteTokensDia));
+    if (orcamentoUSD !== undefined) cfg.orcamentoUSD = Math.max(0.10, Math.min(1000, Number(orcamentoUSD) || cfg.orcamentoUSD));
+    if (limiteDiarioUSD !== undefined) cfg.limiteDiarioUSD = Math.max(0.01, Math.min(100, Number(limiteDiarioUSD) || cfg.limiteDiarioUSD));
+    if (diarioAutomatico !== undefined) cfg.diarioAutomatico = Boolean(diarioAutomatico);
+    if (modoOrcamento !== undefined) cfg.modoOrcamento = modoOrcamento === 'intensivo' ? 'intensivo' : 'normal';
+    if (roteamento !== undefined) cfg.roteamento = roteamento === 'manual' ? 'manual' : 'automatico';
+    if (cfg.modoOrcamento === 'intensivo') estado.orcamentoPreventivo = false;
+    periodo.limiteUSD = cfg.orcamentoUSD; periodo.margemUSD = 0;
+    const hoje = usoHoje();
+    hoje.limiteUSD = limiteDiarioCalculado();
+    salvarPeriodo(); salvarUso();
     const kk = cfg.provedor === 'openrouter' ? K_CHAVE_OR : K_CHAVE;
     if (chave()) S.local.set(kk, chave()); else S.local.del(kk);
     S.local.setJson(K_CFG, cfg);
     estado.bloqueadaAte = 0; estado.falhas = 0;
     situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada', chave() ? `configuração salva · ${prov().nome}` : 'sem chave');
   }
-
-  /* Custo do dia em dólar, calculado sobre o uso que o provedor contabilizou.
-     É estimativa de acompanhamento, não fatura. */
-  function custoDoDia() {
-    const q=usoHoje();
-    return Object.values(q.porModelo||{}).reduce((n,m)=>n+Number(m.custo||0),0) || 0;
-  }
-
 
   function orcamento() {
     renovarPeriodoSeNecessario();
@@ -523,14 +617,19 @@
     const diasRestantes=Math.max(0,periodo.dias-diasPassados);
     const restante=restanteUSD();
     const ritmo=diasRestantes>0?restante/diasRestantes:0;
-    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:custoDoDia(),custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:periodo.margemUSD,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),tier:cfg.tier,limiteTokensDia:cfg.limiteTokensDia};
+    const diario=Number(q.limiteUSD||limiteDiarioCalculado());
+    const gastoDia=custoDoDia();
+    return {requisicoes:q.requisicoes,tokens:q.tokens,entrada:q.entrada,saida:q.saida,pctTokens,pctReq,fonte:(temTok||temReq)?cfg.provedor:'aguardando headers',provedor:cfg.provedor,ref:null,headers:h,porModelo:q.porModelo,custo:gastoDia,custoDiaUSD:gastoDia,limiteDiarioUSD:diario,restanteDiaUSD:Math.max(0,diario-gastoDia),diarioAutomatico:cfg.diarioAutomatico,modoOrcamento:cfg.modoOrcamento,custoPeriodo:custoPeriodo(),orcamentoUSD:periodo.limiteUSD,margemUSD:0,restanteUSD:restante,diasRestantes,ritmoDiarioUSD:ritmo,periodoInicio:periodo.inicio,periodoFim:periodo.inicio+periodo.dias*86400000,esgotado:orcamentoEsgotado(),esgotadoDia:(cfg.modoOrcamento !== 'intensivo' && orcamentoDiarioEsgotado()),tier:cfg.tier,roteamento:cfg.roteamento,limiteTokensDia:cfg.limiteTokensDia};
   }
 
   S.ai = {
     get MODELOS() { return MODELOS_DE(cfg.provedor); },
     PROVEDORES,
     definirProvedor(p) {
-      if (!PROVEDORES[p] || p === cfg.provedor) return;
+      if (p === 'auto') { cfg.roteamento='automatico'; cfg.provedor = chaves.groq ? 'groq' : 'openrouter'; cfg.providerSelecionadoEm=Date.now(); S.local.setJson(K_CFG,cfg); estado.bloqueadaAte=0; estado.falhas=0; situar(chave()?'pronta':'off',chave()?'IA pronta':'IA desligada','roteamento automático · Groq grátis → OpenRouter'); return; }
+      if (!PROVEDORES[p]) return;
+      if (p === cfg.provedor && cfg.roteamento === 'manual') return;
+      cfg.roteamento='manual';
       cfg.providerSelecionadoEm = Date.now();
       cfg.provedor = p;
       // Modelos são identificados de forma diferente em cada provedor:
@@ -542,8 +641,10 @@
       estado.bloqueadaAte = 0; estado.falhas = 0; estado.ultimo429 = 0;
       situar(chave() ? 'pronta' : 'off', chave() ? 'IA pronta' : 'IA desligada',
         chave() ? `usando ${PROVEDORES[p].nome}` : `informe a chave ${PROVEDORES[p].rotulo}`);
-    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, limiteTokensDia,
-    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoIndisponivel, restanteUSD, custoPeriodo,
+    },    provedorAtual: () => cfg.provedor, cfg, estado, chamar, deliberar, perguntar, campos, corpo, testar, salvarCfg, salvarChaves, limiteTokensDia,
+    orcamento, pronta, disponivel, PRECOS_POR_PROVEDOR, orcamentoEsgotado, orcamentoDiarioEsgotado, orcamentoIndisponivel, restanteUSD, restanteDiaUSD, custoPeriodo, custoDoDia,
+    sincronizarFornecedor: sincronizarOpenRouter,
+    statusFornecedores: () => ({ groq: stateProvedor('groq'), openrouter: stateProvedor('openrouter'), roteamento: cfg.roteamento }),
     definirTier(v) {
       cfg.tier = v === 'dev' ? 'dev' : 'free';
       S.local.setJson(K_CFG, cfg);

@@ -249,3 +249,10 @@ Ao fundar uma empresa, a equipe realiza uma primeira reunião de planejamento as
 - Cada funcionário continua com sua própria lane de IA, usando separadamente o modelo de pensamento e o modelo de produção definidos na configuração. A gerente é a autoridade executiva; não existe maestro.
 - Toda entrega cliente-visível é armazenada no **site central da empresa**. A equipe decide a arquitetura, navegação, identidade e organização do site a partir do contexto real; não há template visual ou estrutura de site pré-fabricada.
 - O produto final passa por inspeção da gerente com conteúdo real, evidências, pendências e declaração explícita de prontidão. Não existe nota artificial de qualidade.
+
+## v45 — orçamento diário em dólar
+O orçamento da IA pode ser definido em dólar por ciclo de 30 dias. O limite diário pode ser automático: o sistema divide o saldo restante pelos dias restantes do ciclo e recalcula o valor no começo de cada novo dia. Também é possível desligar o automático e definir um teto diário fixo. Quando o teto diário acaba, a equipe não faz novas chamadas e continua a rotina física do ambiente; quando o ciclo inteiro acaba, aguarda a renovação.
+
+## v45.1 — Trabalho intensivo
+
+O modo **Trabalho intensivo** permite que a equipe ignore o teto diário em dólar e use o saldo disponível do ciclo de 30 dias. O limite mensal/ciclo continua sendo absoluto; chamadas que não couberem no saldo restante não são enviadas. O limite diário permanece como referência quando o modo normal está ativo.

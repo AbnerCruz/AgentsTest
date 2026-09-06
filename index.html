@@ -211,15 +211,23 @@
         <div class="field">
           <label for="provedorSel">Provedor</label>
           <select id="provedorSel">
-            <option value="groq">Groq — teto diário no gratuito</option>
-            <option value="openrouter">OpenRouter — sem teto</option>
+            <option value="auto">Automático — Groq grátis → OpenRouter</option>
+            <option value="groq">Groq — manual</option>
+            <option value="openrouter">OpenRouter — manual</option>
           </select>
           <p class="hint" id="provedorHint"></p>
         </div>
-        <div class="field">
+        <div class="field" id="chaveManualField">
           <label for="apiKeyInput" id="apiKeyLabel">Chave</label>
           <input id="apiKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
           <p class="hint" id="apiKeyHint"></p>
+        </div>
+        <div class="field" id="chavesAutoField" hidden>
+          <label for="groqKeyInput">Chave Groq · gratuita primeiro</label>
+          <input id="groqKeyInput" type="password" placeholder="gsk_..." autocomplete="off" spellcheck="false">
+          <label for="openrouterKeyInput" style="margin-top:10px">Chave OpenRouter · fallback pago</label>
+          <input id="openrouterKeyInput" type="password" placeholder="sk-or-..." autocomplete="off" spellcheck="false">
+          <p class="hint">O Estúdio tenta a Groq primeiro. Quando a cota real da Groq acabar, muda sozinho para o OpenRouter. A chave do OpenRouter é consultada para sincronizar o limite restante.</p>
         </div>
         <div class="field" id="tierField">
           <label for="tierSel">Plano da sua conta Groq</label>
@@ -236,6 +244,28 @@
         <div class="field">
           <label for="modeloProducaoSel">IA de produção <span class="tag">forte</span></label>
           <select id="modeloProducaoSel"></select>
+        </div>
+        <div class="field">
+          <label for="orcamentoMensalInput">Orçamento de IA por mês</label>
+          <input id="orcamentoMensalInput" type="number" min="0.10" max="1000" step="0.10" inputmode="decimal" value="3.00">
+          <p class="hint">Ciclo de 30 dias. O gasto nunca ultrapassa este teto local. O limite diário pode ser calculado automaticamente a partir do saldo restante.</p>
+        </div>
+        <div class="field">
+          <label><input id="diarioAutoInput" type="checkbox" checked> Calcular limite diário automaticamente</label>
+          <p class="hint">Com esta opção, o Estúdio divide o orçamento restante pelos dias restantes. Se economizar hoje, o limite dos próximos dias aumenta; se gastar mais, diminui.</p>
+        </div>
+        <div class="field">
+          <label for="limiteDiarioUSDInput">Limite diário de IA (US$)</label>
+          <input id="limiteDiarioUSDInput" type="number" min="0.01" max="100" step="0.01" inputmode="decimal" value="0.10">
+          <p class="hint" id="limiteDiarioHint">Usado somente quando o cálculo automático estiver desligado.</p>
+        </div>
+        <div class="field">
+          <label for="modoOrcamentoSel">Modo de trabalho</label>
+          <select id="modoOrcamentoSel">
+            <option value="normal">Normal — respeita o limite diário</option>
+            <option value="intensivo">Trabalho intensivo — ignora o limite diário</option>
+          </select>
+          <p class="hint">No Trabalho intensivo, a equipe pode consumir o orçamento disponível sem o teto diário. O orçamento do ciclo de 30 dias continua sendo o limite absoluto.</p>
         </div>
         <div class="field">
           <label for="limiteTokensSel">Teto de segurança de tokens por dia</label>

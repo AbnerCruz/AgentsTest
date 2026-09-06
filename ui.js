@@ -430,18 +430,24 @@
     if (msg) msg.textContent = st.detalhe || '';
 
     const pv = S.ai.provedorAtual();
-    const info = S.ai.PROVEDORES[pv];
+    const info = S.ai.PROVEDORES[pv] || S.ai.PROVEDORES.groq;
+    const auto = S.ai.cfg.roteamento === 'automatico';
     const provSel = $('#provedorSel');
-    if (provSel && provSel.value !== pv) provSel.value = pv;
+    if (provSel) provSel.value = auto ? 'auto' : pv;
     const pHint = $('#provedorHint');
-    if (pHint) pHint.textContent = info.nota;
+    if (pHint) pHint.textContent = auto ? 'Roteamento real: Groq primeiro, OpenRouter somente quando a Groq atingir a cota. O orçamento local continua valendo para o gasto pago.' : info.nota;
+    const manualField=$('#chaveManualField'), autoField=$('#chavesAutoField');
+    if(manualField) manualField.hidden=auto; if(autoField) autoField.hidden=!auto;
     const kLabel = $('#apiKeyLabel');
     if (kLabel) kLabel.textContent = `Chave ${info.rotulo}`;
     const kHint = $('#apiKeyHint');
     if (kHint) kHint.textContent = `A chave fica só neste aparelho, no armazenamento do navegador. Pegue a sua em ${info.console}.`;
     if (apiKeyInput) apiKeyInput.placeholder = S.ai.temChave() ? S.ai.chaveMascarada() : info.prefixo + '...';
     const tierField = $('#tierField');
-    if (tierField) tierField.hidden = pv !== 'groq';
+    if (tierField) tierField.hidden = !auto && pv !== 'groq';
+    const gki=$('#groqKeyInput'), ori=$('#openrouterKeyInput');
+    if(gki) gki.placeholder=S.ai.statusFornecedores().groq.status==='disponivel'?'gsk_••••••':'gsk_...';
+    if(ori) ori.placeholder=S.ai.statusFornecedores().openrouter.status==='disponivel'?'sk-or-••••••':'sk-or-...';
 
     const opcoes = sel => (S.ai.MODELOS || []).map(m =>
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
@@ -451,9 +457,22 @@
     if (producao) producao.innerHTML = opcoes('producao');
     const limite = $('#limiteTokensSel');
     if (limite) limite.value = String(S.ai.cfg.limiteTokensDia || 120000);
+    const mensal = $('#orcamentoMensalInput');
+    if (mensal) mensal.value = Number(S.ai.cfg.orcamentoUSD || 3).toFixed(2);
+    const autoDia = $('#diarioAutoInput');
+    if (autoDia) autoDia.checked = S.ai.cfg.diarioAutomatico !== false;
+    const diario = $('#limiteDiarioUSDInput');
+    if (diario) diario.value = Number(S.ai.cfg.limiteDiarioUSD || 0.10).toFixed(2);
+    const diarioHint = $('#limiteDiarioHint');
+    if (diarioHint) diarioHint.textContent = S.ai.cfg.diarioAutomatico !== false ? 'Calculado automaticamente a cada novo dia a partir do saldo do orçamento e dos dias restantes.' : 'Limite fixo por dia. O orçamento de 30 dias continua sendo o teto absoluto.';
+    if (diario) diario.disabled = S.ai.cfg.diarioAutomatico !== false;
 
     const o = S.ai.orcamento();
     const h = o.headers;
+    const autoDiaInput = $('#diarioAutoInput');
+    const modoOrcamento = $('#modoOrcamentoSel');
+    if (modoOrcamento) modoOrcamento.value = S.ai.cfg.modoOrcamento || 'normal';
+    if (autoDiaInput) autoDiaInput.onchange = () => { const d=$('#limiteDiarioUSDInput'); if(d) d.disabled=autoDiaInput.checked; };
     const tierSel = $('#tierSel');
     if (tierSel && tierSel.value !== o.tier) tierSel.value = o.tier;
     const espera = S.ai.estado.bloqueadaAte - Date.now();
@@ -461,9 +480,12 @@
       <div class="panel-head"><span class="panel-label">Consumo de hoje</span><span class="tag tag-real">REAL</span></div>
       ${o.pctTokens != null ? `<div class="meter ${o.pctTokens > 85 ? 'bad' : o.pctTokens > 60 ? 'warn' : 'ok'}"><i style="width:${o.pctTokens}%"></i></div>` : ''}
       <div class="stats">
-        <div class="stat"><span>Orçamento do período</span><b>US$ ${Number(o.orcamentoUSD||3).toFixed(2)} / 30 dias</b></div>
-        <div class="stat"><span>Gasto estimado no período</span><b>US$ ${Number(o.custoPeriodo||0).toFixed(4)}</b></div>
-        <div class="stat"><span>Restante para IA</span><b>US$ ${Number(o.restanteUSD||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Orçamento do ciclo</span><b>US$ ${Number(o.orcamentoUSD||3).toFixed(2)} / 30 dias</b></div>
+        <div class="stat"><span>Gasto estimado no ciclo</span><b>US$ ${Number(o.custoPeriodo||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Restante do ciclo</span><b>US$ ${Number(o.restanteUSD||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Limite de hoje</span><b>US$ ${Number(o.limiteDiarioUSD||0).toFixed(4)} ${o.modoOrcamento === 'intensivo' ? '· ignorado no intensivo' : (o.diarioAutomatico ? '· automático' : '· fixo')}</b></div>
+        <div class="stat"><span>Gasto de hoje</span><b>US$ ${Number(o.custoDiaUSD||0).toFixed(4)}</b></div>
+        <div class="stat"><span>Restante hoje</span><b>US$ ${Number(o.restanteDiaUSD||0).toFixed(4)}</b></div>
         <div class="stat"><span>Dias restantes</span><b>${Math.ceil(o.diasRestantes||0)}</b></div>
         <div class="stat"><span>Ritmo médio disponível</span><b>US$ ${Number(o.ritmoDiarioUSD||0).toFixed(4)}/dia</b></div>
         <div class="stat"><span>Tokens usados hoje</span><b>${F.num(o.tokens)}</b></div>
@@ -472,8 +494,11 @@
         <div class="stat"><span>Entrada / saída</span><b>${F.compact(o.entrada)} / ${F.compact(o.saida)}</b></div>
         ${h && h.restaReq != null ? `<div class="stat"><span>Requisições restantes</span><b>${F.num(h.restaReq)}${h.limiteReq ? ' / ' + F.num(h.limiteReq) : ''}</b></div>` : ''}
         ${h && h.restaTok != null ? `<div class="stat"><span>Tokens restantes na janela</span><b>${F.num(h.restaTok)}${h.limiteTok ? ' / ' + F.num(h.limiteTok) : ''}</b></div>` : ''}
+        <div class="stat"><span>Modo de provedor</span><b>${o.roteamento === 'automatico' ? 'Groq grátis → OpenRouter' : o.provedor}</b></div>
+        ${(()=>{ const ps=S.ai.statusFornecedores(); const g=ps.groq, r=ps.openrouter; return `<div class="stat"><span>Groq</span><b>${g.status}${g.headers&&g.headers.restaReq!=null?' · '+F.num(g.headers.restaReq)+' req restantes':''}</b></div><div class="stat"><span>OpenRouter sincronizado</span><b>${r.status}${r.limiteRestante!=null?' · US$ '+Number(r.limiteRestante).toFixed(4)+' restantes':''}</b></div>`; })()}
+        <div class="stat"><span>Modo de trabalho</span><b>${o.modoOrcamento === 'intensivo' ? 'Trabalho intensivo' : 'Normal'}</b></div>
         <div class="stat"><span>Autonomia</span><b>${st.emVoo ? 'em execução' : st.pausado ? 'pausada' : S.ai.pronta() ? 'pronta' : 'aguardando chave'}</b></div>
-        ${(o.esgotado || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? '<p class="panel-foot" style="color:#E08573"><strong>Orçamento esgotado.</strong> A equipe não fará novas chamadas e entrou em rotina de descanso até a renovação.</p>' : ''}
+        ${(o.esgotado || o.esgotadoDia || (S.ai.estado && S.ai.estado.orcamentoPreventivo)) ? `<p class="panel-foot" style="color:#E08573"><strong>${o.esgotado ? 'Orçamento do ciclo esgotado.' : 'Limite diário esgotado.'}</strong> A equipe não fará novas chamadas e entra em rotina Sims-like até ${o.esgotado ? 'o próximo ciclo de 30 dias' : 'o próximo dia'}. ${(!o.esgotado && o.modoOrcamento !== 'intensivo') ? 'Ative Trabalho intensivo se quiser usar o saldo mensal restante hoje.' : ''}</p>` : ''}
         ${espera > 0 ? `<div class="stat"><span>Janela reabre em</span><b>${F.dur(espera)}</b></div>` : ''}
         ${e ? `<div class="stat"><span>Consumo deste estúdio</span><b>${F.compact(e.uso.tokens)} tokens · ${F.num(e.uso.chamadas)} chamadas</b></div>` : ''}
       </div>
@@ -486,7 +511,7 @@
       <div class="call">
         <div class="call-head"><b>${esc(c.quem)}</b><span>${esc(c.motivo)}</span>
           <span class="tag ${c.ok ? 'tag-real' : 'tag-rust'}">${c.ok ? 'ok' : 'falhou'}</span></div>
-        <div class="call-meta">${esc(c.modelo)} · ${F.dur(c.ms)}${c.tokens ? ' · ' + F.num(c.tokens) + ' tokens' : ''} · ${F.hora(c.em)}</div>
+        <div class="call-meta">${esc(c.modelo)}${c.provedor ? ' · '+esc(c.provedor) : ''} · ${F.dur(c.ms)}${c.tokens ? ' · ' + F.num(c.tokens) + ' tokens' : ''} · ${F.hora(c.em)}</div>
         ${c.erro ? `<div class="call-meta" style="color:#E08573">${esc(c.erro).slice(0, 160)}</div>` : ''}
       </div>`).join('') : '<div class="empty">Nenhuma chamada ainda nesta sessão.</div>';
 
@@ -681,9 +706,20 @@
         const pensamento = $('#modeloPensamentoSel');
         const producao = $('#modeloProducaoSel');
         const limite = $('#limiteTokensSel');
+        const mensal = $('#orcamentoMensalInput');
+        const diario = $('#limiteDiarioUSDInput');
+        const autoDia = $('#diarioAutoInput');
+        const modoOrcamento = $('#modoOrcamentoSel');
         const digitada = key ? key.value.trim() : '';
-        S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined);
-        if (key) key.value = ''; 
+        if (S.ai.cfg.roteamento === 'automatico') {
+          const g=$('#groqKeyInput'), r=$('#openrouterKeyInput');
+          S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined);
+          if(g) g.value=''; if(r) r.value='';
+        } else {
+          S.ai.salvarCfg(digitada ? digitada : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
+          if (key) key.value = '';
+        }
+        S.ai.salvarCfg(undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined); 
         toast('Configuração salva.', 'ok');
         pintarMotor();
       } catch (err) { toast(err.message, 'erro'); }
@@ -696,7 +732,12 @@
         const pensamento = $('#modeloPensamentoSel');
         const producao = $('#modeloProducaoSel');
         const limite = $('#limiteTokensSel');
-        if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined);
+        const mensal = $('#orcamentoMensalInput');
+        const diario = $('#limiteDiarioUSDInput');
+        const autoDia = $('#diarioAutoInput');
+        const modoOrcamento = $('#modoOrcamentoSel');
+        if (S.ai.cfg.roteamento === 'automatico') { const g=$('#groqKeyInput'), r=$('#openrouterKeyInput'); S.ai.salvarChaves(g&&g.value.trim()?g.value:undefined, r&&r.value.trim()?r.value:undefined); if(g) g.value=''; if(r) r.value=''; }
+        else if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, limite ? limite.value : undefined, mensal ? mensal.value : undefined, diario ? diario.value : undefined, autoDia ? autoDia.checked : undefined, modoOrcamento ? modoOrcamento.value : undefined);
         const r = await S.ai.testar();
         toast('Conexão ok — o provedor respondeu: ' + r.slice(0, 40), 'ok');
       } catch (err) { toast(err.message, 'erro'); }
@@ -710,7 +751,7 @@
     if (provedorSel) provedorSel.onchange = () => {
       S.ai.definirProvedor(provedorSel.value);
       const k = $('#apiKeyInput'); if (k) k.value = '';
-      toast(`Provedor: ${S.ai.PROVEDORES[provedorSel.value].nome}.`, 'ok');
+      toast(provedorSel.value==='auto' ? 'Roteamento automático: Groq grátis → OpenRouter.' : `Provedor: ${S.ai.PROVEDORES[provedorSel.value].nome}.`, 'ok');
       pintarMotor();
     };
 

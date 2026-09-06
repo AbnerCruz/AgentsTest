@@ -40,7 +40,8 @@
     reuniao: { x: 345, y: 276, rotulo: 'reunião' },
     quadro: { x: 525, y: 276, rotulo: 'quadro' },
     descanso: { x: 350, y: 350, rotulo: 'descanso' },
-    dormitorio: { x: 555, y: 350, rotulo: 'dormitório' }
+    dormitorio: { x: 555, y: 350, rotulo: 'dormitório' },
+    tv: { x: 465, y: 350, rotulo: 'televisão' }
   };
 
   function montar() {
@@ -226,14 +227,18 @@
 
       // Quando o orçamento de 30 dias acaba, a equipe não finge trabalhar:
       // a rotina física continua, mas nenhuma chamada de IA é iniciada.
-      if (semOrcamento && !p.ocupado && p.estado !== 'dormindo' && p.estado !== 'comendo') {
+      if (semOrcamento && !p.ocupado && !['dormindo','comendo','assistindo','andando','pausa'].includes(p.estado)) {
         if (f.cuidados.fome > 58) {
           p.estado='comendo'; f.cuidados.rotina='refeicao'; p.balao='comendo';
-          logPessoa(p,'foi comer enquanto o orçamento de IA está esgotado.','rotina');
-          irPara(p,ESTACOES.cafe).then(()=>setTimeout(()=>{ if(p.estado==='comendo'){p.estado='dormindo';f.cuidados.rotina='sono';p.balao='dormindo';irPara(p,ESTACOES.dormitorio);logPessoa(p,'foi descansar no dormitório; aguardando a renovação do orçamento de IA.','rotina');}},7000));
+          logPessoa(p,'foi comer porque o limite diário de IA acabou.','rotina');
+          irPara(p,ESTACOES.cafe).then(()=>setTimeout(()=>{ if(p.estado==='comendo'){p.estado='dormindo';f.cuidados.rotina='sono';p.balao='dormindo';irPara(p,ESTACOES.dormitorio);logPessoa(p,'foi dormir depois da refeição; a empresa aguarda o próximo dia de orçamento.','rotina');}},7000));
+        } else if ((Math.floor(Date.now()/60000) + p.id.charCodeAt(p.id.length-1)) % 3 !== 0) {
+          p.estado='assistindo'; f.cuidados.rotina='lazer'; p.balao='assistindo TV';
+          logPessoa(p,'foi assistir televisão enquanto o limite diário de IA está esgotado.','rotina');
+          irPara(p,ESTACOES.tv).then(()=>setTimeout(()=>{ if(p.estado==='assistindo'){p.estado='dormindo';f.cuidados.rotina='sono';p.balao='dormindo';irPara(p,ESTACOES.dormitorio);logPessoa(p,'terminou o lazer e foi descansar no dormitório.','rotina');}},12000));
         } else {
           p.estado='dormindo'; f.cuidados.rotina='sono'; p.balao='dormindo';
-          logPessoa(p,'encerrou o expediente e foi dormir porque o orçamento de IA do período acabou.','rotina');
+          logPessoa(p,'foi dormir porque o limite diário de IA acabou.','rotina');
           irPara(p,ESTACOES.dormitorio);
         }
         return;
@@ -946,7 +951,8 @@ Não use pontuação. Cite problemas específicos encontrados no conteúdo. Se c
     S.bus.emit('relogio');
     if(S.ai.estado && S.ai.estado.pausado) return;
     if(S.ai.orcamentoIndisponivel && S.ai.orcamentoIndisponivel()) {
-      rt.forEach(p=>{ if(!p.ocupado && p.estado!=='dormindo' && p.estado!=='comendo'){ p.estado='dormindo'; p.ref.cuidados=p.ref.cuidados||{}; p.ref.cuidados.rotina='sono'; p.balao='dormindo'; logPessoa(p,'está descansando: o orçamento de IA de 30 dias chegou ao limite.','rotina'); irPara(p,ESTACOES.dormitorio); }});
+      const orc = S.ai.orcamento ? S.ai.orcamento() : null;
+      rt.forEach(p=>{ if(!p.ocupado && !['dormindo','comendo','assistindo','andando'].includes(p.estado)){ p.estado='dormindo'; p.ref.cuidados=p.ref.cuidados||{}; p.ref.cuidados.rotina='sono'; p.balao='dormindo'; logPessoa(p,orc&&orc.esgotado ? 'está descansando: o orçamento do ciclo chegou ao limite.' : 'está descansando: o limite diário de IA chegou ao limite.','rotina'); irPara(p,ESTACOES.dormitorio); }});
       S.bus.emit('equipe'); return;
     }
     const g=gerente();
