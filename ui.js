@@ -215,9 +215,11 @@
             <div class="stat"><span>Entregas completas</span><b>${completos}/${arquivos.length}</b></div>
           </div>
           ${atividade.length ? `<div class="project-feed">${atividade.map(a=>`<div><span>${F.hora(a.t)}</span>${esc(a.texto)}</div>`).join('')}</div>` : ''}
+          ${arquivos.length?`<div class="row-actions"><button class="btn btn-mini" data-projeto-zip="${pr.id}" type="button">Baixar projeto .zip</button></div>`:''}
         </div>
       </div>`;
     }).join('') : '<div class="empty">A equipe ainda não criou um projeto.</div>';
+    $$('#projetosList [data-projeto-zip]').forEach(b=>b.onclick=()=>exportarProjetoZip(b.dataset.projetoZip));
   }
 
   function pintarIdeias() {
@@ -307,7 +309,7 @@
     $('#pipelineNota').textContent = EXPLICA_CLASSE[filtroClasse];
     $('#filesList').innerHTML = lista.length ? lista.slice(0, 40).map(a => {
       const aberto = abertos[a.id];
-      const previa = aberto === 'previa' && (a.tipo === 'html' || a.tipo === 'svg');
+      const previa = aberto === 'previa' && (a.tipo === 'html' || a.tipo === 'svg' || ['png','jpg','jpeg','webp'].includes(a.tipo));
       return `<div class="file">
         <div class="file-head">
           <div class="file-info">
@@ -322,15 +324,15 @@
           </div>
         </div>
         <div class="file-tools">
-          ${(a.tipo === 'html' || a.tipo === 'svg') ? `<button class="btn btn-mini" data-previa="${a.id}" type="button">${previa ? 'Fechar prévia' : 'Ver prévia'}</button>` : ''}
+          ${(a.tipo === 'html' || a.tipo === 'svg' || ['png','jpg','jpeg','webp'].includes(a.tipo)) ? `<button class="btn btn-mini" data-previa="${a.id}" type="button">${previa ? 'Fechar prévia' : 'Ver prévia'}</button>` : ''}
           <button class="btn btn-mini" data-codigo="${a.id}" type="button">${aberto === 'codigo' ? 'Fechar' : 'Ver conteúdo'}</button>
           <button class="btn btn-mini btn-primary" data-baixar="${a.id}" type="button">Baixar</button>
           ${a.classe !== 'produto' ? `<button class="btn btn-mini" data-publicar="${a.id}" type="button">Publicar</button>` : ''}
           ${a.classe !== 'produto' ? `<button class="btn btn-mini" data-editar="${a.id}" type="button">Editar</button>` : ''}
           ${a.classe !== 'produto' ? `<button class="btn btn-mini btn-danger" data-apagar="${a.id}" type="button">Apagar</button>` : ''}
         </div>
-        ${previa ? `<iframe class="file-frame" sandbox="allow-same-origin" srcdoc="${esc(a.conteudo)}"></iframe>` : ''}
-        ${aberto === 'codigo' ? `<div class="file-view">${esc(a.conteudo.slice(0, 9000))}</div>` : ''}
+        ${previa ? (['png','jpg','jpeg','webp'].includes(a.tipo) ? `<img class="file-frame" style="object-fit:contain;max-height:480px;background:#111" src="${esc(a.conteudo)}" alt="${esc(a.nome)}">` : `<iframe class="file-frame" sandbox="allow-same-origin" srcdoc="${esc(a.conteudo)}"></iframe>`) : ''}
+        ${aberto === 'codigo' ? `<div class="file-view">${['png','jpg','jpeg','webp'].includes(a.tipo)?'Imagem binária gerada por IA. Use “Ver prévia” ou “Baixar”.':esc(a.conteudo.slice(0, 9000))}</div>` : ''}
       </div>`;
     }).join('') : `<div class="empty">Nenhum arquivo ${filtroClasse === 'todos' ? '' : 'nesse estágio '}ainda. A equipe ainda não produziu um artefato neste projeto.</div>`;
 
@@ -342,7 +344,8 @@
     });
     $$('#filesList [data-baixar]').forEach(b => b.onclick = () => {
       const a = e.arquivos.find(x => x.id === b.dataset.baixar); if (!a) return;
-      const mime = { html: 'text/html', svg: 'image/svg+xml', md: 'text/markdown', csv: 'text/csv', css: 'text/css', json: 'application/json' }[a.tipo] || 'text/plain';
+      if(['png','jpg','jpeg','webp'].includes(a.tipo) && /^data:image\//.test(a.conteudo)){S.arquivo.baixarBlob(S.arquivo.dataUrlBlob(a.conteudo),a.nome);return;}
+      const mime = { html:'text/html',svg:'image/svg+xml',md:'text/markdown',markdown:'text/markdown',csv:'text/csv',tsv:'text/tab-separated-values',css:'text/css',scss:'text/x-scss',json:'application/json',jsonl:'application/x-ndjson',js:'text/javascript',mjs:'text/javascript',cjs:'text/javascript',ts:'text/typescript',tsx:'text/typescript',jsx:'text/jsx',xml:'application/xml',yaml:'application/yaml',yml:'application/yaml',py:'text/x-python',sql:'application/sql',sh:'text/x-shellscript',webmanifest:'application/manifest+json' }[a.tipo] || 'text/plain';
       S.arquivo.baixarBlob(new Blob([a.conteudo], { type: mime + ';charset=utf-8' }), a.nome);
     });
     $$('#filesList [data-publicar]').forEach(b => b.onclick = () => {
@@ -372,6 +375,8 @@
     });
     pintarBadges();
   }
+
+  function exportarProjetoZip(projectId){const e=S.state.atual();if(!e)return;const pr=e.projetos.find(p=>p.id===projectId)||e.projetos.find(p=>p.status==='ativo')||e.projetos[0];if(!pr)return;const arqs=e.arquivos.filter(a=>a.projectId===pr.id);if(!arqs.length)return toast('Este projeto ainda não tem arquivos.');const pasta=S.util.slug(pr.nome);S.arquivo.baixarBlob(S.arquivo.zip(arqs.map(a=>({nome:`${pasta}/${a.nome}`,conteudo:a.conteudo}))),pasta+'.zip');toast(`${arqs.length} arquivos do projeto empacotados em ZIP.`,'ok');}
 
   function exportarZip() {
     const e = S.state.atual(); if (!e || !e.arquivos.length) return toast('Nada para exportar ainda.');
@@ -450,8 +455,10 @@
       `<option value="${m.id}" ${S.ai.cfg[sel] === m.id ? 'selected' : ''}>${esc(m.nome)}</option>`).join('');
     const pensamento = $('#modeloPensamentoSel');
     const producao = $('#modeloProducaoSel');
+    const imagem = $('#modeloImagemSel');
     if (pensamento) pensamento.innerHTML = opcoes('pensamento');
     if (producao) producao.innerHTML = opcoes('producao');
+    if (imagem) imagem.innerHTML = (S.ai.MODELOS_IMAGEM||[]).map(m=>`<option value="${m.id}" ${S.ai.cfg.imagem===m.id?'selected':''}>${esc(m.nome)}</option>`).join('');
     const diario = $('#limiteDiarioAutomaticoDisplay');
     if (diario) diario.textContent = `US$ ${Number(S.ai.orcamento().limiteDiarioUSD || 0).toFixed(4)} hoje · calculado automaticamente`;
 
@@ -673,9 +680,9 @@
     const salvarIABtn = $('#salvarIABtn');
     if (salvarIABtn) salvarIABtn.onclick = async () => {
       try {
-        const key = $('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
+        const key = $('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), imagem=$('#modeloImagemSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
         if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
-        S.ai.salvarCfg(key && key.value.trim() ? key.value : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual');
+        S.ai.salvarCfg(key && key.value.trim() ? key.value : undefined, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual', imagem ? imagem.value : undefined);
         if(key) key.value='';
         toast('Configuração salva.', 'ok'); pintarMotor();
       } catch (err) { toast(err.message, 'erro'); }
@@ -684,9 +691,9 @@
     if (testarIABtn) testarIABtn.onclick = async () => {
       const b=testarIABtn; b.disabled=true; b.textContent='testando…';
       try {
-        const key=$('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
+        const key=$('#apiKeyInput'), pensamento=$('#modeloPensamentoSel'), producao=$('#modeloProducaoSel'), imagem=$('#modeloImagemSel'), mensal=$('#orcamentoMensalInput'), modoOrcamento=$('#modoOrcamentoSel'), mgmt=$('#openrouterManagementKeyInput');
         if (mgmt && mgmt.value.trim()) { await S.ai.salvarChaveGerenciamentoOpenRouter(mgmt.value); mgmt.value=''; }
-        if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual');
+        if (key && key.value.trim()) S.ai.salvarCfg(key.value, pensamento ? pensamento.value : undefined, producao ? producao.value : undefined, undefined, mensal ? mensal.value : undefined, undefined, undefined, modoOrcamento ? modoOrcamento.value : undefined, 'manual', imagem ? imagem.value : undefined);
         const r=await S.ai.testar(); toast('Conexão ok — o OpenRouter respondeu: '+r.slice(0,40),'ok');
       } catch(err) { toast(err.message,'erro'); }
       b.disabled=false; b.textContent='Testar'; pintarMotor();
