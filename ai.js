@@ -480,11 +480,21 @@
   /* ---------- leitura de resposta em linhas CHAVE: valor ---------- */
   function campos(texto) {
     const saida = {};
-    String(texto || '').replace(/```[a-z]*|```/gi, '').split(/\n+/).forEach(linha => {
+    /* Os campos vivem sempre ANTES do separador. Sem esse corte, uma linha
+       como "Nome: Crônicas de Eldoria" dentro do plano sobrescrevia o NOME
+       da empresa decidido no cabeçalho. */
+    const bruto = String(texto || '').replace(/```[a-z]*|```/gi, '');
+    const corte = bruto.indexOf('\n---');
+    const cabecalho = corte >= 0 ? bruto.slice(0, corte) : bruto;
+    cabecalho.split(/\n+/).forEach(linha => {
       const m = linha.match(/^\s*[-*]?\s*([A-Za-zÀ-ú0-9_ ]{2,28}?)\s*[:=]\s*([\s\S]+)$/);
       if (!m) return;
       const k = m[1].trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, '_');
       let v = m[2].trim().replace(/^["'<]+|["'>]+$/g, '').trim();
+      /* Modelos pequenos devolvem o valor decorado com markdown. Guardar
+         "**Eldoria Press**" como nome da empresa contamina toda a interface
+         e todo prompt seguinte, então a decoração cai aqui. */
+      v = v.replace(/^\s*[*_`#]+|[*_`]+\s*$/g, '').trim();
       const b = v.toLowerCase();
       if (b === 'sim' || b === 'true') v = true;
       else if (b === 'nao' || b === 'não' || b === 'false') v = false;

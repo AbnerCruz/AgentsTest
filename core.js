@@ -94,11 +94,15 @@ window.S = window.S || {};
   function normalizarEstudio(e) {
     if (!e || typeof e !== 'object') return null;
     e.id = e.id || uid('e');
-    e.nome = String(e.nome || 'Estúdio');
-    e.ramo = String(e.ramo || 'serviços criativos');
-    e.missao = String(e.missao || 'Entregar material útil e bem-feito.');
-    e.tom = String(e.tom || 'direto e caloroso');
-    e.publico = String(e.publico || 'pequenos negócios');
+    /* Empresas fundadas antes da limpeza de markdown guardaram nomes como
+       "**Eldoria Press**". Corrigimos na carga para não contaminar a
+       interface nem os prompts. */
+    const semMarcacao = (v, padrao) => String(v || padrao).replace(/^\s*[*_`#]+|[*_`]+\s*$/g, '').trim() || padrao;
+    e.nome = semMarcacao(e.nome, 'Estúdio');
+    e.ramo = semMarcacao(e.ramo, 'serviços criativos');
+    e.missao = semMarcacao(e.missao, 'Entregar material útil e bem-feito.');
+    e.tom = semMarcacao(e.tom, 'direto e caloroso');
+    e.publico = semMarcacao(e.publico, 'pequenos negócios');
     // Fundação estratégica persistente; empresas antigas passam por migração sem perder trabalho.
     e.fundacao = e.fundacao && typeof e.fundacao === 'object' ? e.fundacao : {};
     e.fundacao.versao = Number(e.fundacao.versao) || 0;

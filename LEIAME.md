@@ -1,3 +1,17 @@
+# Estúdio — v48.2
+
+## Correção da fundação (leia primeiro)
+- A fundação da empresa agora sempre termina em ação: identidade, plano de
+  negócio, primeiro produto, equipe contratada com ficha individual e a
+  primeira tarefa no plano de trabalho.
+- `factory.js` (camada de produção de arquivos reais) voltou ao pacote; ela é
+  carregada pelo `index.html` e sem ela nenhuma entrega era possível.
+- A gerente contrata, demite e planeja de verdade: essas decisões alteram o
+  quadro de pessoal e o plano, em vez de morrerem na deliberação.
+- Uma falha de IA na fundação espera 60s antes de tentar de novo, então não há
+  mais sequência de chamadas pagas sem resultado.
+- Teste sem navegador: `node teste/fundacao.test.js`.
+
 # Estúdio — v48
 
 ## Motor de IA

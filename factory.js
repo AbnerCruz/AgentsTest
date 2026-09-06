@@ -1,93 +1,141 @@
 /* ============================================================
-   FÁBRICA — ferramenta de produção.
-
-   Não existem gabaritos de conteúdo nem uma sequência de produtos aqui.
-   O agente decide o que deve nascer ou mudar; esta camada apenas entrega a
-   capacidade técnica para transformar essa decisão em um arquivo real.
+   FACTORY — camada de produção real.
+   O agente decide O QUE fazer (agency/studio); aqui a decisão vira
+   ARQUIVO. Nada é gerado por template: o conteúdo vem da IA de produção
+   e só é aceito se houver material concreto. Sem IA não há produção
+   fictícia: a função falha e a tarefa volta para aberta.
    ============================================================ */
 (function (S) {
   'use strict';
   const { slug } = S.util;
 
-  const FORMATOS = ['html','md','txt','csv','json','js','css','pdf','outro'];
-  const KITS = [{
-    id:'autonomo', nome:'Produção autônoma', ext:'md', nivel:1, especialidade:'geral',
-    desc:'Capacidade aberta de criar, transformar ou excluir arquivos conforme a decisão do agente.',
-    vende:'Ferramenta de produção; não determina o que a empresa deve vender.', tokens:2400,
-    obrigatorios:[]
-  }];
-  const porId = id => KITS.find(k => k.id === id) || (id ? KITS[0] : null);
-  const disponiveis = () => KITS.slice();
+  /* Kits existem apenas para roteamento de especialidade e nome de arquivo.
+     Não são roteiros de produto nem templates de conteúdo. */
+  const KITS = [
+    { id: 'autonomo',  nome: 'Trabalho autônomo',  especialidade: 'geral',     tipo: 'md'   },
+    { id: 'texto',     nome: 'Texto e conteúdo',   especialidade: 'criacao',   tipo: 'md'   },
+    { id: 'pagina',    nome: 'Página / interface', especialidade: 'producao',  tipo: 'html' },
+    { id: 'dados',     nome: 'Dados e catálogo',   especialidade: 'dados',     tipo: 'csv'  },
+    { id: 'comercial', nome: 'Material comercial', especialidade: 'comercial', tipo: 'md'   }
+  ];
+  const porId = id => KITS.find(k => k.id === id) || KITS[0];
 
-  const placeholder = /<[^>]{2,}>|lorem ipsum|xxx+|\[\s*(?:preencher|exemplo|aqui)\s*\]|preencher aqui|conteúdo em elaboração/i;
-  function validar(kit, campos, arquivos) {
-    const lista = Array.isArray(arquivos) ? arquivos : [];
-    const problemas = [];
-    if (!lista.length) problemas.push('nenhum arquivo foi produzido');
-    lista.forEach(a => {
-      const nome=String(a.nome||'').trim(), conteudo=String(a.conteudo||'').trim();
-      if(nome.length<3) problemas.push('arquivo sem nome utilizável');
-      if(conteudo.length<80) problemas.push(`${nome || 'arquivo'} tem conteúdo insuficiente`);
-      if(placeholder.test(conteudo)) problemas.push(`${nome || 'arquivo'} contém placeholder`);
+  const TIPOS = ['md', 'html', 'txt', 'csv', 'json', 'js', 'css'];
+  const PLACEHOLDERS = [
+    /lorem ipsum/i, /\bTODO\b/, /\bTBD\b/, /\bxxx+\b/i, /\{\{[^}]*\}\}/,
+    /<preencher>/i, /\[inserir[^\]]*\]/i, /coloque aqui/i, /texto de exemplo/i
+  ];
+
+  function limparNome(nome, tipo) {
+    let n = String(nome || '').replace(/[\\/:*?"<>|]+/g, '').replace(/\*+/g, '').trim();
+    n = n.split(/\s+/).slice(0, 8).join(' ').slice(0, 70) || 'entrega';
+    const ext = '.' + tipo;
+    if (!n.toLowerCase().endsWith(ext)) n = slug(n).slice(0, 60) + ext;
+    return n;
+  }
+
+  function tipoValido(t, kit) {
+    const v = String(t || '').toLowerCase().replace(/^\./, '').trim();
+    return TIPOS.includes(v) ? v : porId(kit).tipo;
+  }
+
+  function validar(conteudo) {
+    const texto = String(conteudo || '');
+    const notas = [];
+    if (texto.trim().length < 200) notas.push('conteúdo curto demais para ser uma entrega completa');
+    if (texto.split(/\n/).length < 4) notas.push('estrutura insuficiente: poucas linhas');
+    PLACEHOLDERS.forEach(rx => { if (rx.test(texto)) notas.push('marcador de preenchimento encontrado: ' + rx.source); });
+    return { pronto: notas.length === 0, notas: notas.slice(0, 4), verificadoEm: Date.now() };
+  }
+
+  function contextoAcervo(e, baseArquivo, projectId) {
+    if (!e) return 'nenhum';
+    const relacionados = (e.arquivos || [])
+      .filter(a => (!projectId || a.projectId === projectId) && (!baseArquivo || a.id !== baseArquivo.id))
+      .slice(0, 4)
+      .map(a => `${a.nome} [${a.classe}]: ${String(a.conteudo || '').slice(0, 700)}`);
+    return relacionados.join('\n\n') || 'nenhum';
+  }
+
+  /* Produz um artefato real a partir da decisão já tomada pelo agente. */
+  async function produzir(op) {
+    const e = S.state.atual();
+    if (!e) throw new Error('Nenhuma empresa ativa para receber a produção.');
+    const kit = porId(op && op.kit).id;
+    const agente = (op && op.agente) || {};
+    const briefing = String((op && op.briefing) || '').slice(0, 2000);
+    if (!briefing) throw new Error('Sem briefing não existe produção.');
+    const base = op && op.baseArquivoId ? (e.arquivos || []).find(a => a.id === op.baseArquivoId) : null;
+    const projeto = (e.projetos || []).find(p => p.id === (op && op.projectId)) ||
+                    (e.projetos || []).find(p => p.status === 'ativo') || (e.projetos || [])[0] || null;
+
+    const sistema = [
+      `Você é ${agente.nome || 'um integrante'}, ${agente.cargo || 'da equipe'} da empresa ${e.nome}.`,
+      `Sua tarefa agora é PRODUZIR um arquivo real e completo, pronto para uso, não descrever o que faria.`,
+      ``,
+      `EMPRESA: ${e.nome} | ramo: ${e.ramo} | público: ${e.publico} | tom: ${e.tom}`,
+      `MISSÃO: ${e.missao}`,
+      `IDENTIDADE: ${(e.fundacao && e.fundacao.identidade && e.fundacao.identidade.posicionamento) || 'n/d'}`,
+      `PROJETO: ${projeto ? projeto.nome : 'principal'} | objetivo: ${projeto ? projeto.objetivo : e.missao}`,
+      `BRIEFING DA TAREFA: ${briefing}`,
+      (op && op.deliberacao) ? `ABORDAGEM JÁ DECIDIDA POR VOCÊ: ${String(op.deliberacao).slice(0, 700)}` : '',
+      base ? `ARTEFATO BASE QUE DEVE SER EVOLUÍDO (preserve o que funciona, não recomece do zero):\n${base.nome} [${base.tipo}]\n${String(base.conteudo || '').slice(0, 6000)}` : '',
+      `ACERVO RELACIONADO (para continuidade, não copie):\n${contextoAcervo(e, base, projeto && projeto.id)}`,
+      ``,
+      `REGRAS DE PRODUÇÃO:`,
+      `- Entregue o conteúdo integral do arquivo, sem resumo, sem comentários sobre o processo e sem pedir aprovação.`,
+      `- Nada de texto de exemplo, lorem ipsum, TODO, colchetes para preencher ou dados inventados sobre o mundo real.`,
+      `- Não invente clientes, vendas, métricas, datas ou aprovações. Hipóteses devem ser declaradas como hipóteses.`,
+      `- Se estiver evoluindo o artefato base, entregue a versão nova completa, não um diff.`,
+      ``,
+      `RETORNE EXATAMENTE NESTE FORMATO:`,
+      `ARQUIVO: <nome do arquivo com extensão>`,
+      `TIPO: <md | html | txt | csv | json | js | css>`,
+      `RESUMO: <uma frase sobre o que foi entregue>`,
+      `PRONTO: sim | nao`,
+      `---`,
+      `<conteúdo integral do arquivo a partir daqui>`
+    ].filter(Boolean).join('\n');
+
+    const r = await S.ai.chamar({
+      sistema,
+      pedido: 'Produza agora o arquivo completo, no formato pedido. O conteúdo depois de --- é o arquivo, exatamente como será salvo.',
+      tipo: 'conteudo',
+      tokens: (op && op.tokens) || 3000,
+      agente: agente.nome,
+      agenteId: agente.id,
+      motivo: 'produção de artefato'
     });
+
+    const texto = String((r && r.texto) || '');
+    const campos = S.ai.campos(texto);
+    let conteudo = S.ai.corpo(texto);
+    if (!conteudo) {
+      // Sem o separador, aproveitamos o que veio removendo as linhas de cabeçalho.
+      conteudo = texto.split(/\n/).filter(l => !/^\s*(ARQUIVO|TIPO|RESUMO|PRONTO)\s*:/i.test(l)).join('\n').trim();
+    }
+    conteudo = conteudo.replace(/^```[a-z]*\n?|```$/gi, '').trim();
+    if (conteudo.length < 80) throw new Error('A IA de produção não devolveu conteúdo utilizável.');
+
+    const tipo = tipoValido(campos.tipo, kit);
+    const nome = limparNome(campos.arquivo || (base ? base.nome : (op && op.titulo) || 'entrega'), tipo);
+    const validacao = validar(conteudo);
+    if (String(campos.pronto || '').toLowerCase() === 'nao' || campos.pronto === false) {
+      validacao.pronto = false;
+      validacao.notas = (validacao.notas || []).concat('o próprio autor declarou a entrega incompleta').slice(0, 5);
+    }
+
     return {
-      pronto: problemas.length === 0,
-      problemas,
-      palavras: lista.reduce((n,a)=>n+String(a.conteudo||'').split(/\s+/).filter(Boolean).length,0)
+      arquivos: [{ nome, tipo, conteudo }],
+      resumo: String(campos.resumo || '').slice(0, 300),
+      validacao,
+      classe: 'candidato',
+      kit,
+      viaIA: true,
+      linhagem: base ? base.linhagem : null,
+      baseArquivoId: base ? base.id : null
     };
   }
-  const aferir = validar;
 
-  function contextoProjeto(e, projectId) {
-    const projeto=(e.projetos||[]).find(p=>p.id===projectId)||(e.projetos||[]).find(p=>p.status==='ativo')||(e.projetos||[])[0];
-    if(!projeto) return {id:'',nome:'Projeto principal',objetivo:e.missao,arquivos:[],tarefas:[]};
-    const arquivos=(projeto.arquivoIds||[]).map(id=>e.arquivos.find(a=>a.id===id)).filter(Boolean).slice(0,10)
-      .map(a=>({id:a.id,nome:a.nome,tipo:a.tipo,classe:a.classe,versao:a.versao,linhagem:a.linhagem,conteudo:String(a.conteudo||'').slice(0,8000)}));
-    const tarefas=(projeto.tarefaIds||[]).map(id=>e.tarefas.find(t=>t.id===id)).filter(Boolean).slice(0,12)
-      .map(t=>({id:t.id,titulo:t.titulo,status:t.status,briefing:t.briefing,handoff:t.handoff||''}));
-    return {id:projeto.id,nome:projeto.nome,objetivo:projeto.objetivo,arquivos,tarefas};
-  }
-
-  function normalizarSitePath(nome) {
-    const n=String(nome||'').trim().replace(/\\/g,'/').replace(/^\.\//,'').replace(/^\/+/, '');
-    return /^site\//i.test(n) ? n : 'site/' + n.replace(/^site\//i,'');
-  }
-
-  async function produzir(op) {
-    const e=S.state.atual(); const agente=op.agente||null;
-    if(!e || !S.ai.disponivel(agente&&agente.id)) return null;
-    const projeto=contextoProjeto(e,op.projectId);
-    const base=op.baseArquivoId?e.arquivos.find(a=>a.id===op.baseArquivoId):null;
-    const arquivos=(projeto.arquivos||[]).map(a=>
-      `ID=${a.id} | ${a.nome} | ${a.tipo} | ${a.classe} | v${a.versao||1} | site=${a.siteCentral?'sim':'nao'}\n${String(a.conteudo||'').slice(0,9000)}`
-    ).join('\n\n')||'Nenhum artefato existente.';
-    const siteArquivos=e.arquivos.filter(a=>a.siteCentral && a.projectId===projeto.id).slice(0,8);
-    const siteContext=siteArquivos.length?siteArquivos.map(a=>`SITE ${a.sitePath||a.nome} | ${a.tipo} | v${a.versao||1}\n${String(a.conteudo||'').slice(0,9000)}`).join('\n\n'):'O site central ainda não existe; a primeira arquitetura deve ser criada pela equipe, sem template.';
-    const tarefas=(projeto.tarefas||[]).map(t=>`${t.status}: ${t.titulo} | ${t.briefing} | ${t.handoff||''}`).join('\n')||'Nenhuma tarefa.';
-    const memoria=agente&&Array.isArray(agente.memoria)?agente.memoria.slice(-10).map(m=>typeof m==='string'?m:m.texto).join(' | '):'';
-    const sistema=`Você é ${agente?agente.nome:'um funcionário'} do estúdio ${e.nome}. Você está na etapa de EXECUÇÃO, não de planejamento. Sua função agora é transformar uma decisão de trabalho em um resultado concreto no acervo.\n\nEMPRESA: ${e.nome}\nMISSÃO: ${e.missao}\nRAMO: ${e.ramo}\nPÚBLICO: ${e.publico}\nPROJETO: ${projeto.nome}\nOBJETIVO: ${projeto.objetivo}\n\nDECISÃO E BRIEFING:\n${String(op.briefing||'').slice(0,2200)}\n\nPENSAMENTO DO FUNCIONÁRIO:\n${String(op.deliberacao||'').slice(0,1800)}\n\nARTEFATO BASE:\n${base?`ID=${base.id} | ${base.nome} | ${base.tipo} | v${base.versao||1}\n${String(base.conteudo||'').slice(0,14000)}`:'nenhum'}\n\nACERVO DO PROJETO:\n${arquivos.slice(0,28000)}\n\nTAREFAS:\n${tarefas.slice(0,7000)}\n\nMEMÓRIA:\n${memoria||'nenhuma'}\n\nEXECUTE AGORA. Você pode criar um arquivo, atualizar um arquivo existente ou excluir um arquivo que realmente não serve. Se atualizar, devolva o arquivo completo.
-
-SITE CENTRAL: toda entrega que o cliente verá deve viver no site central. Não use layout, copy, estrutura ou identidade padronizados. A arquitetura, navegação, linguagem visual e organização devem nascer do contexto real da empresa e dos artefatos existentes. Se estiver construindo o site, escolha você mesmo a estrutura necessária. Se já houver site, preserve o que funciona e evolua a partir dele. Não devolva plano, promessa, avaliação ou explicação no lugar do arquivo. Não invente fatos ausentes. Não use placeholders.\n\nFORMATOS ACEITOS: ${FORMATOS.join(', ')}\n\nRETORNE EXATAMENTE:\nACAO: criar | atualizar | excluir\nARQUIVO_ID: <id existente se atualizar/excluir; vazio se criar>\nNOME: <nome completo com extensão>\nTIPO: <formato>\nRESUMO: <uma frase sobre o que mudou>\n---\nCONTEUDO COMPLETO DO ARQUIVO`; 
-    try {
-      const r=await S.ai.chamar({sistema,pedido:'Execute a decisão agora. O conteúdo depois de --- deve ser o arquivo final completo. Não pare em uma descrição.',tipo:'conteudo',tokens:Math.max(1800,Math.min(3600,Number(op.tokens||2400))),agente:agente&&agente.nome,agenteId:agente&&agente.id,motivo:'execução de decisão'});
-      const c=S.ai.campos(r.texto), corpo=S.ai.corpo(r.texto);
-      const acao=String(c.acao||'').trim().toLowerCase(), id=String(c.arquivo_id||'').trim();
-      if(!['criar','atualizar','excluir'].includes(acao)) throw new Error('A produção não escolheu uma transformação válida.');
-      const alvo=e.arquivos.find(a=>a.id===id)||base;
-      if(acao==='excluir') {
-        if(!alvo) throw new Error('A produção pediu exclusão sem apontar um arquivo existente.');
-        return {arquivos:[],excluir:[alvo.id],kit:'autonomo',classe:'candidato',viaIA:true,resumo:String(c.resumo||'').slice(0,400),validacao:{pronto:true,problemas:[]}};
-      }
-      let nome=String(c.nome||'').trim()||(alvo&&alvo.nome)||`${slug(c.resumo||'entrega')}.md`;
-      const siteCentral = op.siteCentral !== false;
-      if(siteCentral) nome=normalizarSitePath(nome);
-      const tipo=String(c.tipo||'').trim().toLowerCase()||((nome.match(/\.([a-z0-9]+)$/i)||[])[1]||'md');
-      if(corpo.trim().length<80) throw new Error('A produção devolveu um arquivo vazio ou insuficiente.');
-      if(acao==='atualizar'&&!alvo) throw new Error('A produção pediu atualização sem arquivo base.');
-      const arquivo={nome,tipo,conteudo:corpo.trim(),baseArquivoId:alvo?alvo.id:null,siteCentral,sitePath:siteCentral?nome:null,clienteVisivel:true};
-      return {arquivos:[arquivo],kit:'autonomo',classe:'candidato',viaIA:true,siteCentral,clienteVisivel:true,sitePath:arquivo.sitePath,linhagem:alvo&&alvo.linhagem||null,validacao:validar(null,c,[arquivo]),campos:c,resumo:String(c.resumo||'').slice(0,400)};
-    } catch(err) { console.error('Produção autônoma falhou',err); return null; }
-  }
-
-  S.factory={KITS,FORMATOS,porId,disponiveis,produzir,aferir,validar,contextoProjeto};
+  S.factory = { KITS, porId, produzir, validar };
 })(window.S);
