@@ -1,0 +1,11 @@
+{
+  "name": "Urbe v0.20 Teste",
+  "short_name": "Urbe",
+  "description": "Build de teste mobile do Urbe",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0b1116",
+  "theme_color": "#0b1116"
+}
